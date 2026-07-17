@@ -1848,6 +1848,7 @@ class MercadoLivreClient
             return ['error' => 'invalid_item_id', 'message' => 'item_id obrigatório'];
         }
 
+        // moderation_reference_id = element_id + "-" + element_type (ITM para publicações)
         $referenceId = str_ends_with($itemId, '-ITM') ? $itemId : $itemId . '-ITM';
 
         try {
@@ -1856,7 +1857,12 @@ class MercadoLivreClient
                 return $response;
             }
 
-            return is_array($response) ? $response : [];
+            // Docs oficiais: resposta é um ARRAY de moderações (não objeto único).
+            if (!is_array($response)) {
+                return [];
+            }
+
+            return $response;
         } catch (\Exception $e) {
             log_error('Erro ao obter last_moderation', [
                 'item_id' => $itemId,

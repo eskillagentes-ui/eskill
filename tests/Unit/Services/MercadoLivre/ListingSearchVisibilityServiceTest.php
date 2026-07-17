@@ -207,8 +207,14 @@ final class ListingSearchVisibilityServiceTest extends TestCase
             if (($params['status'] ?? '') === 'under_review') {
                 return ['results' => ['MLB111']];
             }
+            if (($params['status'] ?? '') === 'pending') {
+                return ['results' => ['MLB333']];
+            }
             if (($params['status'] ?? '') === 'paused') {
                 return ['results' => ['MLB222']];
+            }
+            if (($params['status'] ?? '') === 'active' && ($params['tags'] ?? '') === 'poor_quality_thumbnail') {
+                return ['results' => ['MLB444']];
             }
             return ['results' => []];
         });
@@ -221,6 +227,9 @@ final class ListingSearchVisibilityServiceTest extends TestCase
                         ['type' => 'REMEDY', 'value' => 'Corrija o atributo'],
                     ],
                 ]];
+            }
+            if ($itemId === 'MLB444') {
+                return [];
             }
             return [[
                 'name' => 'PAUSED_PREVENTION_PRICE',
@@ -237,9 +246,45 @@ final class ListingSearchVisibilityServiceTest extends TestCase
 
         $this->assertFalse($result['write_enabled']);
         $this->assertSame(1, $result['totals']['under_review']);
+        $this->assertSame(1, $result['totals']['pending']);
         $this->assertSame(1, $result['totals']['paused_moderation_penalty']);
-        $this->assertSame(2, $result['totals']['unique']);
-        $this->assertCount(2, $result['blocked']);
+        $this->assertSame(1, $result['totals']['active_poor_quality_thumbnail']);
+        $this->assertSame(4, $result['totals']['unique']);
+        $this->assertCount(4, $result['blocked']);
         $this->assertSame('Corrija o atributo', $result['blocked'][0]['next_step']);
+
+        $thumb = null;
+        foreach ($result['blocked'] as $row) {
+            if ($row['listing_id'] === 'MLB444') {
+                $thumb = $row;
+                break;
+            }
+        }
+        $this->assertNotNull($thumb);
+        $this->assertSame('exposure_loss', $thumb['severity']);
+        $this->assertSame('active_poor_quality_thumbnail', $thumb['source_status']);
+    }
+
+    public function testNormalizeModerationAcceptsEvidenceSingularKey(): void
+    {
+        $client = $this->createMock(MercadoLivreClient::class);
+        $service = new ListingSearchVisibilityService($client);
+
+        $normalized = $service->normalizeModeration([
+            [
+                'name' => 'PAUSED_PREVENTION_PRICE',
+                'wordings' => [
+                    ['type' => 'REASON', 'value' => 'Preço incomum'],
+                    ['type' => 'REMEDY', 'value' => 'Revise e reative'],
+                ],
+                'evidence' => [
+                    ['section_name' => 'item', 'text_matched' => '77393.72'],
+                ],
+            ],
+        ]);
+
+        $this->assertTrue($normalized['active']);
+        $this->assertCount(1, $normalized['evidences']);
+        $this->assertSame('item', $normalized['evidences'][0]['section_name']);
     }
 }

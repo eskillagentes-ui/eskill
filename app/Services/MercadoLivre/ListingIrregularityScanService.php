@@ -9,7 +9,13 @@ use App\Services\MercadoLivreClient;
 /**
  * Varredura read-only de irregularidades que travam ou reduzem vendas no ML.
  *
- * Usa items/search (under_review, paused+moderation_penalty) + last_moderation.
+ * Buckets oficiais (MCP gerenciar-moderacoes / com-pausa / moderacoes-de-imagens):
+ * - status=under_review
+ * - status=pending (itens moderados agregados)
+ * - status=paused + tags=moderation_penalty
+ * - status=active + tags=poor_quality_thumbnail (perda de exposição)
+ *
+ * Detalhe: GET /moderations/last_moderation/{ITEM}-ITM (resposta = array).
  * Não reativa nem edita anúncios.
  */
 final class ListingIrregularityScanService
@@ -32,18 +38,31 @@ final class ListingIrregularityScanService
         $limitPerBucket = max(1, min(50, $limitPerBucket));
 
         $underReview = $this->searchItemIds(['status' => 'under_review', 'limit' => $limitPerBucket]);
+        $pending = $this->searchItemIds(['status' => 'pending', 'limit' => $limitPerBucket]);
         $pausedPenalty = $this->searchItemIds([
             'status' => 'paused',
             'tags' => 'moderation_penalty',
             'limit' => $limitPerBucket,
         ]);
+        $poorThumbnail = $this->searchItemIds([
+            'status' => 'active',
+            'tags' => 'poor_quality_thumbnail',
+            'limit' => $limitPerBucket,
+        ]);
 
+        // Prioridade de rótulo quando o mesmo item aparece em mais de um bucket
         $combined = [];
         foreach ($underReview as $id) {
             $combined[$id] = 'under_review';
         }
+        foreach ($pending as $id) {
+            $combined[$id] = $combined[$id] ?? 'pending';
+        }
         foreach ($pausedPenalty as $id) {
             $combined[$id] = $combined[$id] ?? 'paused_moderation_penalty';
+        }
+        foreach ($poorThumbnail as $id) {
+            $combined[$id] = $combined[$id] ?? 'active_poor_quality_thumbnail';
         }
 
         $blocked = [];
@@ -52,6 +71,21 @@ final class ListingIrregularityScanService
             $moderation = $this->visibilityService->normalizeModeration(
                 is_array($raw) ? $raw : ['error' => 'invalid_response']
             );
+
+            // Thumbnail pobre sem last_moderation ainda é exposição perdida
+            if (
+                ($moderation['active'] ?? false) !== true
+                && $sourceStatus === 'active_poor_quality_thumbnail'
+            ) {
+                $moderation = [
+                    'active' => true,
+                    'severity' => 'exposure_loss',
+                    'name' => 'POOR_QUALITY_THUMBNAIL',
+                    'reason' => 'Tag poor_quality_thumbnail ativa no anúncio',
+                    'remedy' => 'Corrija a foto de capa (fundo branco / qualidade) para recuperar exposição.',
+                    'evidences' => [],
+                ];
+            }
 
             $blocked[] = [
                 'listing_id' => $itemId,
@@ -78,12 +112,15 @@ final class ListingIrregularityScanService
             'blocked' => $blocked,
             'totals' => [
                 'under_review' => count($underReview),
+                'pending' => count($pending),
                 'paused_moderation_penalty' => count($pausedPenalty),
+                'active_poor_quality_thumbnail' => count($poorThumbnail),
                 'unique' => count($combined),
             ],
             'write_enabled' => false,
             'scanned_at' => gmdate('c'),
             'message' => 'Somente leitura — use reason/remedy oficiais; não reativar automaticamente',
+            'source' => 'ml_moderations_official',
         ];
     }
 
