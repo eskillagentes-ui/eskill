@@ -102,6 +102,12 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
                 <span class="nav-badge new">Novo</span>
             </a>
 
+            <a href="/dashboard/listing-visibility" class="nav-item <?= isActive('/listing-visibility') ? 'active' : '' ?>">
+                <i class="bi bi-search-heart"></i>
+                <span>Visibilidade ML</span>
+                <span class="nav-badge new">Novo</span>
+            </a>
+
             <a href="/dashboard/raio-x" class="nav-item <?= isActive('/raio-x') ? 'active' : '' ?>">
                 <i class="bi bi-radioactive text-danger"></i>
                 <span>Raio X da Conta</span>

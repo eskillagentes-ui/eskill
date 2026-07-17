@@ -449,6 +449,7 @@ $router->get('api/listings/search-visibility/queue', ListingVisibilityController
 $router->get('api/listings/search-visibility/{itemId}', ListingVisibilityController::class, 'analyzeItem');
 $router->get('api/listings/irregularities', ListingVisibilityController::class, 'scanIrregularities');
 $router->get('api/listings/infractions', ListingVisibilityController::class, 'listInfractions');
+$router->post('api/listings/picture-diagnostic', ListingVisibilityController::class, 'diagnosePicture');
 
 // ========================================
 // 🤖 FASE 4 - Dynamic Pricing, AI Predictions, Chatbot AI

@@ -12,12 +12,24 @@ use App\Services\MercadoLivreClient;
 use PDO;
 
 /**
- * API read-only: irregularidades ML + fila de ativação de busca (SEO oficial /performance).
+ * API + dashboard read-only: irregularidades ML + fila de ativação de busca (SEO oficial /performance).
  *
- * Nunca envia PUT/PATCH ao Mercado Livre.
+ * Nunca envia PUT/PATCH de anúncio ao Mercado Livre.
  */
 final class ListingVisibilityController extends BaseController
 {
+    /**
+     * GET /dashboard/listing-visibility
+     */
+    public function index(): void
+    {
+        $this->renderView('dashboard/listing-visibility', [
+            'pageTitle' => 'Visibilidade e Irregularidades',
+            'currentPage' => 'listing-visibility',
+            'activePage' => 'listing-visibility',
+        ]);
+    }
+
     /**
      * GET /api/listings/search-visibility/{itemId}
      */
@@ -141,6 +153,94 @@ final class ListingVisibilityController extends BaseController
                 'error' => $e->getMessage(),
             ]);
             $this->jsonError('Falha ao listar infrações', 500);
+        }
+    }
+
+    /**
+     * POST /api/listings/picture-diagnostic
+     *
+     * Diagnóstico preventivo oficial (não publica nem altera anúncio).
+     */
+    public function diagnosePicture(): void
+    {
+        try {
+            $accountId = $this->resolveOwnedAccountId();
+            if ($accountId === null) {
+                $this->jsonError('Conta não autorizada ou não selecionada', 403);
+                return;
+            }
+
+            $payload = $this->request->json() ?? [];
+            if (!is_array($payload)) {
+                $this->jsonError('JSON inválido', 400);
+                return;
+            }
+
+            $categoryId = isset($payload['category_id']) && is_string($payload['category_id'])
+                ? trim($payload['category_id'])
+                : '';
+            if ($categoryId === '') {
+                $this->jsonError('category_id é obrigatório', 400);
+                return;
+            }
+
+            $pictureUrl = isset($payload['picture_url']) && is_string($payload['picture_url'])
+                ? trim($payload['picture_url'])
+                : '';
+            $pictureId = isset($payload['picture_id']) && is_string($payload['picture_id'])
+                ? trim($payload['picture_id'])
+                : '';
+
+            if (($pictureUrl === '') === ($pictureId === '')) {
+                $this->jsonError('Envie exatamente um de: picture_url ou picture_id', 400);
+                return;
+            }
+
+            $pictureType = isset($payload['picture_type']) && is_string($payload['picture_type'])
+                ? trim($payload['picture_type'])
+                : 'thumbnail';
+            if (!in_array($pictureType, ['thumbnail', 'variation_thumbnail', 'other'], true)) {
+                $this->jsonError('picture_type inválido', 400);
+                return;
+            }
+
+            $body = [
+                'context' => [
+                    'category_id' => $categoryId,
+                    'picture_type' => $pictureType,
+                ],
+            ];
+            if ($pictureUrl !== '') {
+                $body['picture_url'] = $pictureUrl;
+            } else {
+                $body['picture_id'] = $pictureId;
+            }
+
+            $title = isset($payload['title']) && is_string($payload['title']) ? trim($payload['title']) : '';
+            if ($title !== '') {
+                $body['context']['title'] = mb_substr($title, 0, 200);
+            }
+
+            $client = new MercadoLivreClient($accountId);
+            $result = $client->diagnosePicture($body);
+            $result['write_enabled'] = false;
+            $result['message'] = 'Diagnóstico preventivo — nenhuma imagem foi associada ao anúncio';
+
+            if (isset($result['error'])) {
+                $this->jsonError(
+                    (string) ($result['message'] ?? $result['error']),
+                    422,
+                    ['diagnostic' => $result]
+                );
+                return;
+            }
+
+            $this->jsonSuccess($result);
+        } catch (\Throwable $e) {
+            log_error('ListingVisibility picture diagnostic failed', [
+                'error' => $e->getMessage(),
+            ]);
+            $this->jsonError('Falha no diagnóstico de imagem', 500);
         }
     }
 

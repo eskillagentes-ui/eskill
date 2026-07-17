@@ -34,6 +34,10 @@ $router->get('api/account-health/pillar/{pillarName}', AccountHealthController::
 $router->get('api/account-health/history', AccountHealthController::class, 'getHistory');
 $router->post('api/account-health/refresh', AccountHealthController::class, 'refresh');
 
+// Visibilidade de anúncios / irregularidades (read-only)
+use App\Controllers\ListingVisibilityController;
+$router->get('dashboard/listing-visibility', ListingVisibilityController::class, 'index');
+
 // 🆕 Advanced Account Health Diagnostics
 $router->get('api/account-health/advanced/status', AccountHealthController::class, 'getAdvancedStatus');
 $router->get('api/account-health/advanced/customer-service', AccountHealthController::class, 'getAdvancedCustomerService');
