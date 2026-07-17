@@ -351,11 +351,22 @@ class LoggerService extends AbstractLogger
      */
     private function appendLine(string $filePath, string $line): void
     {
-        if (@file_put_contents($filePath, $line, FILE_APPEND | LOCK_EX) === false) {
-            throw new \RuntimeException('Nao foi possivel escrever no arquivo de log: ' . $filePath);
+        $dir = dirname($filePath);
+        if (!is_dir($dir)) {
+            @mkdir($dir, 0775, true);
         }
 
-        @chmod($filePath, 0640);
+        if (@file_put_contents($filePath, $line, FILE_APPEND | LOCK_EX) === false) {
+            // Nunca derrubar a request (ex.: login) por falha de permissão de log.
+            error_log(sprintf(
+                '[LoggerService] falha ao gravar log em %s | %s',
+                $filePath,
+                rtrim($line)
+            ));
+            return;
+        }
+
+        @chmod($filePath, 0664);
     }
 
     /**
