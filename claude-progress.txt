@@ -1,5 +1,15 @@
 # Progress log (newest first)
 
+## 2026-07-17 — Remote migrado + plano commitado
+
+- `origin` → `https://github.com/jessestainx/eskill.git` ([repo](https://github.com/jessestainx/eskill))
+- Commit `e8faf71c` na branch `feat/listing-search-visibility-motor` (SEC-001 + motor + guards + hygiene)
+- `composer.json` / `package.json` apontam para jessestainx/eskill
+- Push falhou: sem credencial GitHub neste host (`gh`/token/SSH). Rodar localmente:
+  `git push -u origin feat/listing-search-visibility-motor` e `git push origin --all` / `--tags` se quiser migrar histórico completo.
+
+---
+
 ## 2026-07-17 — Plano pós-varredura executado
 
 ### Entregue
