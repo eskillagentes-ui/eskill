@@ -198,6 +198,7 @@
             <file>tests/Unit/Services/MercadoLivre/MlObservabilityServiceTest.php</file>
             <!-- ML-BLG-060: Trilha de Auditoria ML -->
             <file>tests/Unit/Services/MercadoLivre/MlOrderAuditServiceTest.php</file>
+            <file>tests/Unit/Services/MercadoLivre/ListingSearchVisibilityServiceTest.php</file>
             <!-- ML-BLG-061: Analytics e Pricing Avançado (feature flags) -->
             <file>tests/Unit/Services/MercadoLivre/MlAdvancedFeaturesServiceTest.php</file>
         </testsuite>
