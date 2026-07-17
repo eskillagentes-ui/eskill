@@ -441,6 +441,16 @@ $router->post('api/messaging/{accountId}/webhook', MessagingController::class, '
 $router->get('api/messaging/{accountId}/stats', MessagingController::class, 'getStats');
 
 // ========================================
+// Listing visibility / irregularities (read-only — ML performance + moderations)
+// ========================================
+use App\Controllers\ListingVisibilityController;
+
+$router->get('api/listings/search-visibility/queue', ListingVisibilityController::class, 'searchActivationQueue');
+$router->get('api/listings/search-visibility/{itemId}', ListingVisibilityController::class, 'analyzeItem');
+$router->get('api/listings/irregularities', ListingVisibilityController::class, 'scanIrregularities');
+$router->get('api/listings/infractions', ListingVisibilityController::class, 'listInfractions');
+
+// ========================================
 // 🤖 FASE 4 - Dynamic Pricing, AI Predictions, Chatbot AI
 // ========================================
 

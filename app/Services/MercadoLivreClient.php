@@ -985,6 +985,9 @@ class MercadoLivreClient
             '#^/answers#',
             '#^/my/#',
             '#^/v1/claims#',
+            '#^/moderations/last_moderation#',
+            '#^/moderations/infractions#',
+            '#^/moderations/pictures/diagnostic#',
             // Search é endpoint público - usar searchItems() para forçar public
             // '#^/sites/[^/]+/search#',
         ];
@@ -1839,6 +1842,105 @@ class MercadoLivreClient
         } catch (\Exception $e) {
             log_error('Erro ao obter experiência de compra do item', [
                 'item_id' => $itemId,
+                'error' => $e->getMessage(),
+            ]);
+            return ['error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Última moderação ativa do anúncio (reason/remedy oficiais).
+     *
+     * ML API: GET /moderations/last_moderation/{ITEM_ID}-ITM
+     *
+     * @return list<array<string, mixed>>|array{error: string, message?: string}
+     */
+    public function getLastModeration(string $itemId): array
+    {
+        $itemId = trim($itemId);
+        if ($itemId === '') {
+            return ['error' => 'invalid_item_id', 'message' => 'item_id obrigatório'];
+        }
+
+        $referenceId = str_ends_with($itemId, '-ITM') ? $itemId : $itemId . '-ITM';
+
+        try {
+            $response = $this->get('/moderations/last_moderation/' . rawurlencode($referenceId));
+            if (isset($response['error'])) {
+                return $response;
+            }
+
+            return is_array($response) ? $response : [];
+        } catch (\Exception $e) {
+            log_error('Erro ao obter last_moderation', [
+                'item_id' => $itemId,
+                'error' => $e->getMessage(),
+            ]);
+            return ['error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Histórico de infrações do vendedor.
+     *
+     * ML API: GET /moderations/infractions/{USER_ID}
+     *
+     * @param array<string, scalar|null> $params date_created_since, limit, offset, language, related_item_id, sort
+     * @return array<string, mixed>
+     */
+    public function getModerationInfractions(string $sellerId, array $params = []): array
+    {
+        $sellerId = trim($sellerId);
+        if ($sellerId === '') {
+            return ['error' => 'invalid_seller_id', 'message' => 'seller_id obrigatório', 'infractions' => []];
+        }
+
+        $defaults = [
+            'language' => 'PT',
+            'limit' => 20,
+            'offset' => 0,
+            'sort' => 'date_created_desc',
+        ];
+        $query = array_merge($defaults, $params);
+
+        try {
+            return $this->get('/moderations/infractions/' . rawurlencode($sellerId), $query);
+        } catch (\Exception $e) {
+            log_error('Erro ao obter infractions', [
+                'seller_id' => $sellerId,
+                'error' => $e->getMessage(),
+            ]);
+            return ['error' => $e->getMessage(), 'infractions' => []];
+        }
+    }
+
+    /**
+     * Diagnóstico preventivo de imagem (antes de associar ao anúncio).
+     *
+     * ML API: POST /moderations/pictures/diagnostic
+     *
+     * @param array{picture_url?: string, picture_id?: string, context: array<string, mixed>, id?: string} $payload
+     * @return array<string, mixed>
+     */
+    public function diagnosePicture(array $payload): array
+    {
+        if (!isset($payload['context']) || !is_array($payload['context'])) {
+            return ['error' => 'invalid_payload', 'message' => 'context é obrigatório'];
+        }
+
+        $hasUrl = isset($payload['picture_url']) && is_string($payload['picture_url']) && $payload['picture_url'] !== '';
+        $hasId = isset($payload['picture_id']) && is_string($payload['picture_id']) && $payload['picture_id'] !== '';
+        if ($hasUrl === $hasId) {
+            return [
+                'error' => 'invalid_payload',
+                'message' => 'Envie exatamente um de: picture_url ou picture_id',
+            ];
+        }
+
+        try {
+            return $this->post('/moderations/pictures/diagnostic', $payload);
+        } catch (\Exception $e) {
+            log_error('Erro no diagnóstico de imagem ML', [
                 'error' => $e->getMessage(),
             ]);
             return ['error' => $e->getMessage()];

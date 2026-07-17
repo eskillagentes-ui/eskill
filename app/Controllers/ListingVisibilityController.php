@@ -1,0 +1,198 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Controllers;
+
+use App\Database;
+use App\Helpers\SessionHelper;
+use App\Services\MercadoLivre\ListingIrregularityScanService;
+use App\Services\MercadoLivre\ListingSearchVisibilityService;
+use App\Services\MercadoLivreClient;
+use PDO;
+
+/**
+ * API read-only: irregularidades ML + fila de ativação de busca (SEO oficial /performance).
+ *
+ * Nunca envia PUT/PATCH ao Mercado Livre.
+ */
+final class ListingVisibilityController extends BaseController
+{
+    /**
+     * GET /api/listings/search-visibility/{itemId}
+     */
+    public function analyzeItem(string $itemId): void
+    {
+        try {
+            $accountId = $this->resolveOwnedAccountId();
+            if ($accountId === null) {
+                $this->jsonError('Conta não autorizada ou não selecionada', 403);
+                return;
+            }
+
+            $client = new MercadoLivreClient($accountId);
+            $service = new ListingSearchVisibilityService($client);
+            $result = $service->analyzeListing($itemId);
+
+            if (isset($result['error']) && ($result['error'] === 'invalid_item_id')) {
+                $this->jsonError((string) ($result['message'] ?? 'item inválido'), 400);
+                return;
+            }
+
+            $this->jsonSuccess($result);
+        } catch (\Throwable $e) {
+            log_error('ListingVisibility analyzeItem failed', [
+                'item_id' => $itemId,
+                'error' => $e->getMessage(),
+            ]);
+            $this->jsonError('Falha ao analisar visibilidade do anúncio', 500);
+        }
+    }
+
+    /**
+     * GET /api/listings/search-visibility/queue
+     */
+    public function searchActivationQueue(): void
+    {
+        try {
+            $accountId = $this->resolveOwnedAccountId();
+            if ($accountId === null) {
+                $this->jsonError('Conta não autorizada ou não selecionada', 403);
+                return;
+            }
+
+            $limit = $this->request->inputInt('limit', 20);
+            $client = new MercadoLivreClient($accountId);
+            $service = new ListingSearchVisibilityService($client);
+            $result = $service->buildSearchActivationQueue(null, $limit);
+
+            $this->jsonSuccess($result);
+        } catch (\Throwable $e) {
+            log_error('ListingVisibility queue failed', [
+                'error' => $e->getMessage(),
+            ]);
+            $this->jsonError('Falha ao montar fila de ativação de busca', 500);
+        }
+    }
+
+    /**
+     * GET /api/listings/irregularities
+     */
+    public function scanIrregularities(): void
+    {
+        try {
+            $accountId = $this->resolveOwnedAccountId();
+            if ($accountId === null) {
+                $this->jsonError('Conta não autorizada ou não selecionada', 403);
+                return;
+            }
+
+            $limit = $this->request->inputInt('limit', 30);
+            $client = new MercadoLivreClient($accountId);
+            $visibility = new ListingSearchVisibilityService($client);
+            $scan = new ListingIrregularityScanService($client, $visibility);
+            $result = $scan->scan($limit);
+
+            $this->jsonSuccess($result);
+        } catch (\Throwable $e) {
+            log_error('ListingVisibility irregularities failed', [
+                'error' => $e->getMessage(),
+            ]);
+            $this->jsonError('Falha ao varrer irregularidades', 500);
+        }
+    }
+
+    /**
+     * GET /api/listings/infractions
+     */
+    public function listInfractions(): void
+    {
+        try {
+            $accountId = $this->resolveOwnedAccountId();
+            if ($accountId === null) {
+                $this->jsonError('Conta não autorizada ou não selecionada', 403);
+                return;
+            }
+
+            $params = [
+                'limit' => $this->request->inputInt('limit', 20),
+                'offset' => $this->request->inputInt('offset', 0),
+                'language' => 'PT',
+            ];
+
+            $since = $this->request->input('date_created_since');
+            if (is_string($since) && preg_match('/^\d{4}-\d{2}-\d{2}$/', $since) === 1) {
+                $params['date_created_since'] = $since;
+            }
+
+            $client = new MercadoLivreClient($accountId);
+            $visibility = new ListingSearchVisibilityService($client);
+            $scan = new ListingIrregularityScanService($client, $visibility);
+            $result = $scan->listInfractions($params);
+
+            if (isset($result['error']) && $result['error'] === 'seller_not_found') {
+                $this->jsonError('Vendedor ML não encontrado para a conta', 422);
+                return;
+            }
+
+            $this->jsonSuccess($result);
+        } catch (\Throwable $e) {
+            log_error('ListingVisibility infractions failed', [
+                'error' => $e->getMessage(),
+            ]);
+            $this->jsonError('Falha ao listar infrações', 500);
+        }
+    }
+
+    /**
+     * Resolve account_id apenas se pertencer ao usuário autenticado.
+     * Não confia em account_id cru sem ownership (mitiga IDOR nestes endpoints).
+     */
+    private function resolveOwnedAccountId(): ?int
+    {
+        $userId = $this->getUserId();
+        if ($userId === null || $userId <= 0) {
+            return null;
+        }
+
+        $requested = $this->request->inputInt('ml_account_id', 0);
+        if ($requested <= 0) {
+            $requested = $this->request->inputInt('account_id', 0);
+        }
+
+        if ($requested > 0) {
+            return $this->assertAccountOwnedByUser($requested, $userId) ? $requested : null;
+        }
+
+        $active = SessionHelper::getActiveAccountId();
+        if ($active === null || $active <= 0) {
+            return null;
+        }
+
+        return $this->assertAccountOwnedByUser($active, $userId) ? $active : null;
+    }
+
+    private function assertAccountOwnedByUser(int $accountId, int $userId): bool
+    {
+        try {
+            $db = Database::getInstance();
+            $stmt = $db->prepare(
+                'SELECT id FROM ml_accounts WHERE id = :id AND user_id = :user_id LIMIT 1'
+            );
+            $stmt->execute([
+                'id' => $accountId,
+                'user_id' => $userId,
+            ]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+
+            return is_array($row);
+        } catch (\Throwable $e) {
+            log_error('ListingVisibility ownership check failed', [
+                'account_id' => $accountId,
+                'user_id' => $userId,
+                'error' => $e->getMessage(),
+            ]);
+            return false;
+        }
+    }
+}
