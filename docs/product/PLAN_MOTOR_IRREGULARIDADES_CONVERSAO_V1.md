@@ -42,10 +42,10 @@ Humano        → aprova ações críticas
 | Busca itens `under_review` / `paused`+tag | `GET /users/{id}/items/search` | **Presente** no scan de irregularidades (materializa reason/remedy via last_moderation) |
 | Reputação | `GET /users/{id}` → `seller_reputation` | **Parcial** |
 | Compatibilidades autopeças | API de compatibilidades | **Presente** (Controllers Compatibility / BulkCompatibility) |
-| Persistência fila (`SalesBlockerStore`) | — | **Em implementação** (scan on-demand já existe; store + cron na Fase 2 do plano de execução) |
-| SEC-001 isolamento de contas | — | **Pré-condição** — policy central obrigatória antes de escrita ML |
+| Persistência fila (`SalesBlockerStore`) | — | **Presente** (`SalesBlockerStore` + `bin/sync-irregularities.php` + UI “Fila persistida”) |
+| SEC-001 isolamento de contas | — | **Presente** nos caminhos críticos (Items/Orders/Listing/Compatibility/Questions/Messages/Pricing); expansão contínua |
 
-**Conclusão (atualizada 2026-07-17):** a coleta read-only de moderations já está no código da branch de visibilidade. O gap restante é **persistência/cron da fila**, **SEC-001 wired**, e **desarme de escrita automática** — não mais “zero moderations no app”.
+**Conclusão (atualizada 2026-07-17):** coleta read-only + store + guards de escrita estão na branch. Próximo: smoke Facility com conta real e aprovação humana para qualquer escrita ML.
 
 ---
 

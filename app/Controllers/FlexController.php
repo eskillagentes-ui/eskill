@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Security\AccountAccessException;
+use App\Security\AccountContextResolver;
 use App\Services\MercadoLivreClient;
 use App\Services\UserService;
 use App\Database;
@@ -56,8 +58,14 @@ class FlexController extends BaseController
             return;
         }
 
-        $accountId = $_SESSION['active_ml_account_id'] ?? null;
-        $client    = new MercadoLivreClient($accountId);
+        try {
+            $context = (new AccountContextResolver())->authorizeForCurrentActor('flex.read');
+            $client = MercadoLivreClient::fromAuthorizedContext($context);
+        } catch (AccountAccessException $e) {
+            http_response_code($e->httpStatus());
+            echo json_encode(['error' => $e->getMessage(), 'error_code' => $e->errorCode()]);
+            return;
+        }
 
         try {
             // Fetch recent orders; filter for Flex (logistic_type = self_service or fulfillment)

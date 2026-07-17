@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Security\AccountAccessException;
+use App\Security\AccountContextResolver;
 use App\Services\ClaimsService;
 use App\Services\MercadoLivreClient;
 use App\Services\UserService;
@@ -22,7 +24,14 @@ class ReturnsController extends BaseController
     {
         parent::__construct();
         $this->userService = $userService;
-        $accountId = $_SESSION['active_ml_account_id'] ?? null;
+        $accountId = null;
+        try {
+            $accountId = (new AccountContextResolver())
+                ->authorizeForCurrentActor('returns.read')
+                ->accountId();
+        } catch (AccountAccessException $e) {
+            $accountId = null;
+        }
         $this->claimsService = new ClaimsService($accountId);
     }
 
@@ -37,8 +46,14 @@ class ReturnsController extends BaseController
             exit;
         }
 
-        $accountId = $_SESSION['active_ml_account_id'] ?? null;
-        $client = new MercadoLivreClient($accountId);
+        try {
+            $context = (new AccountContextResolver())->authorizeForCurrentActor('returns.read');
+            $client = MercadoLivreClient::fromAuthorizedContext($context);
+        } catch (AccountAccessException $e) {
+            http_response_code($e->httpStatus());
+            echo $e->getMessage();
+            return;
+        }
 
         // Fetch opened claims (pending triage)
         $pendingRaw = $this->fetchClaims($client, 'opened');
