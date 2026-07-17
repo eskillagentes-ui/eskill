@@ -13,6 +13,8 @@ use App\Services\PricingRulesService;
 use App\Services\AutoPricingOptimizerService;
 use App\Services\PricingCompetitorMonitorService;
 use App\Services\MercadoLivreClient;
+use App\Security\AccountAccessException;
+use App\Security\AccountContextResolver;
 use App\Database;
 use PDO;
 
@@ -55,6 +57,14 @@ class PricingIntelligenceController extends BaseController
     public function __construct(int $accountId)
     {
         parent::__construct();
+        // SEC-001: accountId da rota só é aceito após AccountAccessPolicy
+        try {
+            $context = (new AccountContextResolver())->authorizeForCurrentActor('pricing.read', $accountId);
+            $accountId = $context->accountId();
+            $this->mlClient = MercadoLivreClient::fromAuthorizedContext($context);
+        } catch (AccountAccessException $e) {
+            throw new \RuntimeException($e->getMessage(), $e->httpStatus(), $e);
+        }
         $this->accountId = $accountId;
         $this->marginService = new MarginCalculatorService($accountId);
         $this->dynamicService = new DynamicPricingService($accountId);
@@ -62,7 +72,6 @@ class PricingIntelligenceController extends BaseController
         $this->alertService = new RankingAlertService($accountId);
         $this->promotionService = new PromotionSimulatorService($accountId);
         $this->scenarioService = new PricingScenarioService($accountId);
-        $this->mlClient = new MercadoLivreClient($accountId);
         $this->db = Database::getInstance();
     }
 
@@ -554,6 +563,12 @@ class PricingIntelligenceController extends BaseController
     public function applyPrice(string $itemId): void
     {
         $this->jsonResponse();
+        $guard = \App\Helpers\MlWriteAutomation::guard('PricingIntelligenceController::applyPrice');
+        if (!$guard['allowed']) {
+            $this->error($guard['reason'], 403);
+            return;
+        }
+
         $data = $this->getJsonInput();
 
         if (!isset($data['novo_preco'])) {

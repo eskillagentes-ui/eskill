@@ -15,6 +15,8 @@ declare(strict_types=1);
 
 require __DIR__ . '/../vendor/autoload.php';
 
+\App\Helpers\MlWriteAutomation::exitIfDisabledForCli(basename(__FILE__));
+
 use App\Services\JobService;
 use App\Services\QueueService;
 

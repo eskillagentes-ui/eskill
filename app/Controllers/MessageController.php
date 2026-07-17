@@ -25,13 +25,11 @@ class MessageController extends BaseController
     public function index(): void
     {
         $this->requireUserId();
-        $accountId = $this->request->get('account_id') ?? SessionHelper::getActiveAccountId();
-
-        if (!$accountId) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Account ID required']);
+        $context = $this->requireAuthorizedAccount('messages.read');
+        if ($context === null) {
             return;
         }
+        $accountId = $context->accountId();
 
         $stmt = $this->db->prepare("SELECT * FROM message_templates WHERE account_id = :aid ORDER BY event_trigger");
         $stmt->execute(['aid' => $accountId]);
@@ -49,9 +47,23 @@ class MessageController extends BaseController
     {
         $this->requireUserId();
         $data = json_decode(file_get_contents('php://input'), true);
-        $accountId = $data['account_id'] ?? SessionHelper::getActiveAccountId();
+        if (!is_array($data)) {
+            $data = [];
+        }
+        $explicit = isset($data['account_id']) ? (int) $data['account_id'] : 0;
+        try {
+            $context = (new \App\Security\AccountContextResolver())->authorizeForCurrentActor(
+                'messages.write',
+                $explicit > 0 ? $explicit : null
+            );
+            $accountId = $context->accountId();
+        } catch (\App\Security\AccountAccessException $e) {
+            http_response_code($e->httpStatus());
+            echo json_encode(['error' => $e->getMessage(), 'error_code' => $e->errorCode()]);
+            return;
+        }
 
-        if (empty($accountId) || empty($data['name']) || empty($data['event_trigger']) || empty($data['content'])) {
+        if (empty($data['name']) || empty($data['event_trigger']) || empty($data['content'])) {
             http_response_code(400);
             echo json_encode(['error' => 'Missing required fields']);
             return;

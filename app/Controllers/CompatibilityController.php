@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Security\AccountAccessException;
+use App\Security\AccountContextResolver;
 use App\Services\SEO\CompatibilityService;
 
 class CompatibilityController extends BaseController
@@ -12,8 +14,16 @@ class CompatibilityController extends BaseController
     public function __construct()
     {
         parent::__construct();
-        $accountId = $this->request->get('account_id') ?? $_SESSION['account_id'] ?? null;
-        $this->compatibilityService = new CompatibilityService($accountId ? (int)$accountId : null);
+        // SEC-001: não confiar em account_id cru
+        $accountId = null;
+        try {
+            $accountId = (new AccountContextResolver())
+                ->authorizeForCurrentActor('compatibility.read')
+                ->accountId();
+        } catch (AccountAccessException $e) {
+            $accountId = null;
+        }
+        $this->compatibilityService = new CompatibilityService($accountId);
     }
     
     /**

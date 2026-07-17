@@ -60,6 +60,11 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
         </button>
     </li>
     <li class="nav-item" role="presentation">
+        <button class="nav-link" id="tab-store" data-bs-toggle="tab" data-bs-target="#pane-store" type="button" role="tab">
+            Fila persistida
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
         <button class="nav-link" id="tab-pic" data-bs-toggle="tab" data-bs-target="#pane-pic" type="button" role="tab">
             Diagnóstico de imagem
         </button>
@@ -68,11 +73,16 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
 
 <div class="tab-content border border-top-0 bg-white shadow-sm p-3" id="lvTabContent">
     <div class="tab-pane fade show active" id="pane-irr" role="tabpanel">
-        <div class="d-flex justify-content-between align-items-center mb-3">
+        <div class="d-flex justify-content-between align-items-center mb-3 gap-2 flex-wrap">
             <p class="mb-0 text-muted small">Fonte: items/search + /moderations/last_moderation</p>
-            <button type="button" class="btn btn-sm btn-outline-primary" id="btn-refresh-irr">
-                <i class="bi bi-arrow-clockwise"></i> Atualizar
-            </button>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-sm btn-outline-success" id="btn-sync-irr" title="Persiste na fila ml_sales_blockers">
+                    <i class="bi bi-cloud-download"></i> Sync + salvar
+                </button>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="btn-refresh-irr">
+                    <i class="bi bi-arrow-clockwise"></i> Atualizar
+                </button>
+            </div>
         </div>
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0">
@@ -128,6 +138,40 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
         </div>
     </div>
 
+    <div class="tab-pane fade" id="pane-store" role="tabpanel">
+        <div class="d-flex justify-content-between align-items-center mb-3 gap-2 flex-wrap">
+            <p class="mb-0 text-muted small">SalesBlockerStore — snapshots sem tokens (urgent / exposure)</p>
+            <div class="d-flex gap-2 align-items-center">
+                <select class="form-select form-select-sm" id="store-queue" style="width:auto">
+                    <option value="urgent">urgent</option>
+                    <option value="exposure">exposure</option>
+                    <option value="account">account</option>
+                </select>
+                <button type="button" class="btn btn-sm btn-outline-primary" id="btn-refresh-store">
+                    <i class="bi bi-arrow-clockwise"></i> Atualizar
+                </button>
+            </div>
+        </div>
+        <p class="small text-muted mb-2" id="store-counts">Contagens: —</p>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Anúncio</th>
+                        <th>Fila</th>
+                        <th>Severidade</th>
+                        <th>Motivo</th>
+                        <th>Remedy</th>
+                        <th>Scanned</th>
+                    </tr>
+                </thead>
+                <tbody id="store-body">
+                    <tr><td colspan="6" class="text-center text-muted py-4">Abra a aba e atualize</td></tr>
+                </tbody>
+            </table>
+        </div>
+    </div>
+
     <div class="tab-pane fade" id="pane-pic" role="tabpanel">
         <p class="text-muted small">API oficial POST /moderations/pictures/diagnostic — valida antes de publicar (não associa a imagem).</p>
         <form id="pic-form" class="row g-3">
@@ -180,7 +224,56 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
         return `<span class="badge text-bg-${tone}">${esc(v)}</span>`;
     };
 
-    const state = { seoLoaded: false };
+    const state = { seoLoaded: false, storeLoaded: false };
+
+    async function syncAndPersist() {
+        try {
+            const data = await requestJson('/api/listings/irregularities/sync', { method: 'POST' });
+            if (!data.success) {
+                alert(data.error || 'Falha no sync');
+                return;
+            }
+            await loadIrregularities();
+            state.storeLoaded = false;
+            await loadSalesBlockers();
+        } catch (e) {
+            alert(String(e.message || e));
+        }
+    }
+
+    async function loadSalesBlockers() {
+        const body = document.getElementById('store-body');
+        const queue = document.getElementById('store-queue')?.value || 'urgent';
+        body.innerHTML = `<tr><td colspan="6" class="text-center py-4"><div class="spinner-border spinner-border-sm"></div></td></tr>`;
+        try {
+            const data = await requestJson('/api/listings/sales-blockers?queue=' + encodeURIComponent(queue) + '&limit=50');
+            if (!data.success) {
+                body.innerHTML = `<tr><td colspan="6" class="text-danger text-center py-4">${esc(data.error || 'Falha')}</td></tr>`;
+                return;
+            }
+            const counts = data.counts || {};
+            document.getElementById('store-counts').textContent =
+                `Contagens: urgent=${counts.urgent ?? 0} · exposure=${counts.exposure ?? 0} · account=${counts.account ?? 0}`;
+            const items = data.items || [];
+            if (!items.length) {
+                body.innerHTML = `<tr><td colspan="6" class="text-center text-muted py-4">Fila vazia. Use “Sync + salvar”.</td></tr>`;
+                return;
+            }
+            body.innerHTML = items.map((r) => `
+                <tr>
+                    <td><code>${esc(r.item_id)}</code></td>
+                    <td>${esc(r.queue)}</td>
+                    <td>${esc(r.severity)}</td>
+                    <td class="small">${esc(r.reason || '—')}</td>
+                    <td class="small">${esc(r.remedy || '—')}</td>
+                    <td class="small">${esc(r.scanned_at || '—')}</td>
+                </tr>
+            `).join('');
+            state.storeLoaded = true;
+        } catch (e) {
+            body.innerHTML = `<tr><td colspan="6" class="text-danger text-center py-4">${esc(e.message || e)}</td></tr>`;
+        }
+    }
 
     async function loadIrregularities() {
         const body = document.getElementById('irr-body');
@@ -278,7 +371,13 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
     }
 
     document.getElementById('btn-refresh-irr')?.addEventListener('click', loadIrregularities);
+    document.getElementById('btn-sync-irr')?.addEventListener('click', syncAndPersist);
     document.getElementById('btn-refresh-seo')?.addEventListener('click', loadSeoQueue);
+    document.getElementById('btn-refresh-store')?.addEventListener('click', loadSalesBlockers);
+    document.getElementById('store-queue')?.addEventListener('change', loadSalesBlockers);
+    document.getElementById('tab-store')?.addEventListener('shown.bs.tab', () => {
+        if (!state.storeLoaded) loadSalesBlockers();
+    });
 
     document.getElementById('irr-body')?.addEventListener('click', (ev) => {
         const btn = ev.target.closest('.btn-analyze');

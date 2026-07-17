@@ -1,5 +1,17 @@
 # Progress log (newest first)
 
+## 2026-07-17 — Continuação pós-push
+
+- Migration `ml_sales_blockers` aplicada no MySQL local.
+- SEC-001 expandido: Compatibility, BulkCompatibility, Question, Message, PricingIntelligence.
+- UI listing-visibility: aba fila persistida + Sync+salvar.
+- Workers de escrita com `exitIfDisabledForCli` (pricing/clone/seo/ml-ai).
+- `ML_WRITE_AUTOMATION=false` no `.env` local.
+- Docs: `docs/operations/WORKERS_AUTOMATION_QUARANTINE.md`.
+
+---
+# Progress log (newest first)
+
 ## 2026-07-17 — Remote migrado + plano commitado
 
 - `origin` → `https://github.com/jessestainx/eskill.git` ([repo](https://github.com/jessestainx/eskill))

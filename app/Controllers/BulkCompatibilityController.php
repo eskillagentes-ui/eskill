@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Security\AccountAccessException;
+use App\Security\AccountContextResolver;
 use App\Services\MercadoLivreClient;
 use App\Services\AI\SEO\Strategies\CompatibilityService;
 
@@ -23,9 +25,16 @@ class BulkCompatibilityController extends BaseController
     {
         parent::__construct();
 
-        $accountId = (int)($_SESSION['active_ml_account_id'] ?? 0);
+        // SEC-001 + Facility: compatibilidades na mesma prioridade da fila de conversão
+        $accountId = 0;
+        try {
+            $context = (new AccountContextResolver())->authorizeForCurrentActor('compatibility.bulk');
+            $accountId = $context->accountId();
+            $this->mlClient = MercadoLivreClient::fromAuthorizedContext($context);
+        } catch (AccountAccessException $e) {
+            $this->mlClient = new MercadoLivreClient(null);
+        }
         $this->accountId = $accountId;
-        $this->mlClient = new MercadoLivreClient($accountId ?: null);
         $this->compatibilityService = new CompatibilityService($accountId ?: null);
     }
 

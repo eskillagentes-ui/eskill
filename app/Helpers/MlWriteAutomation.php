@@ -37,4 +37,27 @@ final class MlWriteAutomation
             'reason' => 'ML_WRITE_AUTOMATION is disabled (recommend-only mode)',
         ];
     }
+
+    /**
+     * Workers de escrita/automação: saem com código 0 se a flag estiver off (ADR-003).
+     */
+    public static function exitIfDisabledForCli(string $workerName): void
+    {
+        if (self::isEnabled()) {
+            return;
+        }
+
+        $msg = sprintf(
+            "[%s] ML_WRITE_AUTOMATION=false — worker em quarentena (recommend-only). Saindo.\n",
+            $workerName
+        );
+        fwrite(STDERR, $msg);
+        if (function_exists('log_info')) {
+            log_info('Worker automation quarantined', [
+                'worker' => $workerName,
+                'flag' => 'ML_WRITE_AUTOMATION',
+            ]);
+        }
+        exit(0);
+    }
 }

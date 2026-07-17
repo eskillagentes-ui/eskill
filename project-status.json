@@ -58,6 +58,24 @@
       "name": "Métricas de concorrência renomeadas (amostra observada)",
       "passes": true,
       "priority": "P2"
+    },
+    {
+      "id": "sec-001-hot-controllers",
+      "name": "SEC-001 wired em Compatibility/Questions/Messages/Pricing",
+      "passes": true,
+      "priority": "P0"
+    },
+    {
+      "id": "workers-quarantine",
+      "name": "Workers de escrita em quarentena (ML_WRITE_AUTOMATION)",
+      "passes": true,
+      "priority": "P1"
+    },
+    {
+      "id": "listing-ui-store",
+      "name": "UI fila persistida sales-blockers + sync",
+      "passes": true,
+      "priority": "P0"
     }
   ]
 }

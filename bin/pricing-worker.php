@@ -15,6 +15,8 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../autoload.php';
 
+\App\Helpers\MlWriteAutomation::exitIfDisabledForCli(basename(__FILE__));
+
 use App\Database;
 use App\Services\PricingScenarioService;
 use App\Services\MarginCalculatorService;

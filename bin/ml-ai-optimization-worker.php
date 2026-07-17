@@ -54,6 +54,8 @@ if (file_exists($envFile)) {
 // Autoload
 require_once __DIR__ . '/../vendor/autoload.php';
 
+\App\Helpers\MlWriteAutomation::exitIfDisabledForCli(basename(__FILE__));
+
 use App\Services\MercadoLivre\MercadoLivreAIIntegrationService;
 
 // ============================================================================
