@@ -32,4 +32,4 @@
 
 ## Fase 5 — Testes e documentação
 - [x] 5.1 Teste de integração: seller → filtros → job → worker <!-- tests/Unit/Services/CatalogCloneWizardFlowTest.php -->
-- [ ] 5.2 Documentação: guia de uso (limites, boas práticas, troubleshooting)
+- [x] 5.2 Documentação: guia de uso (limites, boas práticas, troubleshooting) <!-- docs/guides/COMPETITOR_CLONE_WIZARD.md -->

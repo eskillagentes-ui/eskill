@@ -62,8 +62,10 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
 <div class="source-input-group">
     <div class="alert alert-info mb-3" role="alert">
         <i class="bi bi-info-circle me-2"></i>
-        <strong>Nota:</strong> A busca por Seller ID só funciona para suas próprias contas vinculadas ao sistema.
-        Para clonar anúncios de concorrentes, use a opção "Lista de Item IDs".
+        <strong>Contas próprias:</strong> use Seller ID ou Conta Origem acima.
+        <strong>Concorrentes:</strong> use o
+        <a href="/dashboard/catalog/clone-wizard" class="alert-link fw-semibold">Wizard Concorrente</a>
+        (filtros por categoria/marca, prévia de preço e clone em massa com modo seguro).
     </div>
     <div class="row align-items-end g-3">
         <div class="col-md-3">
@@ -239,7 +241,7 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
                     <option value="active">Ativo</option>
                 </select>
             </div>
-            
+
             <!-- Guardrails de Segurança -->
             <div class="mb-3">
                 <label class="form-label small fw-semibold">Opções de Conteúdo</label>
@@ -260,7 +262,7 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
                     </label>
                 </div>
             </div>
-            
+
             <div class="d-grid gap-2">
                 <button class="btn btn-outline-primary" id="btn-price-preview" disabled>
                     <i class="bi bi-cash-coin"></i> Preview de Preços
@@ -390,7 +392,7 @@ const CloneBatch = {
         this.loadAccounts();
         this.loadTemplates();
         this.bindEvents();
-        
+
         // Mostrar container de conta por padrão (source-type agora é 'account')
         document.getElementById('seller-input-container').classList.add('d-none');
         document.getElementById('items-input-container').classList.add('d-none');
@@ -400,11 +402,11 @@ const CloneBatch = {
     async loadTemplates() {
         try {
             const data = await requestJson('/api/catalog/clone/templates');
-            
+
             if (data.status === 'success' && data.templates) {
                 this.templates = data.templates;
                 const select = document.getElementById('clone-template');
-                
+
                 data.templates.forEach(t => {
                     const option = document.createElement('option');
                     option.value = t.slug;
@@ -422,7 +424,7 @@ const CloneBatch = {
         const descEl = document.getElementById('template-description');
         const manualPricing = document.getElementById('manual-pricing-section');
         const manualStatus = document.getElementById('manual-status-section');
-        
+
         if (slug) {
             const template = this.templates.find(t => t.slug === slug);
             if (template) {
@@ -520,16 +522,16 @@ const CloneBatch = {
     async loadAccounts() {
         try {
 const data = await requestJson('/api/auth/accounts');
-            
+
             if (data.accounts) {
                 const targetSelect = document.getElementById('target-account');
                 const sourceSelect = document.getElementById('source-account');
-                
+
                 data.accounts.forEach(account => {
                     targetSelect.innerHTML += `<option value="${account.id}" data-seller-id="${account.ml_user_id}">${account.nickname}</option>`;
                     sourceSelect.innerHTML += `<option value="${account.id}" data-seller-id="${account.ml_user_id}">${account.nickname}</option>`;
                 });
-                
+
                 // Adicionar evento de mudança para carregar itens da conta
                 sourceSelect.addEventListener('change', (e) => {
                     const selected = e.target.options[e.target.selectedIndex];
@@ -716,7 +718,7 @@ const data = await requestJson('/api/auth/accounts');
                 this.brands = data.facets?.brands || {};
                 this.categories = data.facets?.categories || {};
                 this.totalItems = data.total || 0;
-                
+
                 this.updateStats({
                     total: data.total,
                     catalog: data.summary?.catalog || 0,
@@ -724,7 +726,7 @@ const data = await requestJson('/api/auth/accounts');
                     brands: Object.keys(this.brands).length,
                     categories: Object.keys(this.categories).length
                 });
-                
+
                 this.renderCategories();
                 this.renderBrands();
                 this.renderItems();
@@ -792,10 +794,10 @@ const data = await requestJson('/api/auth/accounts');
                 this.activeCategory = el.dataset.category || null;
                 container.querySelectorAll('.brand-item').forEach(b => b.classList.remove('active'));
                 el.classList.add('active');
-                
+
                 // Sync top select
                 filterSelect.value = this.activeCategory || '';
-                
+
                 this.renderItems();
             });
         });
@@ -821,7 +823,7 @@ const data = await requestJson('/api/auth/accounts');
     renderBrands() {
         const container = document.getElementById('brands-list');
         const filterSelect = document.getElementById('filter-brand');
-        
+
         if (Object.keys(this.brands).length === 0) {
             container.innerHTML = '<div class="empty-state"><p class="mb-0 text-muted">Nenhuma marca encontrada</p></div>';
             filterSelect.innerHTML = '<option value="">Todas Marcas</option>';
@@ -908,8 +910,8 @@ const data = await requestJson('/api/auth/accounts');
 
         // Filter by search
         if (searchTerm) {
-            filteredItems = filteredItems.filter(item => 
-                item.title.toLowerCase().includes(searchTerm) || 
+            filteredItems = filteredItems.filter(item =>
+                item.title.toLowerCase().includes(searchTerm) ||
                 item.id.toLowerCase().includes(searchTerm)
             );
         }
@@ -922,8 +924,8 @@ const data = await requestJson('/api/auth/accounts');
         let html = '';
         for (const item of filteredItems) {
             const isSelected = this.selectedItems.has(item.id);
-            const catalogBadge = item.is_catalog 
-                ? '<span class="badge-catalog">Catálogo</span>' 
+            const catalogBadge = item.is_catalog
+                ? '<span class="badge-catalog">Catálogo</span>'
                 : '<span class="badge-non-catalog">Não-Catálogo</span>';
 
             html += `
@@ -948,8 +950,8 @@ const data = await requestJson('/api/auth/accounts');
             html += `
                 <div class="load-more-container text-center py-3">
                     <button type="button" class="btn btn-outline-primary" id="load-more-btn" ${this.isLoadingMore ? 'disabled' : ''}>
-                        ${this.isLoadingMore 
-                            ? '<span class="spinner-border spinner-border-sm me-2"></span>Carregando...' 
+                        ${this.isLoadingMore
+                            ? '<span class="spinner-border spinner-border-sm me-2"></span>Carregando...'
                             : `<i class="bi bi-arrow-down-circle me-2"></i>Carregar Mais (${this.items.length} de ${this.totalItems})`}
                     </button>
                 </div>
@@ -1029,8 +1031,8 @@ const data = await requestJson('/api/auth/accounts');
             filteredItems = filteredItems.filter(item => item.is_catalog);
         }
         if (searchTerm) {
-            filteredItems = filteredItems.filter(item => 
-                item.title.toLowerCase().includes(searchTerm) || 
+            filteredItems = filteredItems.filter(item =>
+                item.title.toLowerCase().includes(searchTerm) ||
                 item.id.toLowerCase().includes(searchTerm)
             );
         }
@@ -1069,7 +1071,7 @@ const data = await requestJson('/api/auth/accounts');
         for (const [id, item] of this.selectedItems) {
             const badge = item.is_catalog ? 'C' : 'NC';
             const badgeClass = item.is_catalog ? 'bg-success' : 'bg-warning text-dark';
-            
+
             html += `
                 <div class="selected-item" data-id="${id}">
                     <span class="badge ${badgeClass}" style="font-size: 0.65rem;">${badge}</span>
@@ -1285,10 +1287,10 @@ const data = await requestJson('/api/auth/accounts');
         `;
 
         for (const result of results) {
-            const statusBadge = result.can_clone 
+            const statusBadge = result.can_clone
                 ? '<span class="badge bg-success">OK</span>'
                 : '<span class="badge bg-danger">Bloqueado</span>';
-            
+
             const typeBadge = result.is_catalog
                 ? '<span class="badge bg-success">Catálogo</span>'
                 : '<span class="badge bg-warning text-dark">Não-Cat.</span>';
@@ -1344,13 +1346,13 @@ const data = await requestJson('/api/auth/accounts');
 
         // Confirmar se vai copiar conteúdo protegido
         if (includePictures || includeDescription) {
-            const confirmMsg = 'ATENÇÃO: Você optou por copiar ' + 
-                (includePictures && includeDescription ? 'imagens e descrição' : 
-                 includePictures ? 'imagens' : 'descrição') + 
+            const confirmMsg = 'ATENÇÃO: Você optou por copiar ' +
+                (includePictures && includeDescription ? 'imagens e descrição' :
+                 includePictures ? 'imagens' : 'descrição') +
                 ' do anúncio original.\n\n' +
                 'Isso pode violar direitos autorais e as políticas do Mercado Livre.\n\n' +
                 'Tem certeza que deseja continuar?';
-            
+
             if (!confirm(confirmMsg)) {
                 return;
             }
@@ -1433,9 +1435,9 @@ const data = await requestJson('/api/auth/accounts');
                 if (['completed', 'failed'].includes(job.status)) {
                     document.getElementById('job-spinner').style.display = 'none';
                     document.getElementById('job-footer').style.display = 'block';
-                    document.getElementById('job-status-text').textContent = 
+                    document.getElementById('job-status-text').textContent =
                         job.status === 'completed' ? 'Concluído!' : 'Finalizado com erros';
-                    
+
                     // Clear selection on completion
                     this.clearSelection();
                 } else {

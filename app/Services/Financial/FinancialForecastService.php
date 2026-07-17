@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services\Financial;
 
+use App\Helpers\DebugAgentLog;
+use App\Helpers\SessionHelper;
 use App\Services\Financial\HasFinancialDependencies;
 use PDO;
 
@@ -195,7 +197,33 @@ class FinancialForecastService
 
     public function calculateFinancialForecast(int $monthsAhead = 3): array
     {
-        // Buscar dados históricos dos últimos 6 meses
+        $whereConditions = [
+            "status = 'paid'",
+            'date_created >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)',
+        ];
+        $params = [];
+
+        if ($this->accountId) {
+            $whereConditions[] = 'ml_account_id = :account_id';
+            $params['account_id'] = $this->accountId;
+        }
+
+        $userId = SessionHelper::getUserId();
+        if ($userId) {
+            $whereConditions[] = 'user_id = :user_id';
+            $params['user_id'] = $userId;
+        }
+
+        $whereSql = implode(' AND ', $whereConditions);
+
+        // #region agent log
+        DebugAgentLog::write('A', 'FinancialForecastService::calculateFinancialForecast', 'forecast_query_scope', [
+            'accountId' => $this->accountId,
+            'userId' => $userId,
+            'whereSql' => $whereSql,
+        ]);
+        // #endregion
+
         $stmt = $this->db->prepare("
             SELECT
                 DATE_FORMAT(date_created, '%Y-%m') as month,
@@ -203,15 +231,19 @@ class FinancialForecastService
                 SUM(total_amount) as revenue,
                 AVG(total_amount) as avg_ticket
             FROM ml_orders
-            WHERE ml_account_id = :account_id
-            AND status = 'paid'
-            AND date_created >= DATE_SUB(CURDATE(), INTERVAL 6 MONTH)
+            WHERE {$whereSql}
             GROUP BY DATE_FORMAT(date_created, '%Y-%m')
             ORDER BY month ASC
         ");
 
-        $stmt->execute(['account_id' => $this->accountId]);
+        $stmt->execute($params);
         $history = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        // #region agent log
+        DebugAgentLog::write('B', 'FinancialForecastService::calculateFinancialForecast', 'forecast_history_count', [
+            'historyMonths' => count($history),
+        ]);
+        // #endregion
 
         if (count($history) < 3) {
             return ['error' => 'Dados insuficientes para projeção (mínimo 3 meses)'];

@@ -267,6 +267,7 @@ $router->get('api/financials/mp/reports/ready', 'App\Controllers\FinancialReport
 
 // Financial Forecasting & Goals
 $router->get('api/financials/forecast', 'App\Controllers\FinancialReportController', 'getFinancialForecast');
+$router->post('api/debug/agent-log', 'App\Controllers\FinancialReportController', 'agentDebugLog');
 $router->get('api/financials/goals/progress', 'App\Controllers\FinancialReportController', 'getGoalProgress');
 
 // Withdrawals & Alerts

@@ -112,7 +112,11 @@ self.addEventListener('fetch', (event) => {
 
     // Modo de emergência: sempre rede para evitar loops por cache/offline antigo
     if (EMERGENCY_NETWORK_ONLY) {
-        event.respondWith(fetch(request));
+        event.respondWith(
+            fetch(request).catch((error) => {
+                throw error;
+            })
+        );
         return;
     }
 

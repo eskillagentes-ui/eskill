@@ -351,8 +351,59 @@ class LoggerService extends AbstractLogger
      */
     private function appendLine(string $filePath, string $line): void
     {
+        $directoryPath = dirname($filePath);
+        $canWrite = is_file($filePath) ? is_writable($filePath) : is_writable($directoryPath);
+
+        if (!$canWrite) {
+            // #region agent log
+            @file_put_contents(
+                dirname(__DIR__, 2) . '/.cursor/debug-7ddb1f.log',
+                json_encode([
+                    'sessionId' => '7ddb1f',
+                    'runId' => 'post-fix',
+                    'hypothesisId' => 'H11',
+                    'location' => 'app/Services/LoggerService.php:352-359',
+                    'message' => 'Logger write failed; request preserved',
+                    'data' => [
+                        'file_path' => $filePath,
+                        'is_writable' => is_writable($filePath),
+                        'dir_writable' => is_writable($directoryPath),
+                        'precheck_blocked_write' => true,
+                    ],
+                    'timestamp' => (int) round(microtime(true) * 1000),
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n",
+                FILE_APPEND
+            );
+            // #endregion
+
+            error_log('LoggerService fallback: unable to write log file ' . $filePath);
+            return;
+        }
+
         if (@file_put_contents($filePath, $line, FILE_APPEND | LOCK_EX) === false) {
-            throw new \RuntimeException('Nao foi possivel escrever no arquivo de log: ' . $filePath);
+            // #region agent log
+            @file_put_contents(
+                dirname(__DIR__, 2) . '/.cursor/debug-7ddb1f.log',
+                json_encode([
+                    'sessionId' => '7ddb1f',
+                    'runId' => 'post-fix',
+                    'hypothesisId' => 'H11',
+                    'location' => 'app/Services/LoggerService.php:372-389',
+                    'message' => 'Logger write failed after writable pre-check',
+                    'data' => [
+                        'file_path' => $filePath,
+                        'is_writable' => is_writable($filePath),
+                        'dir_writable' => is_writable($directoryPath),
+                        'precheck_blocked_write' => false,
+                    ],
+                    'timestamp' => (int) round(microtime(true) * 1000),
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n",
+                FILE_APPEND
+            );
+            // #endregion
+
+            error_log('LoggerService fallback: write failed after pre-check for ' . $filePath);
+            return;
         }
 
         @chmod($filePath, 0640);

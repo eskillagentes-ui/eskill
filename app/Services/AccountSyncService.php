@@ -55,8 +55,61 @@ class AccountSyncService
             'needs_reconnect' => false,
             'reconnect_url' => null,
         ];
+        $lockName = sprintf('account_sync_%d', $accountId);
+        $lockAcquired = false;
 
         try {
+            $lockAcquired = $this->acquireSyncLock($lockName);
+            if (!$lockAcquired) {
+                $result['error'] = 'Sincronização já em andamento para esta conta. Aguarde a conclusão e tente novamente.';
+                $result['error_code'] = 'sync_in_progress';
+                $result['steps'][] = [
+                    'step' => 'acquire_sync_lock',
+                    'status' => 'error',
+                    'error' => $result['error'],
+                ];
+
+                // #region agent log
+                @file_put_contents(
+                    dirname(__DIR__, 2) . '/.cursor/debug-7ddb1f.log',
+                    json_encode([
+                        'sessionId' => '7ddb1f',
+                        'runId' => 'post-fix',
+                        'hypothesisId' => 'H14',
+                        'location' => 'app/Services/AccountSyncService.php:syncAccount',
+                        'message' => 'Sync lock denied; sync already running',
+                        'data' => [
+                            'account_id' => $accountId,
+                            'lock_name' => $lockName,
+                        ],
+                        'timestamp' => (int) round(microtime(true) * 1000),
+                    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n",
+                    FILE_APPEND
+                );
+                // #endregion
+
+                return $result;
+            }
+
+            // #region agent log
+            @file_put_contents(
+                dirname(__DIR__, 2) . '/.cursor/debug-7ddb1f.log',
+                json_encode([
+                    'sessionId' => '7ddb1f',
+                    'runId' => 'post-fix',
+                    'hypothesisId' => 'H14',
+                    'location' => 'app/Services/AccountSyncService.php:syncAccount',
+                    'message' => 'Sync lock acquired',
+                    'data' => [
+                        'account_id' => $accountId,
+                        'lock_name' => $lockName,
+                    ],
+                    'timestamp' => (int) round(microtime(true) * 1000),
+                ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n",
+                FILE_APPEND
+            );
+            // #endregion
+
             // 1. Validar que a conta existe
             $account = $this->getAccount($accountId);
             if (!$account) {
@@ -172,9 +225,36 @@ class AccountSyncService
                 'error' => $e->getMessage(),
                 'trace' => $e->getTraceAsString(),
             ]);
+        } finally {
+            if ($lockAcquired) {
+                $this->releaseSyncLock($lockName);
+            }
         }
 
         return $result;
+    }
+
+    private function acquireSyncLock(string $lockName): bool
+    {
+        $stmt = $this->db->prepare('SELECT GET_LOCK(:lock_name, 0) AS lock_acquired');
+        $stmt->execute(['lock_name' => $lockName]);
+        $value = $stmt->fetchColumn();
+
+        return (int) $value === 1;
+    }
+
+    private function releaseSyncLock(string $lockName): void
+    {
+        try {
+            $stmt = $this->db->prepare('SELECT RELEASE_LOCK(:lock_name)');
+            $stmt->execute(['lock_name' => $lockName]);
+        } catch (\Throwable $e) {
+            // Avoid sync failure if lock release fails.
+            $this->logger->warning('ACCOUNT_SYNC_RELEASE_LOCK_WARNING', 'Falha ao liberar lock de sincronização', [
+                'lock_name' => $lockName,
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     /**

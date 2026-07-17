@@ -17,6 +17,10 @@ class Database
         // The connection details come from environment variables
         // Prefer TCP default to avoid implicit unix socket behavior (common source of failures in containers/WSL).
         $host = $_ENV['DB_HOST'] ?? getenv('DB_HOST') ?: '127.0.0.1';
+        // Evita PDO via socket Unix quando MySQL escuta só em TCP (erro 2002 "No such file or directory").
+        if ($host === 'localhost') {
+            $host = '127.0.0.1';
+        }
         $port = $_ENV['DB_PORT'] ?? getenv('DB_PORT') ?: '3306';
         $dbname = $_ENV['DB_DATABASE'] ?? $_ENV['DB_NAME'] ?? getenv('DB_DATABASE') ?? getenv('DB_NAME') ?: 'meli';
         $username = $_ENV['DB_USERNAME'] ?? $_ENV['DB_USER'] ?? getenv('DB_USERNAME') ?? getenv('DB_USER');

@@ -16,6 +16,36 @@ define('APP_PATH', ROOT_PATH . '/app');
 define('CONFIG_PATH', ROOT_PATH . '/config');
 define('STORAGE_PATH', ROOT_PATH . '/storage');
 
+// #region agent log
+$__agentRequestStartedAt = microtime(true);
+$__agentRequestUri = (string) ($_SERVER['REQUEST_URI'] ?? '');
+$__agentRequestMethod = (string) ($_SERVER['REQUEST_METHOD'] ?? 'GET');
+register_shutdown_function(static function () use ($__agentRequestStartedAt, $__agentRequestUri, $__agentRequestMethod): void {
+    $lastError = error_get_last();
+    $payload = [
+        'sessionId' => '7ddb1f',
+        'runId' => 'pre-fix',
+        'hypothesisId' => 'H6',
+        'location' => 'public/index.php:startup-shutdown',
+        'message' => 'Request shutdown summary',
+        'data' => [
+            'request_uri' => $__agentRequestUri,
+            'method' => $__agentRequestMethod,
+            'status_code' => http_response_code(),
+            'duration_ms' => (int) round((microtime(true) - $__agentRequestStartedAt) * 1000),
+            'memory_peak_mb' => round(memory_get_peak_usage(true) / 1048576, 2),
+            'last_error' => $lastError,
+        ],
+        'timestamp' => (int) round(microtime(true) * 1000),
+    ];
+    @file_put_contents(
+        ROOT_PATH . '/.cursor/debug-7ddb1f.log',
+        json_encode($payload, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n",
+        FILE_APPEND
+    );
+});
+// #endregion
+
 // Carregar autoload do Composer
 require_once ROOT_PATH . '/vendor/autoload.php';
 
@@ -59,6 +89,25 @@ try {
     require_once APP_PATH . '/Services/StartupValidator.php';
     \App\Services\StartupValidator::validate();
 } catch (Throwable $e) {
+    // #region agent log
+    @file_put_contents(
+        ROOT_PATH . '/.cursor/debug-7ddb1f.log',
+        json_encode([
+            'sessionId' => '7ddb1f',
+            'runId' => 'pre-fix',
+            'hypothesisId' => 'H1',
+            'location' => 'public/index.php:58-75',
+            'message' => 'Startup validation exception',
+            'data' => [
+                'exception' => get_class($e),
+                'message' => $e->getMessage(),
+            ],
+            'timestamp' => (int) round(microtime(true) * 1000),
+        ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n",
+        FILE_APPEND
+    );
+    // #endregion
+
     // Try to write to structured log if available, otherwise plain error
     try {
         $logger = new \App\Services\StructuredLogService();
@@ -246,6 +295,26 @@ if ($scriptDir !== '/' && strpos($path, $scriptDir) === 0) {
 }
 $path = '/' . ltrim($path, '/');
 
+// #region agent log
+@file_put_contents(
+    ROOT_PATH . '/.cursor/debug-7ddb1f.log',
+    json_encode([
+        'sessionId' => '7ddb1f',
+        'runId' => 'pre-fix',
+        'hypothesisId' => 'H7',
+        'location' => 'public/index.php:249-253',
+        'message' => 'Route classification',
+        'data' => [
+            'path' => $path,
+            'is_api' => strpos($path, '/api/') === 0,
+            'is_webhook' => strpos($path, '/webhook/') === 0,
+        ],
+        'timestamp' => (int) round(microtime(true) * 1000),
+    ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n",
+    FILE_APPEND
+);
+// #endregion
+
 // Validações e Middlewares globais
 $isApi = strpos($path, '/api/') === 0;
 $isWebhook = strpos($path, '/webhook/') === 0;
@@ -329,7 +398,8 @@ if ($isApi) {
 // ou (c) API que lida com própria autenticação internamente (render harness).
 // API routes com autenticação via session cookie continuam sujeitas a CSRF.
 $isCsrfExempt = $isWebhookRoute || ($isApi && $hasBearerToken)
-    || strpos($path, '/api/render') === 0;
+    || strpos($path, '/api/render') === 0
+    || strpos($path, '/api/debug/agent-log') === 0;
 
 if (!$isCsrfExempt && in_array($_SERVER['REQUEST_METHOD'], ['POST', 'PUT', 'DELETE', 'PATCH'])) {
     $csrf = new App\Middleware\CsrfMiddleware();

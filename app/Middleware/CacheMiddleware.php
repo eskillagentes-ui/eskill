@@ -192,6 +192,7 @@ class CacheMiddleware
             '/register',
             '/auth/',
             '/security',
+            '/dashboard/financials',
         ];
 
         foreach ($neverCache as $pattern) {

@@ -1,0 +1,2176 @@
+ChatGPT
+
+
+
+
+segunda-feira 19:55
+C48112C0-5ADA-4BCE-9C44-73EB0CE67F03.jpeg
+D225BCA6-8381-491C-AE07-436B5637D3C0.jpeg
+D6BFE7A1-E7BD-4DFD-8A6C-1F2E667925D0.jpeg
+5D36E9EF-D2A1-42C6-933C-AA7968E2EE37.jpeg
+B701FADA-5974-4947-85A4-C2E48C99D970.jpeg
+C4D2848F-5A40-46F1-91AE-81BF76FD1F18.jpeg
+68ECCDFC-596C-4980-A765-D76379A8DD28.jpeg
+
+Pensou por 3m 22s
+Fiz a pesquisa. A conclusão mais provável é esta:
+
+O que realmente aparece no anúncio
+O sistema mostrado não parece ser um ERP completo que controla diretamente vendas, estoque, anúncios e pedidos de mil contas do Mercado Livre. Ele parece ser um CRM operacional interno, provavelmente chamado de Polo Fácil, criado para organizar empresas, consultores e participantes do Projeto Polos do Mercado Livre.
+
+O próprio anúncio afirma que o sistema foi “desenvolvido via IA” e que “gerencia mais de mil contas no Mercado Livre”. Essa quantidade é uma declaração comercial da própria Ecommerce Puro; não encontrei documentação independente que comprove as mil integrações ativas.
+
+O Mercado Livre mantém oficialmente o Projeto Polos, voltado a conectar lojistas de polos especializados ao marketplace. A identificação “Polo Fashion Kids Blumenau”, visível na tela, combina diretamente com esse contexto.
+
+Minha leitura é que “gerenciar mil contas” provavelmente significa:
+
+acompanhar mil vendedores ou empresas atendidas;
+
+controlar prospecção, implantação e evolução dos clientes;
+
+distribuir tarefas entre consultores;
+
+acompanhar reuniões, responsáveis, conversão e status;
+
+concentrar informações de diferentes contas do Mercado Livre.
+
+Não significa necessariamente que o sistema altera preços, estoque e anúncios de mil sellers automaticamente.
+
+O que está visível no sistema
+Pelas telas enviadas, ele contém:
+
+painel individual por empresa ou projeto;
+
+funil comercial em Kanban;
+
+etapas como base, prospecção, conexão e reunião;
+
+responsáveis por cada conta;
+
+tarefas e atividades;
+
+indicadores de conversão;
+
+operações inbound e outbound;
+
+filtros por responsável, estágio e tags;
+
+usuários e equipes;
+
+perfis e permissões;
+
+gatilhos;
+
+integrações;
+
+chaves de API;
+
+módulos de Revenue Share e Paid Hunting.
+
+Não aparecem telas típicas de um hub de marketplace, como:
+
+pedidos;
+
+estoque sincronizado;
+
+catálogo de anúncios;
+
+reputação do seller;
+
+perguntas de compradores;
+
+logística;
+
+Mercado Ads;
+
+conciliação financeira.
+
+Isso reforça a conclusão de que é principalmente um CRM de acompanhamento de contas e projetos, possivelmente com algumas integrações externas.
+
+A Ecommerce Puro se apresenta oficialmente como uma plataforma de consultoria e soluções para e-commerce e declara ter criado sistemas e automações próprios durante sua operação.
+
+Como provavelmente foi construído
+A barra do navegador confirma que o projeto estava sendo editado no Lovable. O título visível é semelhante a “Projeto Polo Fácil — Lovable”.
+
+A arquitetura provável seria:
+
+Interface
+
+Lovable, usando componentes gerados por IA. Os padrões mais comuns da plataforma são React, Vite, Tailwind CSS e shadcn/ui. Projetos novos passaram também a utilizar TanStack Start como padrão, enquanto projetos anteriores continuam normalmente em React com Vite.
+
+Banco de dados e autenticação
+
+Provavelmente Lovable Cloud ou Supabase. O Lovable consegue criar o esquema do banco, migrações, autenticação, funções de servidor e conexão da interface com os dados. O Supabase oferece PostgreSQL, autenticação, armazenamento, APIs, funções e recursos em tempo real.
+
+Automação
+
+Pode utilizar funções do próprio backend, webhooks ou ferramentas como n8n. Não encontrei evidência suficiente para afirmar que o sistema mostrado utiliza n8n.
+
+Código e versionamento
+
+Uma implantação profissional deveria sincronizar o projeto com GitHub. O Lovable permite sincronização bidirecional, revisão do código, trabalho local, backup e implantação fora da plataforma.
+
+Integração com Mercado Livre
+
+Para controlar dados reais de sellers, seria necessário registrar uma aplicação no Mercado Livre Developers e integrar cada conta autorizada pela API oficial. O sistema precisaria armazenar tokens, receber eventos, sincronizar informações e controlar falhas sem depender de automação do navegador. O Mercado Livre mantém um DevCenter específico para aplicações e integrações.
+
+Onde está a inteligência artificial
+A expressão “desenvolvido via IA” provavelmente significa que a IA ajudou a programar o sistema no Lovable.
+
+Nas imagens não aparece claramente uma IA tomando decisões ou operando as contas. Portanto, existem duas coisas diferentes:
+
+Sistema criado com IA: Lovable gerou parte da interface, banco e código.
+
+Sistema com IA interna: assistente que analisa dados, sugere ações, resume contas ou executa tarefas.
+
+O anúncio comprova claramente a primeira situação. A segunda não pode ser confirmada pelas telas.
+
+Quanto custa a infraestrutura
+Valores aproximados em 13 de julho de 2026, antes de impostos, IOF e serviços de WhatsApp:
+
+Serviço	Faixa aproximada
+Lovable Pro, 100 créditos	US$ 25, cerca de R$ 128/mês
+Lovable Pro, 200 créditos	US$ 50, cerca de R$ 257/mês
+Supabase Pro	US$ 25, cerca de R$ 128/mês
+n8n Cloud Starter	€20, cerca de R$ 117/mês
+n8n Cloud Pro	€50, cerca de R$ 292/mês
+Os planos oficiais atuais do Lovable começam em US$ 25 para 100 créditos mensais. O Supabase Pro custa US$ 25 mensais, e o n8n Cloud começa em €20 mensais no pagamento anual.
+
+Para as conversões, considerei aproximadamente R$ 5,13 por dólar e R$ 5,84 por euro.
+
+Uma implantação pequena poderia operar entre R$ 500 e R$ 1.500 mensais. Uma implantação com mais integrações, processamento, monitoramento e vários usuários provavelmente ficaria entre R$ 1.500 e R$ 5.000 mensais, sem considerar tarifas do WhatsApp, modelos de IA e equipe técnica.
+
+Quanto custaria reproduzir
+Estas são estimativas próprias de engenharia, não preços informados pela Ecommerce Puro.
+
+Protótipo visual semelhante
+Inclui login simples, dashboard, Kanban, empresas, tarefas e dados cadastrados manualmente.
+
+R$ 10 mil a R$ 25 mil
+Prazo estimado: duas a quatro semanas.
+
+É suficiente para demonstração, mas não para operar dados sensíveis ou várias empresas em produção.
+
+MVP operacional para Ava Motors, Facility e Falcão
+Inclui:
+
+empresas e unidades separadas;
+
+importação de Excel;
+
+cadastro de leads;
+
+Kanban comercial;
+
+tarefas;
+
+responsáveis;
+
+histórico de atividades;
+
+dashboards;
+
+usuários e permissões;
+
+integração básica com Hermes ou n8n;
+
+registro dos contatos realizados.
+
+R$ 40 mil a R$ 90 mil
+Prazo estimado: seis a doze semanas.
+
+Sistema profissional integrado
+Inclui tudo do MVP, mais:
+
+integração oficial com Mercado Livre;
+
+conexão de várias contas;
+
+integração com WhatsApp;
+
+renovação e proteção de tokens;
+
+webhooks;
+
+automações;
+
+IA para qualificação e resumo;
+
+logs de auditoria;
+
+testes;
+
+backups;
+
+monitoramento;
+
+tratamento de falhas;
+
+segurança multiempresa.
+
+R$ 100 mil a R$ 250 mil
+Prazo estimado: quatro a oito meses.
+
+Plataforma preparada para aproximadamente mil contas
+Para realmente sincronizar e operar mil contas, seria necessário adicionar:
+
+filas de processamento;
+
+controle de limites das APIs;
+
+reprocessamento automático;
+
+observabilidade;
+
+banco de eventos;
+
+isolamento de dados por cliente;
+
+suporte técnico;
+
+política de segurança;
+
+recuperação de desastres;
+
+ambientes separados de desenvolvimento e produção.
+
+R$ 250 mil a R$ 600 mil ou mais
+Prazo provável: seis a doze meses.
+
+A manutenção técnica poderia ficar entre R$ 10 mil e R$ 40 mil mensais, dependendo do volume e do nível de suporte.
+
+Principal risco de reproduzir somente com prompts
+O Lovable consegue acelerar muito a criação visual, mas uma interface funcionando não garante segurança.
+
+O Supabase recomenda Row Level Security para controlar exatamente quais registros cada usuário pode consultar. Chaves administrativas podem ignorar essas regras e nunca devem aparecer no navegador.
+
+Para a Ava Motors, o sistema deveria obrigatoriamente ter:
+
+separação entre Ava, Facility e Falcão;
+
+permissões por atendente;
+
+histórico de todas as alterações;
+
+tokens e chaves somente no servidor;
+
+backup diário;
+
+GitHub desde o primeiro dia;
+
+ambiente de testes separado;
+
+integração oficial, sem automação insegura do navegador.
+
+Minha recomendação para sua operação
+Não vale começar tentando copiar a plataforma inteira nem suportar mil contas.
+
+A primeira versão adequada para você seria:
+
+CRM multiempresa + importação da planilha de leads + Kanban + duas atendentes + WhatsApp + Hermes + tarefas e relatórios.
+
+Depois entrariam:
+
+integração com Mercado Livre;
+
+acompanhamento de anúncios e vendas;
+
+IA para qualificar leads;
+
+automação de mensagens;
+
+dashboards por loja;
+
+expansão para mais contas.
+
+Essa primeira versão profissional provavelmente ficaria entre R$ 45 mil e R$ 80 mil, com custo operacional inicial próximo de R$ 800 a R$ 2.000 por mês. O visual do anúncio é relativamente simples; a parte cara é a integração, a segurança e a automação confiável.
+
+
+Pensou por 1m 16s
+Continuando a investigação, o ponto principal ficou mais claro: o sistema do anúncio não parece ser um “gerenciador completo do Mercado Livre”. Ele é, com maior probabilidade, uma plataforma interna para controlar o relacionamento, a implantação e o desempenho de empresas participantes do Projeto Polos.
+
+O que consegui confirmar
+A Ecommerce Puro participa oficialmente de projetos de acompanhamento de novos sellers do Mercado Livre. Em sua própria página, a empresa afirma que foi selecionada para gerenciar e acompanhar gratuitamente vendedores de moda do Vale do Itajaí durante a entrada no marketplace.
+
+O Mercado Livre também mantém publicamente o Projeto Polos, destinado a conectar fabricantes, distribuidores e vendedores de regiões especializadas ao marketplace. Existem frentes específicas para moda, móveis, brinquedos e outros segmentos.
+
+Isso combina diretamente com o que aparece nas imagens:
+
+“Polo Fashion Kids Blumenau”;
+
+empresas organizadas em colunas;
+
+responsáveis por cada conta;
+
+etapas de prospecção e implantação;
+
+tarefas e reuniões;
+
+indicadores de conversão;
+
+módulos de Outbound e Inbound;
+
+usuários, permissões, gatilhos e integrações;
+
+aba do navegador com “Projeto Polo Fácil — Lovable”.
+
+Portanto, a leitura mais consistente é:
+
+Cada “conta” representa uma empresa ou seller acompanhado pela consultoria, e não necessariamente uma conexão técnica completa com todas as operações daquela conta do Mercado Livre.
+
+A declaração de “mais de mil contas” pode significar mil empresas cadastradas, acompanhadas ou distribuídas entre consultores. As imagens não comprovam que o sistema sincroniza pedidos, estoque, anúncios e faturamento de todas elas.
+
+O que não encontrei publicamente
+Não localizei:
+
+página comercial do “Polo Fácil”;
+
+manual de utilização;
+
+documentação técnica;
+
+repositório público;
+
+integração pública com Mercado Livre;
+
+aplicativo disponível para contratação;
+
+evidência de que a plataforma é vendida separadamente.
+
+Isso reforça a possibilidade de ser uma ferramenta interna da Ecommerce Puro, desenvolvida especificamente para sua equipe e para os projetos operados com o Mercado Livre.
+
+Engenharia reversa funcional
+Com base nas telas, o sistema provavelmente funciona assim:
+
+Empresa entra no Projeto Polo
+        ↓
+Cadastro do CNPJ e responsáveis
+        ↓
+Distribuição para um consultor
+        ↓
+Contato e reunião inicial
+        ↓
+Criação ou diagnóstico da conta Mercado Livre
+        ↓
+Treinamento e implantação
+        ↓
+Publicação dos primeiros anúncios
+        ↓
+Primeiras vendas
+        ↓
+Acompanhamento de desempenho
+        ↓
+Conclusão ou continuidade do projeto
+O Kanban seria a parte central. Cada cartão representa uma empresa, e cada coluna representa uma fase.
+
+Um exemplo provável das etapas:
+
+Base
+→ Prospecção
+→ Contato iniciado
+→ Conexão
+→ Reunião agendada
+→ Diagnóstico
+→ Implantação
+→ Primeiros anúncios
+→ Primeiras vendas
+→ Conta ativa
+→ Concluído
+Os números do topo da tela, como taxa de conversão, contas em determinado estágio, reuniões e médias, parecem ser calculados com base na movimentação desses cartões.
+
+Estrutura de dados provável
+Para reproduzir o sistema de forma correta, o banco teria pelo menos estas entidades:
+
+empresas
+contatos
+usuários
+equipes
+projetos
+polos
+pipelines
+etapas
+oportunidades
+tarefas
+atividades
+reuniões
+documentos
+tags
+integrações
+conexões_mercado_livre
+conversas_whatsapp
+logs_de_auditoria
+Um registro de empresa teria campos como:
+
+Razão social
+Nome fantasia
+CNPJ
+Cidade
+Estado
+Segmento
+Site
+Telefone
+WhatsApp
+E-mail
+Responsável da empresa
+Consultor responsável
+Origem do lead
+Projeto ou polo
+Situação da conta Mercado Livre
+Data de entrada
+Etapa atual
+Próxima tarefa
+Último contato
+Quantidade de anúncios
+Primeira venda
+Faturamento estimado
+Observações
+O sistema provavelmente também utiliza tags para identificar situações como:
+
+Conta nova
+Sem cadastro
+Sem catálogo
+Aguardando documentos
+Reunião realizada
+Anúncios publicados
+Primeira venda
+Sem resposta
+Conta paralisada
+Precisa de suporte
+Como adaptar o conceito para suas empresas
+Para você, não seria adequado copiar exatamente o fluxo da Ecommerce Puro. O ideal seria utilizar a mesma base tecnológica, mas criar três operações separadas.
+
+Ava Motors — prospecção B2B
+Lista importada
+→ CNPJ validado
+→ Lead qualificado
+→ Primeiro contato
+→ Cliente respondeu
+→ Catálogo enviado
+→ Cotação solicitada
+→ Negociação
+→ Pedido realizado
+→ Cliente recorrente
+Informações importantes:
+
+CNPJ;
+
+CNAE;
+
+localização;
+
+tipo de loja;
+
+quantidade estimada de compras;
+
+marcas vendidas;
+
+atendente responsável;
+
+histórico de mensagens;
+
+produtos de interesse;
+
+última cotação;
+
+próxima ação.
+
+Facility — operação B2C e marketplace
+Produto em pesquisa
+→ Produto aprovado
+→ Imagens em produção
+→ Cadastro em preparação
+→ Anúncio publicado
+→ Campanha ativada
+→ Primeiras vendas
+→ Otimização
+→ Produto escalado
+Informações importantes:
+
+SKU;
+
+custo;
+
+preço;
+
+margem;
+
+Mercado Livre;
+
+Shopee;
+
+estoque;
+
+imagens;
+
+título;
+
+categoria;
+
+anúncios;
+
+campanhas;
+
+vendas;
+
+avaliações;
+
+problemas detectados.
+
+Falcão — nova operação
+A Falcão poderia utilizar o mesmo processo da Facility, mas permanecer completamente separada em permissões, indicadores, usuários e contas de marketplace.
+
+O usuário poderia alternar entre as empresas:
+
+Ava Motors
+Facility
+Falcão
+Um atendente da Ava Motors não deveria visualizar automaticamente dados da Facility. Essa separação precisa ocorrer no banco, e não apenas escondendo menus na interface.
+
+Arquitetura recomendada
+A estrutura profissional seria:
+
+Lovable
+Interface e desenvolvimento inicial
+        ↓
+GitHub
+Código, versões, revisão e backup
+        ↓
+Supabase/PostgreSQL
+Banco, autenticação, arquivos e permissões
+        ↓
+Backend seguro / Edge Functions
+Mercado Livre, WhatsApp, IA e serviços externos
+        ↓
+n8n
+Automação de tarefas, filas e integrações
+        ↓
+Hermes
+Análise, classificação, execução assistida e relatórios
+O Lovable pode conectar-se a um projeto Supabase próprio e gerar tabelas, migrações, funções de servidor e interface. Utilizar um Supabase próprio oferece mais controle sobre o banco e a infraestrutura.
+
+O projeto também deveria ser sincronizado com GitHub desde o início. O Lovable oferece sincronização bidirecional, permitindo revisar o código, criar branches, trabalhar localmente e implantar fora da plataforma.
+
+Segurança obrigatória
+O ponto mais perigoso de sistemas criados apenas por prompts é a falsa sensação de segurança. A interface pode funcionar perfeitamente e, ao mesmo tempo, permitir que um usuário visualize registros de outras empresas.
+
+No Supabase, a separação deve ser implementada com Row Level Security. Essas políticas controlam quais linhas cada usuário pode consultar, incluir, alterar ou excluir.
+
+Cada tabela precisaria ter um identificador como:
+
+organization_id
+Exemplo:
+
+Lead da Ava Motors:
+organization_id = ava_motors
+
+Produto da Facility:
+organization_id = facility
+
+Anúncio da Falcão:
+organization_id = falcao
+Além disso:
+
+tokens do Mercado Livre nunca ficam no navegador;
+
+chaves do WhatsApp nunca ficam no código da interface;
+
+ações importantes geram log;
+
+exclusões devem ser recuperáveis;
+
+backups devem ser automáticos;
+
+webhooks precisam validar autenticidade;
+
+tarefas automáticas precisam ter limite e reprocessamento;
+
+disparos devem exigir permissão adequada.
+
+A própria documentação do Lovable orienta que chaves sensíveis sejam mantidas como secrets no backend ou em funções do Supabase, e não inseridas diretamente no código da aplicação.
+
+Integração com WhatsApp
+Para uma operação empresarial estável, eu não recomendaria utilizar uma conexão baseada apenas em QR Code e em uma sessão semelhante ao WhatsApp Web como componente central.
+
+A Meta informa que a Cloud API é atualmente a solução preferencial para integração, enquanto a antiga API local foi encerrada.
+
+O fluxo seria:
+
+Atendente abre o lead
+        ↓
+Visualiza histórico da conversa
+        ↓
+Escolhe mensagem aprovada
+        ↓
+Sistema envia pela API
+        ↓
+Resposta chega por webhook
+        ↓
+Conversa aparece no CRM
+        ↓
+Hermes classifica a resposta
+        ↓
+Sistema sugere próxima ação
+O Hermes não deveria disparar mensagens de forma totalmente livre. O melhor modelo seria:
+
+IA prepara mensagem
+→ verifica regras
+→ atendente aprova
+→ sistema envia
+Depois de validar o processo, determinadas mensagens transacionais poderiam ser automatizadas.
+
+Integração com Mercado Livre
+A integração oficial exige uma aplicação no Mercado Livre Developers, autenticação e autorização das contas conectadas. A documentação oficial organiza recursos para anúncios, perguntas, pedidos, métricas, notificações, pagamentos e envios.
+
+Cada conta da Facility ou Falcão precisaria autorizar o sistema.
+
+Usuário clica em “Conectar Mercado Livre”
+        ↓
+É encaminhado ao Mercado Livre
+        ↓
+Autoriza a aplicação
+        ↓
+Sistema recebe autorização
+        ↓
+Token é armazenado com segurança
+        ↓
+Sincronização é iniciada
+Os primeiros dados a sincronizar deveriam ser:
+
+dados básicos do seller;
+
+anúncios ativos e pausados;
+
+vendas e pedidos;
+
+perguntas;
+
+estoque;
+
+preço;
+
+reputação e indicadores;
+
+notificações importantes.
+
+Não vale começar tentando automatizar edição de preço, estoque e anúncios. Primeiro deve existir um painel somente de leitura. As ações de escrita entram depois de a sincronização estar estável.
+
+Papel adequado do Hermes
+O Hermes poderia atuar como camada inteligente sobre o sistema.
+
+Na Ava Motors:
+
+identificar leads mais promissores;
+
+resumir históricos;
+
+classificar respostas;
+
+sugerir mensagem seguinte;
+
+detectar leads parados;
+
+criar tarefas;
+
+preparar relatório diário para o gestor.
+
+Na Facility e Falcão:
+
+detectar anúncios sem venda;
+
+comparar margem e desempenho;
+
+identificar queda de conversão;
+
+sugerir correção de título;
+
+organizar produção de imagens;
+
+alertar sobre estoque;
+
+gerar resumo por marketplace;
+
+abrir tarefas para a equipe.
+
+Exemplo:
+
+Hermes analisa diariamente:
+
+• leads sem contato há mais de dois dias;
+• clientes que responderam e não receberam retorno;
+• tarefas vencidas;
+• anúncios com queda de vendas;
+• produtos com estoque baixo;
+• campanhas com gasto elevado;
+• problemas de margem;
+• contas desconectadas.
+
+Resultado:
+
+• cria tarefas;
+• atribui responsáveis;
+• prepara mensagens;
+• envia relatório ao gestor;
+• somente executa ações críticas após aprovação.
+Ordem correta de construção
+Etapa 1 — núcleo do CRM
+Prazo estimado: duas a quatro semanas.
+
+login;
+
+Ava, Facility e Falcão;
+
+usuários e permissões;
+
+empresas e contatos;
+
+importação de Excel;
+
+Kanban;
+
+tarefas;
+
+histórico;
+
+filtros;
+
+painel básico;
+
+logs.
+
+Etapa 2 — atendimento
+Prazo estimado: duas a quatro semanas.
+
+integração com WhatsApp;
+
+caixa de entrada;
+
+modelos de mensagens;
+
+distribuição entre atendentes;
+
+lembretes;
+
+respostas sugeridas por IA;
+
+relatórios de atendimento.
+
+Etapa 3 — Mercado Livre
+Prazo estimado: quatro a oito semanas.
+
+conexão das contas;
+
+anúncios;
+
+vendas;
+
+pedidos;
+
+perguntas;
+
+estoque;
+
+indicadores;
+
+alertas.
+
+Etapa 4 — Hermes e automações
+Prazo estimado: três a seis semanas.
+
+agente supervisor;
+
+classificação automática;
+
+criação de tarefas;
+
+resumos;
+
+relatórios;
+
+regras de aprovação;
+
+alertas inteligentes.
+
+Etapa 5 — escala e estabilidade
+filas;
+
+reprocessamento;
+
+monitoramento;
+
+backups;
+
+testes automáticos;
+
+ambiente de homologação;
+
+controle de custos;
+
+auditoria de segurança.
+
+O MVP mais adequado
+A primeira versão não deveria tentar reproduzir o painel inteiro do anúncio.
+
+O escopo correto seria:
+
+CRM MULTIEMPRESA
+
+✓ Ava Motors, Facility e Falcão
+✓ Importação de Excel
+✓ Cadastro de CNPJ e contatos
+✓ Kanban configurável
+✓ Tarefas e responsáveis
+✓ Histórico completo
+✓ Duas ou mais atendentes
+✓ WhatsApp integrado
+✓ Modelos de mensagem
+✓ IA para resumo e sugestão
+✓ Dashboard de produtividade
+✓ Perfis e permissões
+✓ Logs de auditoria
+✓ GitHub e backup
+Mercado Livre entraria inicialmente apenas com Facility e Falcão, em um segundo ciclo.
+
+Conclusão atualizada
+O anúncio mostra uma implementação relevante, mas provavelmente muito menos complexa do que a frase “gerencia mais de mil contas no Mercado Livre” faz parecer.
+
+O diferencial real não é o design do painel. É a combinação de:
+
+processo comercial bem definido
++ banco centralizado
++ responsáveis claros
++ acompanhamento de tarefas
++ indicadores
++ automações
++ integração com serviços externos
+O sistema visual semelhante pode ser criado rapidamente no Lovable. Transformá-lo em uma plataforma confiável para WhatsApp, Mercado Livre, Ava Motors, Facility e Falcão exige arquitetura, regras de segurança e controle operacional fora do simples prompt.
+
+
+Pensou por 1m 35s
+Sim. Encontrei o vídeo público original da Ecommerce Puro em que eles apresentam o sistema e afirmam que ele foi desenvolvido com IA para gerenciar mais de mil contas do Mercado Livre.
+
+Porém, não encontrei uma página pública do sistema, demonstração navegável, tela de login, manual ou catálogo comercial. Tudo indica que seja uma ferramenta interna da Ecommerce Puro, construída no Lovable para administrar o Projeto Polos. A própria Ecommerce Puro informa que foi escolhida para gerenciar e acompanhar empresas que estão entrando no Mercado Livre e também declara utilizar sistemas e automações próprios.
+
+O visual que consegui identificar
+As imagens que você enviou são, até agora, o material visual mais detalhado disponível publicamente.
+
+A estrutura é aproximadamente esta:
+
+┌─────────────────────────────────────────────────────────────────┐
+│ Polo Fashion Kids Blumenau          Status: Ativo               │
+│                                                                 │
+│ Empresas | Conversão | Reuniões | Contas ativas | Indicadores  │
+├──────────────┬──────────────────────────────────────────────────┤
+│ Home         │ Outbound | Inbound | KPI | Mapa                  │
+│ Tarefas      │                                                  │
+│ Projetos     │ Busca | Novo Lead | Importação | Filtros         │
+│ Polos        │                                                  │
+│ Hunting      │ BASE        PROSPECÇÃO     CONEXÃO     REUNIÃO   │
+│ Implantação  │ ┌────────┐  ┌────────┐     ┌────────┐ ┌────────┐ │
+│ Operacional  │ │Empresa │  │Empresa │     │Empresa │ │Empresa │ │
+│              │ │Contato │  │Contato │     │Contato │ │Contato │ │
+│ Revenue      │ │WhatsApp│  │Tarefa  │     │Tags    │ │Gestor  │ │
+│ Share        │ └────────┘  └────────┘     └────────┘ └────────┘ │
+│              │                                                  │
+│ Integrações  │                                                  │
+│ Gestão       │                                                  │
+│ Usuários     │                                                  │
+│ Permissões   │                                                  │
+│ Chaves API   │                                                  │
+└──────────────┴──────────────────────────────────────────────────┘
+Visualmente, ele utiliza:
+
+fundo branco e cinza muito claro;
+
+menu lateral fixo;
+
+cartões em Kanban;
+
+indicadores numéricos no topo;
+
+etiquetas coloridas para status;
+
+avatares dos responsáveis;
+
+botões pequenos de telefone, e-mail e WhatsApp;
+
+filtros por projeto, responsável e etapa;
+
+estilo semelhante ao HubSpot, Pipefy e Monday, mas simplificado;
+
+painel administrativo criado no Lovable.
+
+O que esse sistema pode ajudar nas nossas empresas
+O maior benefício não seria “controlar o Mercado Livre” diretamente. O principal benefício seria organizar a operação completa e impedir que atividades, clientes e projetos sejam esquecidos.
+
+Ava Motors: prospecção B2B
+Na Ava Motors, ele poderia substituir o controle disperso por Excel, WhatsApp e anotações.
+
+O fluxo ficaria:
+
+Lista importada
+→ CNPJ analisado
+→ Lead qualificado
+→ Primeiro contato
+→ Cliente respondeu
+→ Catálogo enviado
+→ Cotação solicitada
+→ Negociação
+→ Primeiro pedido
+→ Cliente recorrente
+Cada cartão poderia mostrar:
+
+razão social;
+
+CNPJ;
+
+CNAE;
+
+cidade e estado;
+
+telefone e WhatsApp;
+
+nome do comprador;
+
+atendente responsável;
+
+produtos de interesse;
+
+última mensagem;
+
+próxima tarefa;
+
+valor potencial;
+
+motivo de perda;
+
+histórico completo.
+
+Isso permitiria saber imediatamente:
+
+quantos leads cada atendente recebeu;
+
+quantos foram realmente contatados;
+
+quem respondeu;
+
+quem está aguardando retorno;
+
+quais propostas estão paradas;
+
+quantos clientes foram convertidos;
+
+quais cidades e segmentos geram mais vendas.
+
+Facility: operação de produtos e marketplaces
+Para a Facility, o Kanban poderia controlar o lançamento dos portões pet e dos demais produtos.
+
+Produto selecionado
+→ Concorrência analisada
+→ Preço definido
+→ Fotos em produção
+→ Conteúdo aprovado
+→ Anúncio cadastrado
+→ Publicado
+→ Primeiras vendas
+→ Otimização
+→ Escala
+Cada produto teria:
+
+SKU;
+
+custo;
+
+preço;
+
+margem;
+
+medidas;
+
+fotos pendentes e aprovadas;
+
+título;
+
+descrição;
+
+categoria;
+
+link do anúncio;
+
+estoque;
+
+quantidade vendida;
+
+avaliação;
+
+responsável;
+
+pendências.
+
+No caso do portão pet, por exemplo, seria possível controlar separadamente:
+
+imagem principal;
+
+imagens ambientadas;
+
+imagens com cachorro;
+
+imagens com bebê;
+
+tabela de medidas;
+
+versão preta;
+
+versão branca;
+
+extensores;
+
+anúncio do Mercado Livre;
+
+anúncio da Shopee;
+
+revisão do título;
+
+revisão do preço;
+
+desempenho após publicação.
+
+Falcão: operação independente
+A Falcão utilizaria a mesma plataforma, mas com dados separados.
+
+O administrador poderia alternar entre:
+
+Ava Motors
+Facility
+Falcão
+Cada empresa teria seus próprios:
+
+usuários;
+
+leads;
+
+produtos;
+
+tarefas;
+
+indicadores;
+
+contas de marketplace;
+
+arquivos;
+
+permissões.
+
+Isso evita misturar clientes B2B da Ava Motors com consumidores e produtos da Facility ou da Falcão.
+
+WhatsApp e equipe comercial
+O sistema também resolveria um problema importante: o WhatsApp deixar de ser o único lugar onde o histórico fica armazenado.
+
+O fluxo seria:
+
+Lead entra no CRM
+→ Sistema atribui uma atendente
+→ Atendente faz o contato
+→ Mensagem fica registrada
+→ Resposta atualiza o estágio
+→ Sistema cria próxima tarefa
+→ Gestor acompanha o resultado
+O gestor conseguiria visualizar:
+
+mensagens enviadas por atendente;
+
+respostas recebidas;
+
+tempo médio de resposta;
+
+conversas sem retorno;
+
+leads sem contato;
+
+contatos duplicados;
+
+bloqueios ou falhas de envio;
+
+desempenho por campanha.
+
+O disparo de mensagens precisa ser tratado separadamente. O CRM organiza o processo; uma integração de WhatsApp realiza os envios.
+
+Como o Hermes entraria
+O Hermes poderia funcionar como supervisor inteligente do CRM.
+
+Diariamente, ele analisaria:
+
+Leads sem contato
+Clientes aguardando retorno
+Tarefas vencidas
+Cotações paradas
+Produtos sem anúncio
+Imagens ainda não aprovadas
+Anúncios com queda de vendas
+Estoque baixo
+Problemas de margem
+Depois poderia:
+
+criar tarefas;
+
+sugerir prioridades;
+
+preparar mensagens;
+
+resumir conversas;
+
+classificar respostas;
+
+identificar oportunidades;
+
+gerar relatório diário;
+
+alertar o gestor sobre falhas.
+
+Exemplo de relatório:
+
+AVA MOTORS — RESUMO DIÁRIO
+
+120 leads cadastrados
+63 contatos realizados
+18 respostas
+7 solicitações de catálogo
+4 cotações abertas
+2 clientes sem retorno há mais de 48 horas
+9 tarefas vencidas
+
+Prioridades:
+1. Retornar Loja Moto Center
+2. Enviar tabela para Auto Peças Brasil
+3. Revisar cotação da Moto Sul
+O que ele não substituiria
+O sistema mostrado parece ser principalmente um CRM e gerenciador de projetos. Ele não aparenta substituir sozinho:
+
+ERP;
+
+emissão de notas fiscais;
+
+controle fiscal;
+
+WMS;
+
+estoque físico;
+
+painel financeiro;
+
+hub de pedidos;
+
+sistema nativo do Mercado Livre;
+
+sistema nativo da Shopee.
+
+Essas informações poderiam ser integradas depois, mas não devem ser confundidas com a função inicial do sistema.
+
+O benefício mais importante para você
+Considerando a Ava Motors, Facility, Falcão, WhatsApp, marketplaces e produção de anúncios, o ganho principal seria criar uma central única de comando.
+
+Hoje, uma informação pode ficar:
+
+no Excel;
+
+em uma conversa do WhatsApp;
+
+no computador de uma funcionária;
+
+em uma tarefa não registrada;
+
+no Mercado Livre;
+
+em uma imagem;
+
+em uma conversa com o Hermes.
+
+No sistema, tudo ficaria ligado ao cliente, ao produto ou ao projeto correspondente.
+
+Minha avaliação
+Para sua operação, eu reproduziria o conceito visual, mas não copiaria exatamente os módulos da Ecommerce Puro.
+
+A primeira versão teria quatro áreas:
+
+1. CRM B2B Ava Motors
+2. Produtos e anúncios Facility
+3. Produtos e anúncios Falcão
+4. Central Hermes e automações
+O visual do anúncio pode ser reproduzido com bastante proximidade no Lovable. O próximo passo útil é montar o mapa completo das telas e o prompt técnico para o Lovable criar essa interface para Ava Motors, Facility e Falcão.
+
+
+Pensou por 3m 5s
+Dá para identificar parte, mas não confirmar o link completo com segurança.
+
+Na imagem aparece o endereço:
+
+lovable.dev/projects/...
+
+e a aba mostra “Projeto Polo Fácil — Lovable”. Porém, o identificador final do projeto está desfocado. Eu não vou completar os caracteres por suposição.
+
+Esse endereço é o link do projeto dentro do editor do Lovable, não necessariamente o endereço usado pela equipe no dia a dia. O Lovable separa:
+
+acesso ao projeto/editor;
+
+endereço do sistema publicado.
+
+Mesmo descobrindo o endereço do editor, ele pode exigir login e autorização do proprietário. O sistema publicado poderia usar um endereço nome.lovable.app ou um domínio próprio, e esse endereço pode ser completamente diferente.
+
+Também procurei publicamente por “Projeto Polo Fácil”, “Polo Fashion Kids Blumenau” e Ecommerce Puro no Lovable, mas não encontrei um sistema publicado e indexado.
+
+A melhor abordagem agora é enviar o vídeo original, em vez das capturas. Eu consigo extrair vários quadros, alinhar a imagem e tentar recuperar exatamente o UUID exibido na barra. Mesmo assim, o acesso continuará dependendo das permissões definidas pela Ecommerce Puro.
+
+Oi!
+
+
+Pode sê público ou privado. Se for privado, basta conceder acesso de leitura pro agente que você for usá. Se
+
+
+Mas aí teria que criá um Access Point, um Access Token né
+
+Exato, um token de acesso. Se isso não for possível, uma cópia do código já resolve, sempre removendo segredos e chaves. O acesso ao painel ajuda a entendê o fluxo. Mas sozinho não mostra a qualidade do código. Documentos como PRD ou diagramas ajudam, mas eu vejo isso como complemento. Não como ponto de partida. Resumo direto. Melhor caminho é Git, depois código, depois acesso ao painel e documentação. Assim que você tivé pronto, a gente inicia pela leitura do repositório e monta o relatório técnico oficial. Pode sê assim?
+
+
+Pode. É. Me dá uns 15 minutos, por favor
+
+Claro, tranquilo. Tô por aqui.
+
+
+jessstai747-png/eskill.git
+
+Pensou por 4m 26s
+Recebi o repositório. Como ele está público, não é necessário criar token de acesso nesta etapa.
+
+Já fiz uma primeira auditoria estática. A conclusão inicial é: não devemos descartar o eSkill nem reconstruir toda a integração com o Mercado Livre do zero. O projeto já possui uma base considerável em PHP 8, MySQL, Redis, Docker, PHPUnit e Playwright, além de um microserviço Python para NLP.
+
+O PRD já prevê autenticação OAuth, renovação de tokens, SEO, concorrentes, anúncios, estoque, pedidos, precificação, webhooks, Ads, multi-conta, workers e testes. Isso mostra que boa parte da fundação operacional que precisamos já foi planejada ou parcialmente implementada.
+
+Minha decisão preliminar é esta:
+
+Devemos aproveitar: OAuth e tokens do Mercado Livre, cadastro das contas, sincronização, anúncios, pedidos, perguntas, webhooks, workers, logs e a estrutura de testes.
+
+Devemos adaptar: multi-conta, análise de concorrentes, SEO, clonagem e sincronização. O serviço de concorrência, por exemplo, já trabalha com accountId, cache separado e coleta dados pelo cliente do Mercado Livre.
+
+Devemos refatorar profundamente: precificação automática, motor de decisão e inteligência artificial. O AIService atual chama diretamente a OpenAI e fixa o modelo gpt-3.5-turbo, portanto não atende à arquitetura multimodelo que definimos.
+
+O próprio DecisionEngineService declara que não possui modelos de machine learning treinados, usa LLM e fórmulas heurísticas, e contém uma função capaz de aplicar decisões automaticamente em preço, estoque e campanhas. Isso não deve entrar em produção sem aprovação humana, limites financeiros, testes e rollback.
+
+Há um ponto positivo importante: a autenticação já tenta criptografar os tokens e bloqueia o armazenamento sem criptografia em produção quando a APP_KEY não está configurada corretamente. Essa parte merece ser preservada e auditada.
+
+Também identifiquei um arquivo .env.ai público. Os valores visíveis são exemplos, não chaves reais, mas precisaremos verificar todo o histórico do Git com um scanner de segredos antes de conectar contas de produção.
+
+Criei o primeiro relatório oficial:
+
+AUDITORIA_TECNICA_ESKILL_PRELIMINAR.md
+
+A arquitetura recomendada ficou assim:
+
+eSkill opera o Mercado Livre → nova plataforma analisa e experimenta → CRM organiza as tarefas → Hermes coordena os agentes → AI Gateway escolhe os modelos.
+
+Para a próxima etapa executável, envie o repositório como ZIP, sem credenciais reais. Assim consigo instalar em ambiente isolado, aplicar as migrations e rodar PHPUnit, Playwright, auditoria de dependências e testes de isolamento entre contas.
+
+
+
+eskill-master.zip
+Arquivo zip
+
+Pensou por 20m 5s
+
+Análise pausada
+Recebi e inspecionei o ZIP completo do eSkill. O parecer é: vale aproveitar o sistema, principalmente a integração já construída com o Mercado Livre. Recriar OAuth, renovação de tokens, anúncios, pedidos, perguntas, webhooks e workers do zero seria desperdício de tempo.
+
+Porém, encontrei um risco crítico antes de conectar Facility, Falcão ou novas contas: em alguns fluxos, o account_id pode vir diretamente da requisição e o MercadoLivreClient carrega os tokens sem validar centralmente se aquela conta pertence ao usuário autenticado. Isso cria um risco provável de acesso cruzado entre lojas. Deve ser corrigido antes de qualquer expansão multiempresa.
+
+Também confirmei que o eSkill já possui uma base de AI Gateway com OpenAI, Claude e Gemini. Não precisamos construir essa parte do zero. O problema é que há várias camadas de IA sobrepostas; elas deverão ser consolidadas em uma única entrada oficial.
+
+Outras conclusões relevantes:
+
+O eSkill possui cerca de 1.223 arquivos PHP, 525 mil linhas, 135 controllers e 371 services.
+
+Existem aproximadamente 1.712 registros de rotas e 27 duplicações.
+
+Duas rotas duplicadas apontam para implementações diferentes.
+
+Há rotas vinculadas a métodos que não foram encontrados nos controllers.
+
+O NLP atual é apenas um protótipo treinado com 16 frases sintéticas; não serve ainda para decisões de atendimento em produção.
+
+O motor de decisão pode aplicar alterações automaticamente, mas deverá ficar bloqueado em modo de observação e recomendação.
+
+Há 305 arquivos de testes, Playwright e GitHub Actions, mas a suíte completa ainda precisa ser executada em um ambiente reproduzível.
+
+O MySQL do eSkill deve ser preservado inicialmente. A nova plataforma, o CRM e o laboratório poderão usar PostgreSQL/Supabase e se comunicar com ele por API e eventos.
+
+Não recomendo colocar CRM, Hermes e laboratório de inferência dentro desse monólito PHP.
+
+Preparei quatro documentos oficiais:
+
+AUDITORIA_TECNICA_ESKILL_ZIP_V1.md
+
+MATRIZ_REUSO_ADAPTACAO_ESKILL_V1.md
+
+PLANO_ESTABILIZACAO_ESKILL_30_DIAS.md
+
+SEC-001-ISOLAMENTO-CONTAS-MERCADO-LIVRE.md
+
+O próximo passo técnico é executar a SEC-001: centralizar a autorização das contas e criar testes que provem que um usuário da Facility nunca consegue acessar tokens ou dados da Falcão, mesmo conhecendo o ID da conta. Somente depois disso iniciamos o ambiente reproduzível e rodamos PHPUnit, Playwright, migrations e testes de integração completos.
+
+
+hoje 21:32
+e como seria prompt?
+
+Para essa correção, o prompt não deve ser enviado ao Lovable. É uma alteração de segurança no backend; use no Cursor, Claude Code, Hermes ou outro agente com acesso ao repositório.
+
+Copie este prompt:
+
+Você atuará como Arquiteto de Software Sênior, Engenheiro de Segurança e Desenvolvedor PHP responsável pela correção SEC-001 do projeto eSkill.
+
+REPOSITÓRIO
+Projeto: eSkill
+Branch principal: master
+Tecnologias principais: PHP 8.4, MySQL, Redis, PHPUnit, Playwright e Docker.
+
+OBJETIVO
+
+Corrigir o risco de acesso cruzado entre contas do Mercado Livre.
+
+Atualmente, alguns controllers e o MercadoLivreClient podem receber um account_id diretamente por header, GET, POST, sessão ou execução CLI e carregar os tokens dessa conta sem uma verificação central e obrigatória de propriedade.
+
+A correção deve garantir que:
+
+1. Um usuário da Facility nunca acesse dados ou tokens da Falcão.
+2. Um usuário da Falcão nunca acesse dados ou tokens da Facility.
+3. Conhecer o ID numérico de uma conta não permita acessá-la.
+4. Nenhum controller ou service carregue uma conta usando apenas um ID bruto.
+5. Workers e tarefas automáticas usem uma identidade de serviço e uma organização explícita.
+6. Tokens nunca apareçam em respostas, exceções ou logs.
+7. Todas as negações de acesso relevantes sejam auditadas.
+
+DOCUMENTOS SOBERANOS
+
+Antes de alterar qualquer código, leia:
+
+- 00_MASTER_PLAN.md
+- 01_CONSTITUICAO_DA_PLATAFORMA.md
+- AUDITORIA_TECNICA_ESKILL_ZIP_V1.md
+- SEC-001-ISOLAMENTO-CONTAS-MERCADO-LIVRE.md
+
+Caso código e documentação entrem em conflito, não escolha silenciosamente. Registre a divergência e solicite decisão.
+
+REGRAS OBRIGATÓRIAS
+
+- Não altere diretamente a branch master.
+- Crie a branch: fix/sec-001-account-isolation
+- Não faça alterações em produção.
+- Não altere funcionalidades fora do escopo sem justificar.
+- Não remova recursos existentes apenas para fazer os testes passarem.
+- Não enfraqueça autenticação ou autorização.
+- Não registre access_token, refresh_token, client_secret ou APP_KEY.
+- Não faça migrations destrutivas.
+- Não invente relações entre usuários e contas sem verificar o schema atual.
+- Toda alteração deve ser coberta por testes.
+- Antes de implementar, apresente o plano e aguarde aprovação humana.
+
+PRIMEIRA ETAPA — INVESTIGAÇÃO
+
+Analise especialmente:
+
+- app/Services/MercadoLivreClient.php
+- app/Controllers/ItemController.php
+- app/Controllers/OrderController.php
+- app/Middleware/ApiAuthMiddleware.php
+- app/Middleware/AccountContextMiddleware.php
+- SessionHelper
+- MultiAccountManager
+- tabela ml_accounts
+- tabelas de usuários, contas, organizações e permissões
+- workers, jobs e comandos CLI que utilizam account_id
+
+Localize todos os pontos em que account_id, ml_account_id ou X-ML-Account-ID são recebidos ou usados.
+
+Produza antes da implementação:
+
+1. mapa do fluxo atual de autenticação;
+2. mapa do fluxo atual de seleção de conta;
+3. lista de arquivos afetados;
+4. riscos de compatibilidade;
+5. plano de alteração;
+6. plano de rollback.
+
+SEGUNDA ETAPA — ARQUITETURA DA CORREÇÃO
+
+Implemente uma política central equivalente a:
+
+interface AccountAccessPolicy
+{
+    public function authorize(
+        AuthenticatedActor $actor,
+        int $accountId,
+        string $capability
+    ): AuthorizedAccountContext;
+}
+
+Crie ou adapte os seguintes conceitos:
+
+- AuthenticatedActor
+- AccountAccessPolicy
+- AuthorizedAccountContext
+- AccountAccessDeniedException
+- AccountContextResolver
+- SecurityAuditLogger
+
+AuthorizedAccountContext deverá conter somente os dados necessários, como:
+
+- account_id;
+- organization_id;
+- owner_user_id;
+- marketplace;
+- capabilities autorizadas;
+- estado ativo/inativo.
+
+O contexto não deverá expor tokens diretamente para controllers.
+
+TERCEIRA ETAPA — ALTERAÇÕES
+
+1. MercadoLivreClient não poderá mais aceitar um account_id bruto sem contexto autorizado.
+
+2. Remova ou bloqueie a seleção direta de conta por:
+
+- query string;
+- POST;
+- header;
+- sessão não validada;
+- fallback para a última conta ativa no banco.
+
+3. ItemController, OrderController e outros controllers deverão solicitar um AuthorizedAccountContext antes de criar clients ou services.
+
+4. Toda consulta de conta deverá validar simultaneamente:
+
+- ID da conta;
+- usuário ou ator;
+- organização;
+- estado da conta;
+- capability solicitada.
+
+5. Para API tokens, valide a identidade associada ao token antes de autorizar a conta.
+
+6. Para workers, exija:
+
+- service_actor explícito;
+- organization_id explícito;
+- account_id explícito;
+- capability explícita.
+
+7. Toda tentativa negada deve gerar auditoria sem registrar segredos.
+
+QUARTA ETAPA — TESTES OBRIGATÓRIOS
+
+Crie testes automatizados para:
+
+1. usuário A acessa conta A: permitido;
+2. usuário A tenta acessar conta B: 403;
+3. token de API de A tenta acessar conta B: 403;
+4. usuário sem organização tenta acessar uma conta: 403;
+5. conta inexistente: resposta genérica sem revelar dados;
+6. conta desativada: acesso negado;
+7. header não contorna a policy;
+8. query string não contorna a policy;
+9. POST não contorna a policy;
+10. sessão adulterada não contorna a policy;
+11. worker sem organização explícita falha;
+12. worker sem conta explícita falha;
+13. mudança válida de conta gera log de auditoria;
+14. tentativa inválida gera log de segurança;
+15. tokens não aparecem em logs;
+16. tokens não aparecem em exceções;
+17. tokens não aparecem em respostas HTTP;
+18. funcionalidades legítimas da conta autorizada continuam funcionando.
+
+Inclua testes unitários, de integração e, quando aplicável, end-to-end.
+
+QUINTA ETAPA — VALIDAÇÃO
+
+Execute:
+
+- lint PHP;
+- PHPUnit;
+- testes de integração;
+- Playwright nos fluxos afetados;
+- análise estática;
+- scanner de segredos;
+- verificação de rotas;
+- auditoria de dependências.
+
+Não declare sucesso quando houver testes falhando ou ignorados sem justificativa.
+
+FORMATO DA ENTREGA
+
+Ao terminar, apresente:
+
+1. resumo executivo;
+2. causa raiz;
+3. arquivos alterados;
+4. arquitetura implementada;
+5. testes criados;
+6. testes executados;
+7. resultados reais;
+8. testes não executados e motivo;
+9. riscos restantes;
+10. instruções de rollback;
+11. mudanças de banco, caso existam;
+12. documentação atualizada;
+13. recomendação clara: aprovado ou não aprovado para merge.
+
+CRITÉRIO FINAL
+
+A correção só poderá ser considerada concluída quando um teste automatizado comprovar que um usuário autenticado da Facility não consegue acessar a conta da Falcão usando ID, header, query string, POST, sessão ou token de API.
+
+Agora faça somente a investigação inicial e apresente o plano. Não altere nenhum arquivo antes da aprovação humana.
+A última frase é importante: o agente primeiro investiga e mostra o plano. Ele não deve começar alterando centenas de arquivos sem controle. Depois de aprovado o plano, retiramos essa restrição e emitimos o segundo prompt para implementação.
+
+
+Biblioteca
+/
+AUDITORIA_TECNICA_ESKILL_ZIP_V1.md
+
+
+# Auditoria Técnica do eSkill — ZIP v1
+
+**Versão:** 1.0
+**Status:** Concluída — análise estática inicial
+**Data:** 16/07/2026
+**Fonte analisada:** `eskill-master.zip`
+**Escopo:** código-fonte, configuração, documentação, testes, migrations, rotas, segurança, IA e infraestrutura.
+**Limite desta etapa:** o sistema não foi conectado a contas reais nem executado integralmente com todas as dependências.
+
+---
+
+## 1. Parecer executivo
+
+O eSkill **deve ser aproveitado**, principalmente pela integração já desenvolvida com o Mercado Livre. Não compensa reconstruir OAuth, renovação de tokens, sincronização, anúncios, pedidos, perguntas, webhooks e parte dos workers sem antes validar o que já funciona.
+
+Ao mesmo tempo, o eSkill **não deve receber agora o CRM, o Hermes, o laboratório de inferência e todos os novos agentes dentro do mesmo monólito**. O código já é grande, possui módulos sobrepostos e contém riscos que precisam ser corrigidos antes da expansão.
+
+A arquitetura recomendada permanece:
+
+```text
+Mercado Livre
+      ↓
+eSkill — núcleo operacional do marketplace
+      ↓ API interna versionada + eventos
+Nova plataforma de inteligência
+      ↓
+CRM operacional
+      ↓
+Hermes e agentes
+      ↓
+AI Gateway consolidado
+```
+
+O ERP continuará como fonte soberana de estoque e custos.
+
+---
+
+## 2. Dimensão real do projeto
+
+A inspeção encontrou aproximadamente:
+
+- 13.968 arquivos no ZIP;
+- 1.223 arquivos PHP;
+- 525 mil linhas de PHP;
+- 135 controllers;
+- 371 services;
+- 7 models;
+- 305 arquivos de teste PHPUnit;
+- 123 migrations;
+- 271 arquivos de documentação;
+- 1.712 registros de rota identificados por análise estática;
+- 27 rotas duplicadas.
+
+O sistema não é um protótipo pequeno. Há bastante trabalho acumulado, mas também há sinais claros de crescimento sem uma arquitetura suficientemente controlada.
+
+---
+
+## 3. Tecnologias identificadas
+
+### Aplicação principal
+
+- PHP 8.4;
+- arquitetura própria com Router, Middleware, Controllers e Services;
+- MySQL com PDO;
+- Redis;
+- Guzzle;
+- Monolog;
+- Docker;
+- PHPUnit;
+- Playwright;
+- GitHub Actions.
+
+### Serviços complementares
+
+- FastAPI/Python para NLP;
+- workers e jobs em segundo plano;
+- monitoramento de contas;
+- Cloudflare Worker;
+- módulos internos de inteligência artificial;
+- prompts e estruturas para agentes de desenvolvimento.
+
+---
+
+## 4. Descoberta crítica: isolamento de contas
+
+### Classificação
+
+**Risco provável: crítico**
+**Tipo:** IDOR / acesso cruzado entre contas
+**Status:** precisa de correção antes de operação multiempresa.
+
+### Evidência técnica
+
+O `MercadoLivreClient` aceita `accountId` diretamente. Quando não recebe um ID no construtor, pode obtê-lo de:
+
+- header `X-ML-Account-ID`;
+- query string `account_id` ou `ml_account_id`;
+- dados POST;
+- sessão;
+- conta ativa mais recente do banco em execução CLI.
+
+Depois, `loadAccount()` consulta:
+
+```sql
+SELECT access_token, refresh_token, ...
+FROM ml_accounts
+WHERE id = :id
+```
+
+Essa consulta não verifica, nesse ponto, se a conta pertence ao usuário autenticado.
+
+Além disso, `ItemController` e `OrderController` permitem substituir a conta ativa por `account_id` vindo da requisição.
+
+### Impacto provável
+
+Um usuário autenticado ou token de API pode, dependendo da rota e do fluxo, fornecer o ID numérico de outra conta e fazer o sistema carregar o token Mercado Livre daquela conta.
+
+Isso poderia causar:
+
+- leitura cruzada de anúncios e pedidos;
+- uso indevido do token de outra loja;
+- ações na conta errada;
+- mistura entre Facility, Falcão e futuros clientes;
+- incidente grave de segurança e privacidade.
+
+Esta constatação é resultado de análise estática. Não foi executado teste invasivo contra produção.
+
+### Correção obrigatória
+
+Criar uma política central, por exemplo:
+
+```text
+AccountContextResolver
+AccountAccessPolicy
+```
+
+Essa camada deverá:
+
+1. identificar o usuário por sessão ou Bearer token;
+2. receber o `account_id`;
+3. validar `ml_accounts.id` junto com o proprietário ou organização;
+4. devolver um objeto de contexto já autorizado;
+5. impedir que services consultem tokens por ID bruto;
+6. exigir identidade explícita nos workers;
+7. eliminar o fallback global para “última conta ativa”.
+
+O `MercadoLivreClient` não deverá mais escolher conta diretamente por GET, POST ou header sem validação.
+
+---
+
+## 5. Multi-conta não é ainda multiempresa
+
+O código possui mecanismos de múltiplas contas por usuário e algumas validações em `SessionHelper`, `AccountContextMiddleware` e `MultiAccountManager`.
+
+Porém, não foi identificado um modelo completo com:
+
+- organizações;
+- membros;
+- papéis por organização;
+- lojas;
+- contas de marketplace vinculadas à organização;
+- isolamento entre empresas;
+- permissões por equipe.
+
+Para Facility e Falcão, a estrutura correta deverá ser:
+
+```text
+organization
+  ├── members
+  ├── roles
+  ├── marketplace_accounts
+  ├── products
+  ├── experiments
+  ├── tasks
+  └── audit_logs
+```
+
+A interface esconder dados não é suficiente. O isolamento precisa existir na autorização e no banco.
+
+---
+
+## 6. Integração com Mercado Livre
+
+### Reaproveitamento recomendado
+
+Há valor técnico nos seguintes componentes:
+
+- OAuth;
+- armazenamento e renovação de tokens;
+- cliente do Mercado Livre;
+- sincronização;
+- anúncios;
+- pedidos;
+- perguntas;
+- webhooks;
+- contas conectadas;
+- cache;
+- jobs e workers;
+- logs;
+- testes já existentes.
+
+### Condições antes do reuso
+
+- corrigir o isolamento de contas;
+- testar renovação e expiração de tokens;
+- validar idempotência;
+- implementar retry e dead-letter;
+- testar limites da API;
+- confirmar endpoints e campos com a documentação oficial atual;
+- separar ações de leitura e escrita;
+- registrar toda alteração externa;
+- impedir execução automática de alto risco.
+
+---
+
+## 7. Camada de inteligência artificial
+
+### Descoberta importante
+
+O projeto já possui uma base de gateway multimodelo. Foram encontrados:
+
+- `LLMService`;
+- `AIProviderManager`;
+- providers para OpenAI, Claude e Gemini;
+- `UnifiedAIService`;
+- circuit breaker e fallback;
+- registro de uso em alguns fluxos.
+
+Portanto, **não é necessário criar o AI Gateway do zero**.
+
+### Problema
+
+Existem várias camadas concorrentes:
+
+- `AIService` legado, ligado diretamente à OpenAI;
+- `LLMService`;
+- `UnifiedAIService`;
+- `AIProviderManager`;
+- clients e services específicos.
+
+Isso produz:
+
+- configuração duplicada;
+- modelos hardcoded;
+- fallback inconsistente;
+- custos calculados de formas diferentes;
+- validação de saída desigual;
+- dificuldade de auditoria.
+
+### Decisão recomendada
+
+Consolidar tudo em um único gateway interno.
+
+```text
+Agentes e serviços
+       ↓
+AI Gateway interno
+       ├── OpenAI
+       ├── Claude
+       ├── Gemini
+       ├── modelos locais
+       └── outros provedores
+```
+
+O gateway deverá controlar:
+
+- modelo por tarefa;
+- custo;
+- limite;
+- fallback;
+- logs;
+- cache;
+- schema de saída;
+- versão do prompt;
+- aprovação;
+- rastreabilidade.
+
+O `AIService.php` legado deverá ser removido depois da migração de seus consumidores.
+
+---
+
+## 8. NLP: protótipo, não modelo de produção
+
+O microserviço `ml-nlp-service` usa FastAPI, TF-IDF e SVM.
+
+O modelo inicial é treinado automaticamente com apenas 16 frases sintéticas, divididas em quatro classes:
+
+- compatibilidade;
+- reclamação crítica;
+- logística;
+- dúvida geral.
+
+### Problemas
+
+- não há conjunto real de treinamento;
+- não há conjunto de validação;
+- não há métricas de precisão, recall ou F1;
+- não há controle de versão do dataset;
+- praticamente não há testes;
+- um arquivo de modelo pickle está versionado;
+- a chave padrão é `dev-secret-key`;
+- quando essa chave padrão é usada, a API não rejeita credenciais erradas ou ausentes;
+- mensagens internas de exceção são devolvidas no HTTP 500.
+
+### Parecer
+
+Esse módulo pode ser usado como demonstração técnica, mas não deve classificar automaticamente atendimento real.
+
+Para entrar em produção, será necessário:
+
+1. dataset real e anonimizado;
+2. política de rotulagem;
+3. treino e validação separados;
+4. métricas mínimas;
+5. versionamento;
+6. autenticação obrigatória;
+7. testes;
+8. monitoramento de drift;
+9. fallback para revisão humana.
+
+---
+
+## 9. Motor de decisão
+
+O `DecisionEngineService` informa no próprio código que:
+
+- usa LLM em decisões de precificação;
+- usa fórmulas heurísticas em estoque e campanhas;
+- não possui modelos treinados;
+- consegue aplicar decisões automaticamente.
+
+### Decisão imediata
+
+Bloquear execução automática de:
+
+- preço;
+- estoque;
+- campanhas;
+- publicidade;
+- publicação ou pausa de anúncios.
+
+O módulo poderá permanecer em modo:
+
+```text
+observar → analisar → simular → recomendar
+```
+
+Só poderá executar após:
+
+- cálculo financeiro oficial;
+- aprovação humana;
+- feature flag;
+- limites mínimos e máximos;
+- idempotência;
+- logs;
+- teste controlado;
+- rollback;
+- canário;
+- avaliação do laboratório de inferência.
+
+---
+
+## 10. SEO e concorrência
+
+### O que pode ser reaproveitado
+
+- coleta de dados;
+- estruturas de comparação;
+- serviços de título e atributos;
+- histórico;
+- cache;
+- alguns painéis;
+- jobs de monitoramento.
+
+### Problemas encontrados
+
+O serviço de concorrência usa heurísticas que podem ser úteis, mas não devem ser tratadas como fatos de mercado.
+
+Exemplos:
+
+- “market share” calculado sobre uma amostra de resultados não é participação real de mercado;
+- `sold_quantity` observado não representa necessariamente vendas atuais;
+- a média de preços por seller é calculada de maneira incorreta quando há mais de dois itens;
+- oportunidades geradas pela IA usam dados agregados sem validação suficiente;
+- resultados públicos e endpoints precisam de teste de contrato.
+
+### Correção conceitual
+
+Renomear métricas para refletir o que realmente medem:
+
+```text
+participação observada na amostra
+posição observada
+variação observada
+vendas acumuladas expostas
+índice heurístico de concorrência
+```
+
+O laboratório de inferência deverá guardar evidência, período e limitações de cada métrica.
+
+---
+
+## 11. Rotas e arquitetura do monólito
+
+Foram identificados aproximadamente 1.712 registros de rota.
+
+O Router percorre linearmente todas as rotas a cada requisição. Além do custo, a primeira rota correspondente vence, o que torna duplicações perigosas.
+
+### Duplicações confirmadas
+
+Há 27 combinações de método e caminho registradas mais de uma vez. A maioria aponta para o mesmo controller com sintaxe diferente, mas duas possuem ações realmente diferentes:
+
+```text
+GET /api/jobs/{id}
+- DashboardController::jobStatus
+- JobController::getJob
+```
+
+```text
+POST /api/seo/analyze
+- SEOToolsController::analyze
+- SEOApiController::analyze
+```
+
+Uma das implementações fica inalcançável dependendo da ordem de carregamento.
+
+### Rotas apontando para ações ausentes
+
+A análise encontrou referências a métodos não localizados nos controllers:
+
+```text
+AccountXRayController::exportPdf
+QualityController::getPurchaseExperience
+```
+
+Essas rotas precisam ser corrigidas ou removidas.
+
+### Parecer
+
+Não acrescentar novos domínios ao Router atual sem antes:
+
+- gerar inventário automático;
+- bloquear duplicações no CI;
+- separar API por versão;
+- criar teste de contrato das rotas;
+- considerar roteador consolidado ou framework maduro;
+- reduzir controllers e services gigantes.
+
+---
+
+## 12. Banco de dados e migrations
+
+O eSkill usa MySQL. Não recomendo migrar o banco atual para PostgreSQL neste momento.
+
+A nova plataforma de inteligência poderá usar PostgreSQL/Supabase, enquanto o eSkill mantém MySQL e se comunica por API e eventos.
+
+### Problemas encontrados
+
+- tabelas sobrepostas, como `items` e `ml_items`;
+- várias migrations de correção e consolidação;
+- migrations SQL e PHP misturadas;
+- execução não totalmente transacional;
+- desativação temporária de foreign keys;
+- erros considerados toleráveis;
+- rollback que remove o registro da migration, mas não desfaz necessariamente o schema;
+- as migrations não são totalmente reaplicáveis em banco vazio;
+- o próprio CI usa um snapshot de schema para contornar isso.
+
+### Decisão recomendada
+
+- congelar criação desordenada de migrations;
+- criar baseline oficial;
+- documentar o schema atual;
+- testar restauração em banco limpo;
+- adotar migrations determinísticas;
+- criar backup e restore testados;
+- não fazer conversão de banco junto com a estabilização.
+
+---
+
+## 13. Testes e CI/CD
+
+### Estrutura existente
+
+O projeto possui:
+
+- 305 arquivos de teste PHPUnit;
+- Playwright;
+- testes unitários;
+- testes de integração;
+- testes end-to-end;
+- workflows no GitHub Actions;
+- Codacy;
+- Composer Audit;
+- build de imagem Docker.
+
+Isso é reaproveitável.
+
+### Limites desta auditoria
+
+Não foi possível executar a suíte completa no ambiente desta análise porque o ZIP não contém `vendor/`, o Composer não está instalado no ambiente e não há acesso externo para baixar dependências.
+
+Foi realizada uma validação parcial de sintaxe PHP:
+
+- 555 arquivos verificados;
+- nenhum erro de sintaxe encontrado nessa amostra.
+
+Isso não equivale à aprovação da suíte.
+
+### Problemas no CI
+
+- um workflow executa migrations com `|| true`, podendo ocultar falhas;
+- existem workflows sobrepostos;
+- o deploy ocorre em push para `master` quando secrets estão configurados;
+- o comentário informa que alterações também são feitas diretamente no servidor de produção;
+- o SSH usa `StrictHostKeyChecking=no`;
+- o processo de release ainda não é imutável;
+- testes marcados como skipped precisam ser inventariados;
+- o cache do PHPUnit registra defeitos históricos, mas não comprova o estado atual.
+
+### Decisão recomendada
+
+Nenhuma implantação automática em produção até existir:
+
+```text
+pull request
+→ lint
+→ análise estática
+→ unitários
+→ integração
+→ migrations em banco descartável
+→ Playwright
+→ segurança
+→ imagem imutável
+→ homologação
+→ aprovação
+→ produção
+```
+
+---
+
+## 14. Infraestrutura
+
+### Pontos positivos
+
+- Dockerfile multi-stage;
+- document root apontando para `public/`;
+- MySQL e Redis separados;
+- health checks;
+- volume de storage;
+- imagem de produção sem testes e documentação.
+
+### Riscos
+
+- valores padrão fracos para senhas de produção;
+- health check do Redis pode falhar quando senha estiver habilitada;
+- execução do Apache como `www-data` precisa ser validada em runtime;
+- comentários e versões divergem em alguns arquivos;
+- scripts de setup e debug continuam no diretório público, embora estejam bloqueados por `exit`;
+- editar diretamente em produção contraria a governança aprovada.
+
+Scripts desativados deverão ser removidos da imagem, não apenas deixados com HTTP 404.
+
+---
+
+## 15. Higiene do repositório
+
+### Problemas
+
+- o `ml-nlp-service/venv` foi incluído no repositório e ocupa aproximadamente 376 MB;
+- há `__pycache__`;
+- existem logs, caches e artefatos de runtime;
+- `.env.ai` está versionado com placeholders;
+- o README principal descreve mais um kit de agentes no VS Code do que o produto;
+- inventários como `services_em_uso.txt` contêm duplicações;
+- `rotas_ativas.txt` não representa o estado real.
+
+### Ações
+
+- remover o virtualenv;
+- revisar `.gitignore`;
+- remover caches e artefatos;
+- executar scanner de segredos no histórico Git;
+- rotacionar qualquer segredo que tenha sido publicado;
+- tornar o repositório privado antes de conectar dados reais;
+- criar README de produto;
+- gerar inventários automaticamente no CI.
+
+---
+
+## 16. Matriz resumida
+
+| Área | Parecer |
+|---|---|
+| OAuth e tokens ML | Reaproveitar após correção de autorização |
+| Cliente Mercado Livre | Reaproveitar e endurecer |
+| Anúncios, pedidos e perguntas | Reaproveitar por API interna |
+| Webhooks e workers | Reaproveitar após testes |
+| Multi-conta | Adaptar; ainda não é multiempresa |
+| SEO | Reaproveitar partes e refatorar |
+| Concorrência | Adaptar e corrigir métricas |
+| AI Provider Manager | Reaproveitar como base |
+| Camadas de IA duplicadas | Consolidar |
+| Decision Engine | Quarentena para ações automáticas |
+| NLP SVM | Protótipo; retrainar ou substituir |
+| Router próprio | Refatorar |
+| Migrations | Estabilizar |
+| Testes | Reaproveitar e tornar obrigatórios |
+| CRM | Construir separado |
+| Hermes | Construir separado |
+| Laboratório de inferência | Construir separado |
+| ERP | Sistema externo soberano de estoque |
+
+---
+
+## 17. Decisões recomendadas
+
+1. O eSkill será preservado como **Marketplace Core**.
+2. Nenhuma função de escrita automática será habilitada nesta fase.
+3. A falha de autorização de conta será tratada como prioridade máxima.
+4. Facility será o primeiro piloto.
+5. Falcão só entrará depois do teste de isolamento entre organizações.
+6. O banco MySQL do eSkill será mantido inicialmente.
+7. A nova plataforma poderá usar PostgreSQL/Supabase.
+8. A comunicação ocorrerá por API versionada e eventos.
+9. O gateway de IA existente será consolidado, não reconstruído do zero.
+10. O laboratório de inferência ficará fora do monólito.
+11. O ERP será o dono do estoque.
+12. Todo deploy deverá passar por GitHub Actions, homologação e aprovação.
+
+---
+
+## 18. Estado atual
+
+**Aproveitamento técnico:** alto
+**Prontidão para expansão:** baixa a média
+**Prontidão para multiempresa:** insuficiente sem correções
+**Prontidão para automação autônoma:** não aprovada
+**Valor principal:** integração operacional acumulada com Mercado Livre
+**Risco principal:** autorização e isolamento de contas
+**Estratégia:** estabilizar, encapsular e integrar — não reescrever tudo e não ampliar o monólito.

@@ -6,21 +6,13 @@ MCP_FILE="$ROOT_DIR/.vscode/mcp.json"
 SETTINGS_FILE="$ROOT_DIR/.vscode/settings.json"
 ML_SCRIPT="$ROOT_DIR/bin/mcp-ml-start.sh"
 TRAE_MCP_DIR="/root/.trae/mcps/s_eskill_com_br-6c527cfb/solo_coder"
-
-# Diretório de saída resiliente: usa o padrão se gravável, senão cai para um
-# local temporário do usuário. Evita falha quando storage/ pertence a outro dono.
-DEFAULT_OUT_DIR="$ROOT_DIR/storage/monitoring"
-OUT_DIR="${MCP_MONITOR_OUT_DIR:-$DEFAULT_OUT_DIR}"
-if ! mkdir -p "$OUT_DIR" 2>/dev/null || ! ( : > "$OUT_DIR/.write_test" ) 2>/dev/null; then
-  OUT_DIR="${TMPDIR:-/tmp}/eskill-mcp-monitor"
-  mkdir -p "$OUT_DIR" 2>/dev/null || true
-fi
-rm -f "$OUT_DIR/.write_test" 2>/dev/null || true
+OUT_DIR="$ROOT_DIR/storage/monitoring"
 OUT_FILE="$OUT_DIR/mcp_status_latest.json"
+
+mkdir -p "$OUT_DIR"
 
 PASS_COUNT=0
 FAIL_COUNT=0
-SKIP_COUNT=0
 CHECKS_JSON=""
 
 add_check() {
@@ -31,8 +23,6 @@ add_check() {
   escaped_detail=$(printf '%s' "$detail" | sed 's/\\/\\\\/g; s/"/\\"/g')
   if [ "$status" = "pass" ]; then
     PASS_COUNT=$((PASS_COUNT + 1))
-  elif [ "$status" = "skip" ]; then
-    SKIP_COUNT=$((SKIP_COUNT + 1))
   else
     FAIL_COUNT=$((FAIL_COUNT + 1))
   fi
@@ -86,34 +76,20 @@ else
   add_check "mercadolibre_wrapper_syntax" "fail" "Erro de sintaxe no wrapper ML"
 fi
 
-# Verificação funcional do token usado pelo MCP do Mercado Livre.
-if php "$ROOT_DIR/bin/mcp-ml-token.php" --format=raw >/dev/null 2>&1; then
-  add_check "mercadolibre_token" "pass" "Token ML disponível para o MCP"
-else
-  add_check "mercadolibre_token" "fail" "Nenhum token ML válido (rode: php bin/mcp-ml-auth.php --status)"
-fi
-
-# Checks do Trae são opcionais: aplicam-se apenas quando o Trae IDE está
-# instalado e acessível. Em ambientes Cursor/VS Code o diretório pertence ao
-# root e é inacessível, portanto tratamos como "skip" em vez de "fail".
-if [ -d "$TRAE_MCP_DIR" ] && [ -r "$TRAE_MCP_DIR" ]; then
-  for server in integrated_browser mcp_GitHub mcp_Playwright mcp_context7; do
-    metadata="$TRAE_MCP_DIR/$server/SERVER_METADATA.json"
-    tools_dir="$TRAE_MCP_DIR/$server/tools"
-    if [ -f "$metadata" ] && [ -d "$tools_dir" ]; then
-      count=$(find "$tools_dir" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')
-      if [ "$count" -gt 0 ]; then
-        add_check "trae_${server}" "pass" "$count ferramentas encontradas"
-      else
-        add_check "trae_${server}" "fail" "Sem ferramentas no diretório"
-      fi
+for server in integrated_browser mcp_GitHub mcp_Playwright mcp_context7; do
+  metadata="$TRAE_MCP_DIR/$server/SERVER_METADATA.json"
+  tools_dir="$TRAE_MCP_DIR/$server/tools"
+  if [ -f "$metadata" ] && [ -d "$tools_dir" ]; then
+    count=$(find "$tools_dir" -maxdepth 1 -type f -name '*.json' | wc -l | tr -d ' ')
+    if [ "$count" -gt 0 ]; then
+      add_check "trae_${server}" "pass" "$count ferramentas encontradas"
     else
-      add_check "trae_${server}" "fail" "Metadados ou tools ausentes"
+      add_check "trae_${server}" "fail" "Sem ferramentas no diretório"
     fi
-  done
-else
-  add_check "trae_mcp_servers" "skip" "Trae IDE não instalado/inacessível (ambiente Cursor/VS Code)"
-fi
+  else
+    add_check "trae_${server}" "fail" "Metadados ou tools ausentes"
+  fi
+done
 
 timestamp="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 overall="pass"
@@ -121,8 +97,8 @@ if [ "$FAIL_COUNT" -gt 0 ]; then
   overall="fail"
 fi
 
-printf '{\n  "timestamp":"%s",\n  "overall":"%s",\n  "pass_count":%s,\n  "fail_count":%s,\n  "skip_count":%s,\n  "out_dir":"%s",\n  "checks":[%s]\n}\n' \
-  "$timestamp" "$overall" "$PASS_COUNT" "$FAIL_COUNT" "$SKIP_COUNT" "$OUT_DIR" "$CHECKS_JSON" > "$OUT_FILE"
+printf '{\n  "timestamp":"%s",\n  "overall":"%s",\n  "pass_count":%s,\n  "fail_count":%s,\n  "checks":[%s]\n}\n' \
+  "$timestamp" "$overall" "$PASS_COUNT" "$FAIL_COUNT" "$CHECKS_JSON" > "$OUT_FILE"
 
 cat "$OUT_FILE"
 

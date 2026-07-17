@@ -52,7 +52,6 @@ class PWAManager {
                 scope: '/'
             });
 
-
             // Verificar atualizações
             this.swRegistration.addEventListener('updatefound', () => {
                 const newWorker = this.swRegistration.installing;
@@ -93,7 +92,6 @@ class PWAManager {
      * Callback de mudança de rede
      */
     onNetworkChange(isOnline) {
-
         // Disparar evento customizado
         window.dispatchEvent(new CustomEvent('networkchange', {
             detail: { online: isOnline }

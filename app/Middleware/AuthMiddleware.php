@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Middleware;
 
+use App\Helpers\DebugAgentLog;
 use App\Services\UserService;
 
 class AuthMiddleware
@@ -36,6 +37,15 @@ class AuthMiddleware
                 if (strpos($currentPath, '/auth/login') === false && strpos($currentPath, '/login') === false) {
                     $_SESSION['redirect_after_login'] = $currentPath ?: '/dashboard';
                 }
+
+                // #region agent log
+                if (str_contains($currentPath, '/dashboard/financials')) {
+                    DebugAgentLog::write('L', 'AuthMiddleware::handle', 'financials_auth_redirect', [
+                        'path' => $currentPath,
+                        'hasSessionUserId' => !empty($_SESSION['user_id']),
+                    ]);
+                }
+                // #endregion
 
                 // Se for requisição AJAX, retornar JSON
                 if (!empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest') {

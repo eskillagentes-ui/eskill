@@ -13,6 +13,7 @@
         activeId: null,
         tokenStatus: {},
         syncStatus: {},
+        syncInFlight: new Set(),
         pendingId: null,
         pollTimer: null,
         pollInterval: 30000
@@ -239,6 +240,7 @@
         const accountStatus = String(account?.status || '').toLowerCase();
         const tokenState = String(tokenStatus?.token_status || '').toLowerCase();
         const syncTokenState = String(syncStatus?.token_status?.status || '').toLowerCase();
+        const accountNumericId = Number(account?.id);
 
         if (accountsState.pendingId === account.id) {
             return {
@@ -248,6 +250,17 @@
                 buttonClass: 'btn-outline-secondary',
                 disabled: true,
                 reason: 'Troca de conta em andamento.'
+            };
+        }
+
+        if (accountsState.syncInFlight.has(accountNumericId)) {
+            return {
+                action: 'sync-account',
+                label: 'Sincronizando...',
+                icon: 'bi-arrow-repeat',
+                buttonClass: 'btn-outline-secondary',
+                disabled: true,
+                reason: 'Sincronização em andamento para esta conta.'
             };
         }
 
@@ -757,6 +770,12 @@
     async function syncAccountFromDashboard(event, accountId) {
         event.stopPropagation();
         const numericAccountId = Number(accountId);
+
+        if (accountsState.syncInFlight.has(numericAccountId)) {
+            Toast.warning('Sincronização já em andamento para esta conta.');
+            return;
+        }
+
         const account = accountsState.accounts.find(acc => Number(acc.id) === numericAccountId);
         const tokenStatus = accountsState.tokenStatus[numericAccountId] || accountsState.tokenStatus[accountId] || {};
         const syncStatus = accountsState.syncStatus[numericAccountId] || accountsState.syncStatus[accountId] || {};
@@ -771,6 +790,9 @@
             Toast.warning(syncCapability.reason || 'Conta em processamento. Aguarde.');
             return;
         }
+
+        accountsState.syncInFlight.add(numericAccountId);
+        renderAccounts();
 
         try {
             const data = await requestJson(`/api/accounts/${numericAccountId}/sync`, {
@@ -792,6 +814,9 @@
             }
         } catch (error) {
             Toast.error('Erro ao sincronizar conta');
+        } finally {
+            accountsState.syncInFlight.delete(numericAccountId);
+            renderAccounts();
         }
     }
 

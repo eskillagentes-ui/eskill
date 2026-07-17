@@ -3,8 +3,9 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
-use App\Services\FinancialService;
+use App\Helpers\DebugAgentLog;
 use App\Helpers\SessionHelper;
+use App\Services\FinancialService;
 use Dompdf\Dompdf;
 use Dompdf\Options;
 
@@ -56,6 +57,16 @@ class FinancialReportController extends BaseController
      */
     public function index(): void
     {
+        header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+        header('Pragma: no-cache');
+
+        // #region agent log
+        DebugAgentLog::write('I', 'FinancialReportController::index', 'financials_page_render', [
+            'userId' => SessionHelper::getUserId(),
+            'accountId' => SessionHelper::getActiveAccountId(),
+        ]);
+        // #endregion
+
         $this->renderView('dashboard/financials', [
             'pageTitle' => 'Relatórios Financeiros',
             'activePage' => 'financials',
@@ -122,7 +133,7 @@ class FinancialReportController extends BaseController
         <body>
             <h1>Demonstrativo de Resultados (DRE)</h1>
             <p>Período: $startDate até $endDate</p>
-            
+
             <table>
                 <tr>
                     <td><strong>Receita Bruta</strong></td>
@@ -137,7 +148,7 @@ class FinancialReportController extends BaseController
                     <td class='amount'><strong>R$ " . number_format($pnl['net_revenue'], 2, ',', '.') . "</strong></td>
                 </tr>
                 <tr><td colspan='2'>&nbsp;</td></tr>
-                
+
                 <tr>
                     <td>(-) Custo das Mercadorias (CMV)</td>
                     <td class='amount'>R$ " . number_format($pnl['cogs'], 2, ',', '.') . "</td>
@@ -158,7 +169,7 @@ class FinancialReportController extends BaseController
                     <td>(-) Descontos</td>
                     <td class='amount'>R$ " . number_format($pnl['discounts'], 2, ',', '.') . "</td>
                 </tr>
-                
+
                 <tr class='total'>
                     <td>Lucro Líquido</td>
                     <td class='amount " . ($pnl['net_profit'] >= 0 ? 'profit' : 'loss') . "'>
@@ -170,7 +181,7 @@ class FinancialReportController extends BaseController
                     <td class='amount'>" . number_format($pnl['avg_margin'], 1, ',', '.') . "%</td>
                 </tr>
             </table>
-            
+
             <p><small>Gerado automaticamente pelo Sistema ML Manager.</small></p>
         </body>
         </html>
@@ -2306,19 +2317,72 @@ class FinancialReportController extends BaseController
      * GET /api/financials/forecast
      * Query: months_ahead (default: 3)
      */
+    /**
+     * POST /api/debug/agent-log — client-side debug trace (session required).
+     */
+    public function agentDebugLog(): void
+    {
+        header('Content-Type: application/json');
+
+        if (!SessionHelper::getUserId()) {
+            http_response_code(401);
+            echo json_encode(['ok' => false]);
+            return;
+        }
+
+        $raw = file_get_contents('php://input') ?: '';
+        $body = json_decode($raw, true);
+        if (!is_array($body)) {
+            $body = [];
+        }
+
+        DebugAgentLog::write(
+            (string) ($body['hypothesisId'] ?? 'X'),
+            (string) ($body['location'] ?? 'client'),
+            (string) ($body['message'] ?? ''),
+            is_array($body['data'] ?? null) ? $body['data'] : []
+        );
+
+        echo json_encode(['ok' => true]);
+    }
+
     public function getFinancialForecast(): void
     {
         header('Content-Type: application/json');
 
         $monthsAhead = $this->request->getInt('months_ahead', 3);
+        $resolvedAccountId = SessionHelper::getActiveAccountId();
+
+        // #region agent log
+        DebugAgentLog::write('C', 'FinancialReportController::getFinancialForecast', 'forecast_request', [
+            'resolvedAccountId' => $resolvedAccountId,
+            'userId' => SessionHelper::getUserId(),
+            'monthsAhead' => $monthsAhead,
+        ]);
+        // #endregion
 
         try {
-            $data = $this->financialService->calculateFinancialForecast($monthsAhead);
+            $forecastService = new \App\Services\Financial\FinancialForecastService($resolvedAccountId);
+            $data = $forecastService->calculateFinancialForecast($monthsAhead);
+
+            // #region agent log
+            DebugAgentLog::write('D', 'FinancialReportController::getFinancialForecast', 'forecast_response', [
+                'hasError' => isset($data['error']),
+                'historyMonths' => isset($data['historical_data']) ? count($data['historical_data']) : 0,
+                'projectionCount' => isset($data['projections']) ? count($data['projections']) : 0,
+            ]);
+            // #endregion
+
             echo json_encode([
                 'success' => !isset($data['error']),
                 'data' => $data,
             ]);
         } catch (\Exception $e) {
+            // #region agent log
+            DebugAgentLog::write('G', 'FinancialReportController::getFinancialForecast', 'forecast_exception', [
+                'message' => $e->getMessage(),
+            ]);
+            // #endregion
             http_response_code(500);
             echo json_encode(['success' => false, 'error' => $e->getMessage()]);
         }
