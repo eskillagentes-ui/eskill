@@ -130,6 +130,9 @@ jobs:
           DB_USERNAME: testuser
           DB_PASSWORD: testpass
 
+      - name: Check duplicate routes
+        run: php scripts/check-duplicate-routes.php
+
       - name: Run Unit Tests
         run: php vendor/bin/phpunit --testsuite Unit --colors=always --testdox
         env:

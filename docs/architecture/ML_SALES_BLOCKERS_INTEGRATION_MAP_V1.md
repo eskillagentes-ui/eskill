@@ -1,9 +1,9 @@
 # Mapa de Integração — Bloqueios de Venda e Alavancagem ML
 
-**Documento:** ARCH-ML-SB-001  
-**Versão:** 1.0  
-**Status:** Proposto  
-**Data:** 17/07/2026  
+**Documento:** ARCH-ML-SB-001
+**Versão:** 1.0
+**Status:** Proposto
+**Data:** 17/07/2026
 **Plano pai:** [PLAN_MOTOR_IRREGULARIDADES_CONVERSAO_V1.md](../product/PLAN_MOTOR_IRREGULARIDADES_CONVERSAO_V1.md)
 
 ---
@@ -41,7 +41,9 @@ flowchart LR
 
 **Já reutilizável (código real):**
 - `MercadoLivreClient::getItemPerformance` / `getItemHealth`
+- `MercadoLivreClient::getLastModeration` / `getInfractions` / `diagnosePicture`
 - `MercadoLivreClient` items/search
+- `ListingIrregularityScanService` + `ListingSearchVisibilityService` + `ListingVisibilityController` (UI/API read-only)
 - `AccountHealthService` (pilares; under_review count)
 - `ItemMetricsService`
 - `CompatibilityController` / `BulkCompatibilityController`
@@ -140,7 +142,7 @@ Payloads sem segredos — ver plano produto.
 
 ## 8. Frontend (wire textual)
 
-Rota sugerida (futuro): `/operations/irregularities`  
+Rota sugerida (futuro): `/operations/irregularities`
 Colunas: listing_id · status · severity · reason · remedy · score · updated_at · CTA “abrir no ML / criar draft”.
 
 Não implementar UI nesta branch documental.

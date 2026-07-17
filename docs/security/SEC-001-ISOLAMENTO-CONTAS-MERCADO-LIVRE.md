@@ -1,7 +1,7 @@
 # SEC-001 — Isolamento e Autorização de Contas Mercado Livre
 
 **Severidade:** Crítica
-**Status:** Aberta
+**Status:** Em implementação (policy + client + controllers quentes + testes unitários) — 2026-07-17
 **Data:** 16/07/2026
 **Origem:** Auditoria estática do eSkill
 

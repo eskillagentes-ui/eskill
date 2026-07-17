@@ -4,12 +4,14 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
-use App\Database;
-use App\Helpers\SessionHelper;
+use App\Security\AccountAccessException;
+use App\Security\AccountContextResolver;
+use App\Security\AuthorizedAccountContext;
+use App\Services\MercadoLivre\IrregularitySyncService;
 use App\Services\MercadoLivre\ListingIrregularityScanService;
 use App\Services\MercadoLivre\ListingSearchVisibilityService;
+use App\Services\MercadoLivre\SalesBlockerStore;
 use App\Services\MercadoLivreClient;
-use PDO;
 
 /**
  * API + dashboard read-only: irregularidades ML + fila de ativação de busca (SEO oficial /performance).
@@ -36,13 +38,12 @@ final class ListingVisibilityController extends BaseController
     public function analyzeItem(string $itemId): void
     {
         try {
-            $accountId = $this->resolveOwnedAccountId();
-            if ($accountId === null) {
-                $this->jsonError('Conta não autorizada ou não selecionada', 403);
+            $context = $this->resolveAuthorizedContext();
+            if ($context === null) {
                 return;
             }
 
-            $client = new MercadoLivreClient($accountId);
+            $client = MercadoLivreClient::fromAuthorizedContext($context);
             $service = new ListingSearchVisibilityService($client);
             $result = $service->analyzeListing($itemId);
 
@@ -67,14 +68,13 @@ final class ListingVisibilityController extends BaseController
     public function searchActivationQueue(): void
     {
         try {
-            $accountId = $this->resolveOwnedAccountId();
-            if ($accountId === null) {
-                $this->jsonError('Conta não autorizada ou não selecionada', 403);
+            $context = $this->resolveAuthorizedContext();
+            if ($context === null) {
                 return;
             }
 
             $limit = $this->request->inputInt('limit', 20);
-            $client = new MercadoLivreClient($accountId);
+            $client = MercadoLivreClient::fromAuthorizedContext($context);
             $service = new ListingSearchVisibilityService($client);
             $result = $service->buildSearchActivationQueue(null, $limit);
 
@@ -93,17 +93,26 @@ final class ListingVisibilityController extends BaseController
     public function scanIrregularities(): void
     {
         try {
-            $accountId = $this->resolveOwnedAccountId();
-            if ($accountId === null) {
-                $this->jsonError('Conta não autorizada ou não selecionada', 403);
+            $context = $this->resolveAuthorizedContext();
+            if ($context === null) {
                 return;
             }
 
             $limit = $this->request->inputInt('limit', 30);
-            $client = new MercadoLivreClient($accountId);
+            $client = MercadoLivreClient::fromAuthorizedContext($context);
             $visibility = new ListingSearchVisibilityService($client);
             $scan = new ListingIrregularityScanService($client, $visibility);
             $result = $scan->scan($limit);
+
+            $persist = filter_var($this->request->input('persist', false), FILTER_VALIDATE_BOOLEAN);
+            if ($persist) {
+                $blocked = is_array($result['blocked'] ?? null) ? $result['blocked'] : [];
+                $storeResult = (new SalesBlockerStore())->upsertBlocked($context, $blocked, 'urgent');
+                $result['store'] = [
+                    'urgent_upserted' => (int) ($storeResult['upserted'] ?? 0),
+                    'counts' => (new SalesBlockerStore())->countsByQueue($context->accountId()),
+                ];
+            }
 
             $this->jsonSuccess($result);
         } catch (\Throwable $e) {
@@ -115,14 +124,69 @@ final class ListingVisibilityController extends BaseController
     }
 
     /**
+     * POST /api/listings/irregularities/sync
+     * Sync read-only → SalesBlockerStore (nunca escreve no ML).
+     */
+    public function syncIrregularities(): void
+    {
+        try {
+            $context = $this->resolveAuthorizedContext();
+            if ($context === null) {
+                return;
+            }
+
+            $limit = $this->request->inputInt('limit', 30);
+            $client = MercadoLivreClient::fromAuthorizedContext($context);
+            $result = IrregularitySyncService::forClient($client)->syncAccount($context, $limit);
+            $this->jsonSuccess($result);
+        } catch (\Throwable $e) {
+            log_error('ListingVisibility sync failed', [
+                'error' => $e->getMessage(),
+            ]);
+            $this->jsonError('Falha ao sincronizar irregularidades', 500);
+        }
+    }
+
+    /**
+     * GET /api/listings/sales-blockers
+     */
+    public function listSalesBlockers(): void
+    {
+        try {
+            $context = $this->resolveAuthorizedContext();
+            if ($context === null) {
+                return;
+            }
+
+            $queue = (string) ($this->request->input('queue') ?? 'urgent');
+            if (!in_array($queue, ['urgent', 'exposure', 'account'], true)) {
+                $this->jsonError('queue inválida', 400);
+                return;
+            }
+
+            $store = new SalesBlockerStore();
+            $this->jsonSuccess([
+                'queue' => $queue,
+                'items' => $store->listOpen($context->accountId(), $queue, $this->request->inputInt('limit', 50)),
+                'counts' => $store->countsByQueue($context->accountId()),
+                'write_enabled' => false,
+            ]);
+        } catch (\Throwable $e) {
+            log_error('ListingVisibility sales-blockers failed', [
+                'error' => $e->getMessage(),
+            ]);
+            $this->jsonError('Falha ao listar fila de bloqueios', 500);
+        }
+    }
+
+    /**
      * GET /api/listings/infractions
      */
     public function listInfractions(): void
     {
         try {
-            $accountId = $this->resolveOwnedAccountId();
-            if ($accountId === null) {
-                $this->jsonError('Conta não autorizada ou não selecionada', 403);
+            $context = $this->resolveAuthorizedContext();
+            if ($context === null) {
                 return;
             }
 
@@ -137,7 +201,7 @@ final class ListingVisibilityController extends BaseController
                 $params['date_created_since'] = $since;
             }
 
-            $client = new MercadoLivreClient($accountId);
+            $client = MercadoLivreClient::fromAuthorizedContext($context);
             $visibility = new ListingSearchVisibilityService($client);
             $scan = new ListingIrregularityScanService($client, $visibility);
             $result = $scan->listInfractions($params);
@@ -164,9 +228,8 @@ final class ListingVisibilityController extends BaseController
     public function diagnosePicture(): void
     {
         try {
-            $accountId = $this->resolveOwnedAccountId();
-            if ($accountId === null) {
-                $this->jsonError('Conta não autorizada ou não selecionada', 403);
+            $context = $this->resolveAuthorizedContext();
+            if ($context === null) {
                 return;
             }
 
@@ -221,7 +284,7 @@ final class ListingVisibilityController extends BaseController
                 $body['context']['title'] = mb_substr($title, 0, 200);
             }
 
-            $client = new MercadoLivreClient($accountId);
+            $client = MercadoLivreClient::fromAuthorizedContext($context);
             $result = $client->diagnosePicture($body);
             $result['write_enabled'] = false;
             $result['message'] = 'Diagnóstico preventivo — nenhuma imagem foi associada ao anúncio';
@@ -245,54 +308,25 @@ final class ListingVisibilityController extends BaseController
     }
 
     /**
-     * Resolve account_id apenas se pertencer ao usuário autenticado.
-     * Não confia em account_id cru sem ownership (mitiga IDOR nestes endpoints).
+     * SEC-001: AccountAccessPolicy — header/GET/POST não contornam ownership.
      */
-    private function resolveOwnedAccountId(): ?int
-    {
-        $userId = $this->getUserId();
-        if ($userId === null || $userId <= 0) {
-            return null;
-        }
-
-        $requested = $this->request->inputInt('ml_account_id', 0);
-        if ($requested <= 0) {
-            $requested = $this->request->inputInt('account_id', 0);
-        }
-
-        if ($requested > 0) {
-            return $this->assertAccountOwnedByUser($requested, $userId) ? $requested : null;
-        }
-
-        $active = SessionHelper::getActiveAccountId();
-        if ($active === null || $active <= 0) {
-            return null;
-        }
-
-        return $this->assertAccountOwnedByUser($active, $userId) ? $active : null;
-    }
-
-    private function assertAccountOwnedByUser(int $accountId, int $userId): bool
+    private function resolveAuthorizedContext(): ?AuthorizedAccountContext
     {
         try {
-            $db = Database::getInstance();
-            $stmt = $db->prepare(
-                'SELECT id FROM ml_accounts WHERE id = :id AND user_id = :user_id LIMIT 1'
-            );
-            $stmt->execute([
-                'id' => $accountId,
-                'user_id' => $userId,
-            ]);
-            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            $explicit = $this->request->inputInt('ml_account_id', 0);
+            if ($explicit <= 0) {
+                $explicit = $this->request->inputInt('account_id', 0);
+            }
 
-            return is_array($row);
-        } catch (\Throwable $e) {
-            log_error('ListingVisibility ownership check failed', [
-                'account_id' => $accountId,
-                'user_id' => $userId,
-                'error' => $e->getMessage(),
+            return (new AccountContextResolver())->authorizeForCurrentActor(
+                'listings.read',
+                $explicit > 0 ? $explicit : null
+            );
+        } catch (AccountAccessException $e) {
+            $this->jsonError($e->getMessage(), $e->httpStatus(), [
+                'error_code' => $e->errorCode(),
             ]);
-            return false;
+            return null;
         }
     }
 }

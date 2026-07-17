@@ -8,15 +8,19 @@ use App\Services\Quality\QualityScoreService;
 use App\Services\Quality\ValidationService;
 
 /**
- * Quality Controller - Gerencia APIs de qualidade de anúncios
+ * Quality Controller — validação local e estimativa interna de qualidade.
+ *
+ * Não é a fonte canônica de exposição oficial ML (use ListingVisibilityController).
+ * Score local = internal_quality; api_health embutido = official_ml_performance.
  *
  * Endpoints:
- * - GET  /api/quality/health/{itemId} - Health check de anúncio
- * - GET  /api/quality/score/{itemId} - Quality score de anúncio
- * - POST /api/quality/validate - Validação pré-publicação
- * - POST /api/quality/validate/batch - Validação em lote
- * - POST /api/quality/autofix - Correção automática
- * - GET  /api/quality/report/{itemId} - Relatório completo
+ * - GET  /api/quality/health/{itemId}
+ * - GET  /api/quality/purchase-experience/{itemId}
+ * - GET  /api/quality/score/{itemId}
+ * - POST /api/quality/validate
+ * - POST /api/quality/validate/batch
+ * - POST /api/quality/autofix
+ * - GET  /api/quality/report/{itemId}
  */
 class QualityController extends BaseController
 {
@@ -81,6 +85,31 @@ class QualityController extends BaseController
             $this->jsonSuccess([
                 'item_id' => $itemId,
                 'recommendations' => $recommendations,
+            ]);
+        } catch (\Exception $e) {
+            $this->jsonError($e->getMessage());
+        }
+    }
+
+    /**
+     * GET /api/quality/purchase-experience/{itemId}
+     * Experiência de compra oficial do ML (reputação do anúncio).
+     */
+    public function getPurchaseExperience(string $itemId): void
+    {
+        try {
+            $service = new HealthCheckService($this->accountId);
+            $result = $service->getPurchaseExperience($itemId);
+
+            if (isset($result['error'])) {
+                $this->jsonError((string) $result['error'], 502);
+                return;
+            }
+
+            $this->jsonSuccess([
+                'item_id' => $itemId,
+                'source' => 'official_ml_purchase_experience',
+                'data' => $result,
             ]);
         } catch (\Exception $e) {
             $this->jsonError($e->getMessage());

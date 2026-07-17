@@ -448,6 +448,8 @@ use App\Controllers\ListingVisibilityController;
 $router->get('api/listings/search-visibility/queue', ListingVisibilityController::class, 'searchActivationQueue');
 $router->get('api/listings/search-visibility/{itemId}', ListingVisibilityController::class, 'analyzeItem');
 $router->get('api/listings/irregularities', ListingVisibilityController::class, 'scanIrregularities');
+$router->post('api/listings/irregularities/sync', ListingVisibilityController::class, 'syncIrregularities');
+$router->get('api/listings/sales-blockers', ListingVisibilityController::class, 'listSalesBlockers');
 $router->get('api/listings/infractions', ListingVisibilityController::class, 'listInfractions');
 $router->post('api/listings/picture-diagnostic', ListingVisibilityController::class, 'diagnosePicture');
 

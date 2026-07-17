@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "updated_at": "2026-07-17",
+  "north_star": "ADR-003: irregularidades ML + conversão Facility (read-only primeiro; escrita só após SEC-001 + aprovação humana)",
+  "features": [
+    {
+      "id": "sec-001-account-isolation",
+      "name": "SEC-001 AccountAccessPolicy + AuthorizedAccountContext",
+      "passes": true,
+      "priority": "P0"
+    },
+    {
+      "id": "sec-001-tests",
+      "name": "Suíte obrigatória SEC-001 (10 cenários)",
+      "passes": true,
+      "priority": "P0"
+    },
+    {
+      "id": "listing-irregularity-motor-readonly",
+      "name": "Motor read-only irregularidades + search visibility",
+      "passes": true,
+      "priority": "P0",
+      "notes": "ListingIrregularityScanService + ListingVisibilityController + moderations no MercadoLivreClient"
+    },
+    {
+      "id": "sales-blocker-store",
+      "name": "SalesBlockerStore + cron sync persistido",
+      "passes": true,
+      "priority": "P0",
+      "notes": "bin/sync-irregularities.php + migration ml_sales_blockers + API sync/list"
+    },
+    {
+      "id": "ml-write-automation-off",
+      "name": "Feature flag ML_WRITE_AUTOMATION desligada por padrão",
+      "passes": true,
+      "priority": "P1"
+    },
+    {
+      "id": "ci-duplicate-routes",
+      "name": "CI falha em rotas duplicadas com handlers distintos",
+      "passes": true,
+      "priority": "P1"
+    },
+    {
+      "id": "ai-gateway-consolidation",
+      "name": "AIService legado delega ao gateway unificado",
+      "passes": true,
+      "priority": "P2"
+    },
+    {
+      "id": "migrations-baseline-doc",
+      "name": "Baseline de migrations documentado (CI schema snapshot)",
+      "passes": true,
+      "priority": "P2"
+    },
+    {
+      "id": "observed-sample-metrics",
+      "name": "Métricas de concorrência renomeadas (amostra observada)",
+      "passes": true,
+      "priority": "P2"
+    }
+  ]
+}

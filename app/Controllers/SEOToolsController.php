@@ -11,14 +11,13 @@ use App\Services\ListingBuilderService;
 // use App\Services\PricingStrategyService;
 
 /**
- * @deprecated This controller's functionality is consolidated in SEOKillerController.
- * API endpoints remain functional but new features should go in SEOKillerController.
+ * Primitivas de análise/construção SEO (pré-publicação e tools).
+ * Product UX vive no SEOKillerController; este controller permanece canônico para:
+ * POST /api/seo/analyze e ferramentas de título/listing.
  *
- * Controller de SEO e Otimização de Anúncios
- * 
  * Endpoints disponíveis:
  * - GET  /api/seo/analyze/{itemId}          - Análise SEO de um anúncio
- * - POST /api/seo/analyze                   - Análise SEO de dados de anúncio
+ * - POST /api/seo/analyze                   - Análise SEO de dados de anúncio (canônico)
  * - POST /api/seo/analyze/batch             - Análise em lote
  * - GET  /api/seo/keywords/{categoryId}     - Pesquisa de keywords
  * - POST /api/seo/keywords/volume           - Volume de busca de keyword
@@ -34,13 +33,13 @@ class SEOToolsController
 {
     private ?int $accountId = null;
     private Request $request;
-    
+
     public function __construct()
     {
         $this->request = new Request();
         // Iniciar sessão se necessário
         $this->ensureSession();
-        
+
         // Obter account_id da sessão ou query
         $queryAccountId = $this->request->getInt('account_id', 0) ?: null;
         $this->accountId = $_SESSION['current_account_id'] ?? $queryAccountId;
@@ -48,7 +47,7 @@ class SEOToolsController
             $this->accountId = (int)$this->accountId;
         }
     }
-    
+
     /**
      * Análise SEO de um anúncio existente
      * GET /api/seo/analyze/{itemId}
@@ -60,7 +59,7 @@ class SEOToolsController
             return $analyzer->analyzeItem($itemId);
         });
     }
-    
+
     /**
      * Análise SEO de dados de anúncio (pré-publicação)
      * POST /api/seo/analyze
@@ -69,16 +68,16 @@ class SEOToolsController
     {
         $this->json(function() {
             $data = $this->getJsonInput();
-            
+
             if (empty($data)) {
                 return ['error' => 'Dados do anúncio são obrigatórios'];
             }
-            
+
             $analyzer = new SeoAnalyzerService($this->accountId);
             return $analyzer->analyzeItemData($data);
         });
     }
-    
+
     /**
      * Análise SEO em lote
      * POST /api/seo/analyze/batch
@@ -88,16 +87,16 @@ class SEOToolsController
         $this->json(function() {
             $data = $this->getJsonInput();
             $itemIds = $data['item_ids'] ?? [];
-            
+
             if (empty($itemIds)) {
                 return ['error' => 'Lista de IDs é obrigatória'];
             }
-            
+
             $analyzer = new SeoAnalyzerService($this->accountId);
             return $analyzer->analyzeBatch($itemIds);
         });
     }
-    
+
     /**
      * Pesquisa de keywords para uma categoria
      * GET /api/seo/keywords/{categoryId}
@@ -106,12 +105,12 @@ class SEOToolsController
     {
         $this->json(function() use ($categoryId) {
             $baseKeyword = $this->request->get('keyword');
-            
+
             $keywordService = new KeywordResearchService($this->accountId);
             return $keywordService->researchKeywords($categoryId, $baseKeyword);
         });
     }
-    
+
     /**
      * Estima volume de busca de uma keyword
      * POST /api/seo/keywords/volume
@@ -122,16 +121,16 @@ class SEOToolsController
             $data = $this->getJsonInput();
             $keyword = $data['keyword'] ?? '';
             $categoryId = $data['category_id'] ?? null;
-            
+
             if (empty($keyword)) {
                 return ['error' => 'Keyword é obrigatória'];
             }
-            
+
             $keywordService = new KeywordResearchService($this->accountId);
             return $keywordService->estimateSearchVolume($keyword, $categoryId);
         });
     }
-    
+
     /**
      * Gera variações de keyword
      * GET /api/seo/keywords/variations
@@ -140,11 +139,11 @@ class SEOToolsController
     {
         $this->json(function() {
             $keyword = $this->request->get('keyword', '') ?? '';
-            
+
             if (empty($keyword)) {
                 return ['error' => 'Keyword é obrigatória'];
             }
-            
+
             $keywordService = new KeywordResearchService($this->accountId);
             return [
                 'keyword' => $keyword,
@@ -152,7 +151,7 @@ class SEOToolsController
             ];
         });
     }
-    
+
     /**
      * Obtém trends de uma categoria
      * GET /api/seo/trends/{categoryId}
@@ -167,7 +166,7 @@ class SEOToolsController
             ];
         });
     }
-    
+
     /**
      * Otimiza um título existente
      * POST /api/seo/title/optimize
@@ -177,23 +176,23 @@ class SEOToolsController
         $this->json(function() {
             $data = $this->getJsonInput();
             $title = $data['title'] ?? '';
-            
+
             if (empty($title)) {
                 return ['error' => 'Título é obrigatório'];
             }
-            
+
             $productInfo = [
                 'brand' => $data['brand'] ?? null,
                 'model' => $data['model'] ?? null,
                 'category_id' => $data['category_id'] ?? null,
                 'attributes' => $data['attributes'] ?? [],
             ];
-            
+
             $optimizer = new TitleOptimizerService($this->accountId);
             return $optimizer->optimize($title, $productInfo);
         });
     }
-    
+
     /**
      * Analisa um título
      * POST /api/seo/title/analyze
@@ -203,16 +202,16 @@ class SEOToolsController
         $this->json(function() {
             $data = $this->getJsonInput();
             $title = $data['title'] ?? '';
-            
+
             if (empty($title)) {
                 return ['error' => 'Título é obrigatório'];
             }
-            
+
             $optimizer = new TitleOptimizerService($this->accountId);
             return $optimizer->analyzeTitle($title);
         });
     }
-    
+
     /**
      * Sugere título baseado em categoria e atributos
      * POST /api/seo/title/suggest
@@ -223,16 +222,16 @@ class SEOToolsController
             $data = $this->getJsonInput();
             $categoryId = $data['category_id'] ?? '';
             $attributes = $data['attributes'] ?? [];
-            
+
             if (empty($categoryId)) {
                 return ['error' => 'Categoria é obrigatória'];
             }
-            
+
             $optimizer = new TitleOptimizerService($this->accountId);
             return $optimizer->suggestTitle($categoryId, $attributes);
         });
     }
-    
+
     /**
      * Constrói anúncio otimizado
      * POST /api/seo/listing/build
@@ -241,16 +240,16 @@ class SEOToolsController
     {
         $this->json(function() {
             $data = $this->getJsonInput();
-            
+
             if (empty($data['category_id'])) {
                 return ['error' => 'Categoria é obrigatória'];
             }
-            
+
             $builder = new ListingBuilderService($this->accountId);
             return $builder->buildListing($data);
         });
     }
-    
+
     /**
      * Gera descrição otimizada
      * POST /api/seo/listing/description
@@ -259,21 +258,21 @@ class SEOToolsController
     {
         $this->json(function() {
             $data = $this->getJsonInput();
-            
+
             if (empty($data['title']) && empty($data['category_id'])) {
                 return ['error' => 'Título ou categoria são obrigatórios'];
             }
-            
+
             $builder = new ListingBuilderService($this->accountId);
             $keywordService = new KeywordResearchService($this->accountId);
-            
+
             $keywords = [];
             if (!empty($data['category_id'])) {
                 $keywords = $keywordService->researchKeywords($data['category_id'], $data['title'] ?? '');
             }
-            
+
             $description = $builder->buildDescription($data, $keywords);
-            
+
             return [
                 'description' => $description,
                 'character_count' => mb_strlen($description),
@@ -281,7 +280,7 @@ class SEOToolsController
             ];
         });
     }
-    
+
     /**
      * Publica anúncio no ML
      * POST /api/seo/listing/publish
@@ -290,20 +289,20 @@ class SEOToolsController
     {
         $this->json(function() {
             $data = $this->getJsonInput();
-            
+
             if (empty($data)) {
                 return ['error' => 'Dados do anúncio são obrigatórios'];
             }
-            
+
             if (!$this->accountId) {
                 return ['error' => 'Conta ML não selecionada'];
             }
-            
+
             $builder = new ListingBuilderService($this->accountId);
             return $builder->publishListing($data);
         });
     }
-    
+
     /**
      * Duplica e otimiza um anúncio existente
      * GET /api/seo/listing/duplicate/{itemId}
@@ -314,12 +313,12 @@ class SEOToolsController
             if (!$this->accountId) {
                 return ['error' => 'Conta ML não selecionada'];
             }
-            
+
             $builder = new ListingBuilderService($this->accountId);
             return $builder->duplicateAndOptimize($itemId);
         });
     }
-    
+
     /**
      * Análise de preços da concorrência
      * GET /api/seo/pricing/{categoryId}
@@ -331,13 +330,13 @@ class SEOToolsController
             /*
             $brand = $this->request->get('brand');
             $keyword = $this->request->get('keyword');
-            
+
             $pricingService = new PricingStrategyService($this->accountId);
             return $pricingService->analyzeCompetitorPrices($categoryId, $brand, $keyword);
             */
         });
     }
-    
+
     /**
      * Sugere preço baseado em estratégia
      * POST /api/seo/pricing/suggest
@@ -350,32 +349,32 @@ class SEOToolsController
             $data = $this->getJsonInput();
             $categoryId = $data['category_id'] ?? '';
             $strategy = $data['strategy'] ?? 'competitive';
-            
+
             if (empty($categoryId)) {
                 return ['error' => 'Categoria é obrigatória'];
             }
-            
+
             $pricingService = new PricingStrategyService($this->accountId);
             $analysis = $pricingService->analyzeCompetitorPrices(
                 $categoryId,
                 $data['brand'] ?? null,
                 $data['keyword'] ?? null
             );
-            
+
             if (isset($analysis['error'])) {
                 return $analysis;
             }
-            
+
             $options = [
                 'cost' => $data['cost'] ?? null,
                 'target_margin' => $data['target_margin'] ?? null,
             ];
-            
+
             return $pricingService->suggestPrice($analysis, $strategy, $options);
             */
         });
     }
-    
+
     /**
      * Compara preço com concorrentes
      * POST /api/seo/pricing/compare
@@ -388,11 +387,11 @@ class SEOToolsController
             $data = $this->getJsonInput();
             $price = (float)($data['price'] ?? 0);
             $categoryId = $data['category_id'] ?? '';
-            
+
             if ($price <= 0 || empty($categoryId)) {
                 return ['error' => 'Preço e categoria são obrigatórios'];
             }
-            
+
             $pricingService = new PricingStrategyService($this->accountId);
             return $pricingService->compareWithCompetitors(
                 $price,
@@ -402,7 +401,7 @@ class SEOToolsController
             */
         });
     }
-    
+
     /**
      * Calcula preço com margem desejada
      * POST /api/seo/pricing/calculate
@@ -415,19 +414,19 @@ class SEOToolsController
             $data = $this->getJsonInput();
             $cost = (float)($data['cost'] ?? 0);
             $margin = (float)($data['margin'] ?? 0);
-            
+
             if ($cost <= 0 || $margin <= 0) {
                 return ['error' => 'Custo e margem são obrigatórios'];
             }
-            
+
             $fees = $data['fees'] ?? [];
-            
+
             $pricingService = new PricingStrategyService($this->accountId);
             return $pricingService->calculatePriceWithMargin($cost, $margin, $fees);
             */
         });
     }
-    
+
     /**
      * Monitora preço de um item
      * GET /api/seo/pricing/track/{itemId}
@@ -442,7 +441,7 @@ class SEOToolsController
             */
         });
     }
-    
+
     /**
      * Dashboard SEO - visão geral
      * GET /api/seo/dashboard
@@ -470,7 +469,7 @@ class SEOToolsController
             ];
         });
     }
-    
+
     /**
      * Obtém input JSON da requisição
      */
@@ -480,7 +479,7 @@ class SEOToolsController
         $data = json_decode($input, true);
         return is_array($data) ? $data : [];
     }
-    
+
     /**
      * Retorna resposta JSON
      */
@@ -489,7 +488,7 @@ class SEOToolsController
         if ($this->canSendHeaders()) {
             header('Content-Type: application/json; charset=utf-8');
         }
-        
+
         try {
             $result = $handler();
             echo json_encode($result, JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);

@@ -1,0 +1,23 @@
+# Progress log (newest first)
+
+## 2026-07-17 — Plano pós-varredura executado
+
+### Entregue
+- Harness: `project-status.json` + `claude-progress.txt`; PLAN-IRR e mapa de integração atualizados vs código real.
+- SEC-001: `AccountAccessPolicy`, `OwnerUserAccountAccessPolicy`, `AuthorizedAccountContext`, `AccountContextResolver`.
+- `MercadoLivreClient`: removida resolução por header/GET/POST e fallback “última conta ativa”; factory `fromAuthorizedContext`.
+- Wired: ItemController, OrderController, ListingVisibilityController, AccountContextMiddleware, BaseController helpers.
+- Testes SEC-001 (10 cenários) + MlWriteAutomation + DuplicateRoutes — OK.
+- SalesBlockerStore + IrregularitySyncService + `bin/sync-irregularities.php` + migration/schema `ml_sales_blockers`.
+- API: POST `/api/listings/irregularities/sync`, GET `/api/listings/sales-blockers`.
+- `ML_WRITE_AUTOMATION=false` default; guard em DecisionEngine, AutoPricing, SEO AutoPilot.
+- CI: `scripts/check-duplicate-routes.php`; removida duplicata `GET api/jobs/{id}` em web.php.
+- AIService → delega a LLMService; DeepResearch `observed_sample_share`; docs/database/MIGRATIONS_BASELINE.md.
+
+### Pendente / atenção
+- Aplicar migration `ml_sales_blockers` nos ambientes reais.
+- WIP pré-existente na branch (Quality/SEO/navbar) ainda no working tree — não commitado.
+- SEC-001 ainda não está em 100% dos controllers do monólito; caminhos críticos cobertos.
+- Codacy MCP indisponível nesta sessão (sugerir reset MCP / settings Copilot).
+
+---

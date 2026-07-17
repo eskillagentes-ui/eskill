@@ -98,20 +98,18 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
 
             <a href="/dashboard/account-health" class="nav-item <?= isActive('/account-health') ? 'active' : '' ?>">
                 <i class="bi bi-heart-pulse"></i>
-                <span>Diagnóstico</span>
-                <span class="nav-badge new">Novo</span>
+                <span>Diagnóstico Conta</span>
             </a>
 
             <a href="/dashboard/listing-visibility" class="nav-item <?= isActive('/listing-visibility') ? 'active' : '' ?>">
                 <i class="bi bi-search-heart"></i>
                 <span>Visibilidade ML</span>
-                <span class="nav-badge new">Novo</span>
+                <span class="nav-badge new">Oficial</span>
             </a>
 
             <a href="/dashboard/raio-x" class="nav-item <?= isActive('/raio-x') ? 'active' : '' ?>">
                 <i class="bi bi-radioactive text-danger"></i>
-                <span>Raio X da Conta</span>
-                <span class="nav-badge" style="background:#dc3545;color:#fff">X</span>
+                <span>Raio X (recuperação)</span>
             </a>
         </div>
 
@@ -130,9 +128,14 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
                 <span class="nav-badge pro">PRO</span>
             </a>
 
-            <a href="/dashboard/seo-killer#technical-sheet" class="nav-item <?= isActive('/ficha-tecnica') || isActive('/tech-sheet') ? 'active' : '' ?>">
+            <a href="/dashboard/tech-sheet" class="nav-item <?= isActive('/ficha-tecnica') || isActive('/tech-sheet') ? 'active' : '' ?>">
                 <i class="bi bi-card-checklist"></i>
                 <span>Ficha Técnica</span>
+            </a>
+
+            <a href="/dashboard/quality" class="nav-item <?= isActive('/quality') ? 'active' : '' ?>">
+                <i class="bi bi-shield-check"></i>
+                <span>Validação Anúncios</span>
             </a>
 
             <a href="/dashboard/items/bulk" class="nav-item <?= isActive('/items/bulk') && !isActive('/bulk-compatibility') ? 'active' : '' ?>">
@@ -250,9 +253,13 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
                 <span>Pesq. Vendedores</span>
                 <span class="badge bg-success ms-auto" style="font-size:0.6rem;">NOVO</span>
             </a>
-            <a href="/dashboard/seo-killer#ai-insights" class="nav-item <?= isActive('/ai-optimization') || isActive('/ai-insights') ? 'active' : '' ?>">
+            <a href="/dashboard/ai-center" class="nav-item <?= isActive('/ai-center') ? 'active' : '' ?>">
+                <i class="bi bi-cpu"></i>
+                <span>Central de IA</span>
+            </a>
+            <a href="/dashboard/seo-killer#ai-insights" class="nav-item">
                 <i class="bi bi-robot"></i>
-                <span>AI Insights</span>
+                <span>Insights SEO (IA)</span>
             </a>
         </div>
 

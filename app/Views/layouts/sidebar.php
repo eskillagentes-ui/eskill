@@ -52,8 +52,10 @@ $menuGroups = [
         'items' => [
             ['path' => '/dashboard/seo-killer', 'icon' => 'bi-lightning-charge', 'label' => 'SEO Killer', 'badge' => 'PRO'],
             ['path' => '/dashboard/tech-sheet', 'icon' => 'bi-list-check', 'label' => 'Ficha Técnica'],
-            ['path' => '/dashboard/ai-optimization', 'icon' => 'bi-magic', 'label' => 'Otimização IA'],
-            ['path' => '/dashboard/seo-intelligence', 'icon' => 'bi-graph-up-arrow', 'label' => 'SEO Intelligence'],
+            ['path' => '/dashboard/listing-visibility', 'icon' => 'bi-search-heart', 'label' => 'Visibilidade ML'],
+            ['path' => '/dashboard/quality', 'icon' => 'bi-shield-check', 'label' => 'Validação Anúncios'],
+            ['path' => '/dashboard/account-health', 'icon' => 'bi-heart-pulse', 'label' => 'Diagnóstico Conta'],
+            ['path' => '/dashboard/seo-killer#ai-insights', 'icon' => 'bi-magic', 'label' => 'Insights SEO (IA)'],
             ['path' => '/research', 'icon' => 'bi-zoom-in', 'label' => 'Deep Research'],
         ]
     ],

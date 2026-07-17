@@ -1,4 +1,10 @@
 {
+  "name": "eskill",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/jessestainx/eskill.git"
+  },
   "scripts": {
     "test": "npm run test:e2e",
     "test:e2e": "node scripts/run-playwright.js",

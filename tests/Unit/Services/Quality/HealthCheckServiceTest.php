@@ -35,21 +35,28 @@ class HealthCheckServiceTest extends TestCase
     {
         $mock = $this->createMock(MercadoLivreClient::class);
         $mock->method('get')
-            ->willReturnCallback(function (string $endpoint): array {
-                if (str_contains($endpoint, '/health')) {
-                    return ['error' => 'not_available'];
-                }
-                return [
-                    'id' => 'MLB123',
-                    'title' => 'Bagageiro CG 160 Titan',
-                    'status' => 'active',
-                    'price' => 189.90,
-                    'pictures' => [['id' => 'p1'], ['id' => 'p2'], ['id' => 'p3']],
-                    'attributes' => [['id' => 'BRAND', 'value_name' => 'AWA']],
-                    'shipping' => ['free_shipping' => true],
-                    'listing_type_id' => 'gold_special',
-                ];
-            });
+            ->willReturn([
+                'id' => 'MLB123',
+                'title' => 'Bagageiro CG 160 Titan',
+                'status' => 'active',
+                'price' => 189.90,
+                'pictures' => [['id' => 'p1'], ['id' => 'p2'], ['id' => 'p3']],
+                'attributes' => [['id' => 'BRAND', 'value_name' => 'AWA']],
+                'shipping' => ['free_shipping' => true],
+                'listing_type_id' => 'gold_special',
+            ]);
+        $mock->method('getItemHealth')
+            ->with('MLB123')
+            ->willReturn([
+                'item_id' => 'MLB123',
+                'health_score' => 72,
+                'status' => 'fair',
+                'level_wording' => 'Regular',
+                'issues' => [],
+                'recommendations' => ['Completar título'],
+                'buckets' => [],
+                'calculated_at' => '2026-07-17T12:00:00Z',
+            ]);
 
         $service = $this->buildService($mock);
         $result = $service->checkItemHealth('MLB123');
@@ -58,6 +65,9 @@ class HealthCheckServiceTest extends TestCase
         $this->assertSame('MLB123', $result['item_id']);
         $this->assertArrayHasKey('health', $result);
         $this->assertArrayHasKey('score', $result['health']);
+        $this->assertTrue($result['health']['api_health']['available']);
+        $this->assertSame('official_ml_performance', $result['health']['api_health']['source']);
+        $this->assertSame(72, $result['health']['api_health']['score']);
     }
 
     public function testCheckItemHealthApiError(): void

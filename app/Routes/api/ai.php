@@ -103,8 +103,9 @@ use App\Controllers\SEOApiController;
 // Status do serviço
 $router->get('api/seo/status', SEOApiController::class, 'status');
 
-// SEO Optimizer
-$router->post('api/seo/analyze', SEOApiController::class, 'analyze');
+// SEO Optimizer — canônico: SEOToolsController em api/items.php (POST /api/seo/analyze).
+// Rota IA dedicada (evita sombra sobre o endpoint canônico).
+$router->post('api/seo/ai/analyze', SEOApiController::class, 'analyze');
 $router->post('api/seo/optimize-title', SEOApiController::class, 'optimizeTitle');
 $router->post('api/seo/generate-description', SEOApiController::class, 'generateDescription');
 $router->post('api/seo/keywords', SEOApiController::class, 'researchKeywords');

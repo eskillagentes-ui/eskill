@@ -8,8 +8,9 @@ use App\Services\SEO\TechSheetService;
 use App\Services\SEO\AIClient;
 
 /**
- * @deprecated This controller's functionality is consolidated in SEOKillerController.
- * API endpoints remain functional but new features should go in SEOKillerController.
+ * @deprecated Prefer SEOKillerController for new product features.
+ * Endpoints remain for AI helpers. Analyze moved to POST /api/seo/ai/analyze
+ * to avoid shadowing the canonical SEOToolsController POST /api/seo/analyze.
  *
  * SEO API Controller - Endpoints REST para funcionalidades de SEO com IA
  */

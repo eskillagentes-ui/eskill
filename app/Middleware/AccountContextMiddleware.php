@@ -4,9 +4,12 @@ declare(strict_types=1);
 
 namespace App\Middleware;
 
+use App\Security\AccountAccessException;
+use App\Security\AccountContextResolver;
+
 /**
  * Account Context Middleware
- * Ensures all requests have proper account context for multi-tenant isolation
+ * Ensures all requests have proper account context for multi-tenant isolation (SEC-001).
  */
 class AccountContextMiddleware
 {
@@ -15,52 +18,33 @@ class AccountContextMiddleware
      */
     public function handle(): void
     {
-        // Get current account from session
-        $accountId = $_SESSION['current_account_id'] ?? null;
-        
-        // If no account in session but user is logged in, get default account
-        if (!$accountId && isset($_SESSION['user_id'])) {
-            $accountId = $this->getDefaultAccountForUser($_SESSION['user_id']);
-            
-            if ($accountId) {
+        $accountId = null;
+        $userId = isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : 0;
+
+        if ($userId > 0) {
+            try {
+                $context = (new AccountContextResolver())->authorizeForCurrentActor('session.context');
+                $accountId = $context->accountId();
                 $_SESSION['current_account_id'] = $accountId;
+                $_SESSION['active_ml_account_id'] = $accountId;
+            } catch (AccountAccessException $e) {
+                $accountId = null;
             }
         }
-        
-        // Store in global context for easy access
+
         if (!defined('CURRENT_ACCOUNT_ID')) {
             define('CURRENT_ACCOUNT_ID', $accountId);
         }
-        
-        // Log account context for debugging
+
         if ($accountId) {
-            log_debug('Request context', ['service' => 'AccountContextMiddleware', 'user_id' => $_SESSION['user_id'], 'account_id' => $accountId]);
+            log_debug('Request context', [
+                'service' => 'AccountContextMiddleware',
+                'user_id' => $userId,
+                'account_id' => $accountId,
+            ]);
         }
     }
-    
-    /**
-     * Get default account for a user
-     */
-    private function getDefaultAccountForUser(int $userId): ?int
-    {
-        try {
-            $db = \App\Database::getInstance();
-            $stmt = $db->prepare("
-                SELECT id FROM ml_accounts 
-                WHERE user_id = :user_id 
-                ORDER BY created_at ASC 
-                LIMIT 1
-            ");
-            $stmt->execute(['user_id' => $userId]);
-            $account = $stmt->fetch(\PDO::FETCH_ASSOC);
-            
-            return $account['id'] ?? null;
-        } catch (\Exception $e) {
-            log_error('Failed to get default account', ['service' => 'AccountContextMiddleware', 'error' => $e->getMessage()]);
-            return null;
-        }
-    }
-    
+
     /**
      * Get current account ID
      */
@@ -68,36 +52,32 @@ class AccountContextMiddleware
     {
         return defined('CURRENT_ACCOUNT_ID') ? CURRENT_ACCOUNT_ID : null;
     }
-    
+
     /**
-     * Switch to a different account
+     * Switch to a different account (SEC-001 + audit).
      */
     public static function switchAccount(int $accountId, int $userId): bool
     {
         try {
-            // Verify user has access to this account
-            $db = \App\Database::getInstance();
-            $stmt = $db->prepare("
-                SELECT id FROM ml_accounts 
-                WHERE id = :account_id AND user_id = :user_id
-            ");
-            $stmt->execute([
+            (new AccountContextResolver())->switchActiveAccount($userId, $accountId);
+            return true;
+        } catch (AccountAccessException $e) {
+            log_warning('Account switch denied', [
+                'service' => 'AccountContextMiddleware',
+                'user_id' => $userId,
                 'account_id' => $accountId,
-                'user_id' => $userId
+                'error_code' => $e->errorCode(),
             ]);
-            
-            if ($stmt->fetch()) {
-                $_SESSION['current_account_id'] = $accountId;
-                return true;
-            }
-            
             return false;
-        } catch (\Exception $e) {
-            log_error('Failed to switch account', ['service' => 'AccountContextMiddleware', 'error' => $e->getMessage()]);
+        } catch (\Throwable $e) {
+            log_error('Failed to switch account', [
+                'service' => 'AccountContextMiddleware',
+                'error' => $e->getMessage(),
+            ]);
             return false;
         }
     }
-    
+
     /**
      * Get all accounts for current user
      */
@@ -106,14 +86,14 @@ class AccountContextMiddleware
         try {
             $db = \App\Database::getInstance();
             $stmt = $db->prepare("
-                SELECT 
+                SELECT
                     id,
                     ml_user_id,
                     nickname,
                     email,
                     created_at,
                     (id = :current_id) as is_current
-                FROM ml_accounts 
+                FROM ml_accounts
                 WHERE user_id = :user_id
                 ORDER BY created_at ASC
             ");
@@ -121,7 +101,7 @@ class AccountContextMiddleware
                 'user_id' => $userId,
                 'current_id' => $_SESSION['current_account_id'] ?? 0
             ]);
-            
+
             return $stmt->fetchAll(\PDO::FETCH_ASSOC);
         } catch (\Exception $e) {
             log_error('Failed to get user accounts', ['service' => 'AccountContextMiddleware', 'error' => $e->getMessage()]);

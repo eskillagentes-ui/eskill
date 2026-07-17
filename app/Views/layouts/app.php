@@ -506,7 +506,18 @@ $activePage = $activePage ?? '';
                     <a class="nav-link <?= strpos($currentPath, '/dashboard/ai-center') !== false ? 'active' : '' ?>" href="/dashboard/ai-center">
                         <i class="bi bi-cpu"></i>
                         <span class="nav-text">Central de IA</span>
-                        <span class="badge bg-success ms-auto" style="font-size: 0.6rem;">NEW</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?= strpos($currentPath, '/dashboard/account-health') !== false ? 'active' : '' ?>" href="/dashboard/account-health">
+                        <i class="bi bi-heart-pulse"></i>
+                        <span class="nav-text">Diagnóstico Conta</span>
+                    </a>
+                </li>
+                <li class="nav-item">
+                    <a class="nav-link <?= strpos($currentPath, '/dashboard/listing-visibility') !== false ? 'active' : '' ?>" href="/dashboard/listing-visibility">
+                        <i class="bi bi-search-heart"></i>
+                        <span class="nav-text">Visibilidade ML</span>
                     </a>
                 </li>
 
@@ -580,15 +591,15 @@ $activePage = $activePage ?? '';
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link <?= strpos($currentPath, '/dashboard/seo-killer') !== false ? 'active' : '' ?>" href="/dashboard/seo-killer#ai-insights">
-                        <i class="bi bi-magic"></i>
-                        <span class="nav-text">AI Insights</span>
+                    <a class="nav-link <?= strpos($currentPath, '/dashboard/quality') !== false ? 'active' : '' ?>" href="/dashboard/quality">
+                        <i class="bi bi-shield-check"></i>
+                        <span class="nav-text">Validação Anúncios</span>
                     </a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link <?= strpos($currentPath, '/dashboard/seo-killer') !== false ? 'active' : '' ?>" href="/dashboard/seo-killer#competitor-spy">
-                        <i class="bi bi-graph-up-arrow"></i>
-                        <span class="nav-text">Espião Concorrentes</span>
+                    <a class="nav-link" href="/dashboard/seo-killer#ai-insights">
+                        <i class="bi bi-magic"></i>
+                        <span class="nav-text">Insights SEO (IA)</span>
                     </a>
                 </li>
                 <li class="nav-item">

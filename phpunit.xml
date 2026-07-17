@@ -199,6 +199,10 @@
             <!-- ML-BLG-060: Trilha de Auditoria ML -->
             <file>tests/Unit/Services/MercadoLivre/MlOrderAuditServiceTest.php</file>
             <file>tests/Unit/Services/MercadoLivre/ListingSearchVisibilityServiceTest.php</file>
+            <!-- SEC-001 + ADR-003 -->
+            <file>tests/Unit/Security/OwnerUserAccountAccessPolicyTest.php</file>
+            <file>tests/Unit/Helpers/MlWriteAutomationTest.php</file>
+            <file>tests/Unit/Routing/DuplicateRoutesTest.php</file>
             <!-- ML-BLG-061: Analytics e Pricing Avançado (feature flags) -->
             <file>tests/Unit/Services/MercadoLivre/MlAdvancedFeaturesServiceTest.php</file>
         </testsuite>

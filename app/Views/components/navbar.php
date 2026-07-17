@@ -76,15 +76,16 @@ if ($currentUser) {
                             <i class="bi bi-fire me-1"></i>SEO
                         </a>
                         <ul class="dropdown-menu">
-                            <li><a class="dropdown-item" href="/dashboard/seo-killer"><i class="bi bi-speedometer2 me-2"></i>Dashboard SEO</a></li>
+                            <li><a class="dropdown-item" href="/dashboard/seo-killer"><i class="bi bi-speedometer2 me-2"></i>SEO Killer</a></li>
+                            <li><a class="dropdown-item" href="/dashboard/listing-visibility"><i class="bi bi-search-heart me-2"></i>Visibilidade ML</a></li>
                             <li>
                                 <hr class="dropdown-divider">
                             </li>
-                            <li><a class="dropdown-item" href="/dashboard/seo-killer#technical-sheet"><i class="bi bi-card-checklist me-2"></i>Ficha Técnica</a></li>
-                            <li><a class="dropdown-item" href="/dashboard/seo-killer#competitor-spy"><i class="bi bi-binoculars me-2"></i>Espião de Concorrentes</a></li>
+                            <li><a class="dropdown-item" href="/dashboard/tech-sheet"><i class="bi bi-card-checklist me-2"></i>Ficha Técnica</a></li>
+                            <li><a class="dropdown-item" href="/dashboard/seo-killer#competitor-spy"><i class="bi bi-binoculars me-2"></i>Espião SEO</a></li>
                             <li><a class="dropdown-item" href="/dashboard/seo-killer#performance-tracker"><i class="bi bi-graph-up-arrow me-2"></i>Performance Tracker</a></li>
                             <li><a class="dropdown-item" href="/dashboard/seo-killer#ab-testing"><i class="bi bi-clipboard-data me-2"></i>Testes A/B</a></li>
-                            <li><a class="dropdown-item" href="/dashboard/seo-killer#ai-insights"><i class="bi bi-lightbulb me-2"></i>AI Insights</a></li>
+                            <li><a class="dropdown-item" href="/dashboard/seo-killer#ai-insights"><i class="bi bi-lightbulb me-2"></i>Insights SEO (IA)</a></li>
                             <li>
                                 <hr class="dropdown-divider">
                             </li>

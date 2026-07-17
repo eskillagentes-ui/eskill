@@ -10,15 +10,13 @@ use App\Services\Shipping\ShippingOptimizerService;
 use App\Services\Shipping\DimensionCalculatorService;
 
 /**
- * Health Check Service - Verifica a saúde de anúncios no Mercado Livre
+ * Health Check Service — validação local + sinais oficiais ML de exposição.
  *
- * Analisa o status de saúde (health) de anúncios publicados, identificando:
- * - Problemas que afetam visibilidade
- * - Oportunidades de melhoria
- * - Alertas críticos
- * - Recomendações de ação
+ * Camadas de score (não misturar):
+ * - api_health (official_ml): GET /item/{id}/performance (substitui /items/{id}/health desde fev/2025)
+ * - health.score (internal_quality): heurística local pré/pós publicação
  *
- * Baseado na API oficial: /items/{item_id}/health
+ * Para fila operacional de busca/moderação use ListingSearchVisibilityService.
  */
 class HealthCheckService
 {
@@ -112,26 +110,36 @@ class HealthCheckService
     }
 
     /**
-     * Obtém dados de Health da API oficial do ML (se disponível)
+     * Sinais oficiais de exposição/qualidade via /item/{id}/performance.
+     *
+     * @return array{available: bool, source?: string, status?: string, level_wording?: string, issues?: list<array<string, mixed>>, recommendations?: list<string>, score?: int|null, calculated_at?: mixed}
      */
-    private function getApiHealth(string $itemId): ?array
+    private function getApiHealth(string $itemId): array
     {
         try {
-            $health = $this->client->get("/items/{$itemId}/health");
+            $health = $this->client->getItemHealth($itemId);
 
             if (!isset($health['error'])) {
                 return [
                     'available' => true,
+                    'source' => 'official_ml_performance',
                     'status' => $health['status'] ?? 'unknown',
+                    'level_wording' => $health['level_wording'] ?? '',
                     'issues' => $health['issues'] ?? [],
-                    'score' => $health['score'] ?? null,
+                    'recommendations' => $health['recommendations'] ?? [],
+                    'score' => $health['health_score'] ?? null,
+                    'calculated_at' => $health['calculated_at'] ?? null,
                 ];
             }
         } catch (\Exception $e) {
-            // API health pode não estar disponível para todos os itens
+            log_error('Falha ao obter performance ML no health check', [
+                'service' => 'HealthCheckService',
+                'item_id' => $itemId,
+                'error' => $e->getMessage(),
+            ]);
         }
 
-        return ['available' => false];
+        return ['available' => false, 'source' => 'official_ml_performance'];
     }
 
     /**

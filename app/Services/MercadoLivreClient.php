@@ -119,13 +119,25 @@ class MercadoLivreClient
         }
     }
 
+    /**
+     * Factory SEC-001: só cria client a partir de contexto já autorizado.
+     */
+    public static function fromAuthorizedContext(
+        \App\Security\AuthorizedAccountContext $context,
+        ?MercadoLivreAuthService $authService = null
+    ): self {
+        return new self($context->accountId(), $authService);
+    }
+
     public function __construct(?int $accountId = null, ?MercadoLivreAuthService $authService = null)
     {
         $this->accountId = $accountId;
         $this->authService = $authService;
 
-        // Se não foi informado accountId, tentar inferir a conta ativa da sessão (fluxo web).
-        // Não inicia sessão automaticamente (para manter compatibilidade com CLI/tests).
+        // SEC-001: NÃO resolver conta por header/GET/POST nem por "última conta ativa" do banco.
+        // Controllers/workers devem autorizar via AccountAccessPolicy e passar accountId explícito.
+        // Sessão: apenas hint best-effort quando o client é criado sem ID (legado web);
+        // ownership deve ter sido validado pelo AccountContextResolver antes.
         if ($this->accountId === null) {
             try {
                 if (session_status() === PHP_SESSION_ACTIVE && isset($_SESSION['active_ml_account_id'])) {
@@ -137,32 +149,6 @@ class MercadoLivreClient
             } catch (\Throwable $e) {
                 // best-effort
             }
-        }
-
-        // Fallback HTTP: permitir selecionar conta por header/query quando o client é instanciado sem accountId.
-        // Importante: só faz sentido em contexto HTTP; evita efeitos colaterais em CLI/tests.
-        if ($this->accountId === null && $this->isHttpContext()) {
-            $headerAccountId = (int)($_SERVER['HTTP_X_ML_ACCOUNT_ID'] ?? 0);
-            if ($headerAccountId > 0) {
-                $this->accountId = $headerAccountId;
-            }
-
-            if ($this->accountId === null) {
-                $fromGet = (int)($_GET['ml_account_id'] ?? $_GET['account_id'] ?? 0);
-                $fromPost = (int)($_POST['ml_account_id'] ?? $_POST['account_id'] ?? 0);
-                $candidate = $fromGet > 0 ? $fromGet : $fromPost;
-                if ($candidate > 0) {
-                    $this->accountId = $candidate;
-                }
-            }
-        }
-
-        // Fallback CLI: se nenhuma conta foi resolvida e não estamos em HTTP,
-        // usa a conta active mais recente do banco (cenário cron/worker/cli).
-        // Não ativa em tests (APP_ENV=testing) para respeitar expectativas de null explícito.
-        $isTestEnv = (($_ENV['APP_ENV'] ?? getenv('APP_ENV') ?? '') === 'testing');
-        if ($this->accountId === null && !$this->isHttpContext() && !$isTestEnv) {
-            $this->accountId = $this->resolveDefaultActiveAccount();
         }
 
         // Tokens

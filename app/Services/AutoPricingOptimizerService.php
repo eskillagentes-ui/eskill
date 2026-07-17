@@ -9,7 +9,7 @@ use PDO;
 
 /**
  * Auto Pricing Optimizer Service
- * 
+ *
  * Serviço para otimização automática de preços baseado em:
  * - Monitoramento de concorrentes
  * - Regras de margem mínima
@@ -23,7 +23,7 @@ class AutoPricingOptimizerService
     private MercadoLivreClient $mlClient;
     private MarginCalculatorService $marginService;
     private PricingStrategyService $strategyService;
-    
+
     public function __construct(int $accountId)
     {
         $this->accountId = $accountId;
@@ -32,21 +32,21 @@ class AutoPricingOptimizerService
         $this->marginService = new MarginCalculatorService($accountId);
         $this->strategyService = new PricingStrategyService($accountId);
     }
-    
+
     /**
      * Obtém configuração de auto-otimização da conta
      */
     public function getConfig(): array
     {
         $this->ensureConfigTable();
-        
+
         $stmt = $this->db->prepare("
-            SELECT * FROM pricing_auto_optimizer_config 
+            SELECT * FROM pricing_auto_optimizer_config
             WHERE account_id = :account_id
         ");
         $stmt->execute(['account_id' => $this->accountId]);
         $config = $stmt->fetch(PDO::FETCH_ASSOC);
-        
+
         if (!$config) {
             // Configuração padrão
             return [
@@ -66,26 +66,26 @@ class AutoPricingOptimizerService
                 'total_adjustments' => 0
             ];
         }
-        
+
         $config['exclude_items'] = json_decode($config['exclude_items'] ?? '[]', true) ?: [];
         $config['include_only_items'] = json_decode($config['include_only_items'] ?? '[]', true) ?: [];
-        
+
         return $config;
     }
-    
+
     /**
      * Salva configuração de auto-otimização
      */
     public function saveConfig(array $config): array
     {
         $this->ensureConfigTable();
-        
+
         $stmt = $this->db->prepare("
-            INSERT INTO pricing_auto_optimizer_config 
+            INSERT INTO pricing_auto_optimizer_config
             (account_id, enabled, mode, check_interval_minutes, min_margin_percent,
              max_price_increase_percent, max_price_decrease_percent, competitor_strategy,
              competitor_margin_buffer, notify_email, notify_changes, exclude_items, include_only_items)
-            VALUES 
+            VALUES
             (:account_id, :enabled, :mode, :interval, :min_margin,
              :max_increase, :max_decrease, :strategy, :buffer, :notify_email, :notify_changes,
              :exclude, :include_only)
@@ -104,7 +104,7 @@ class AutoPricingOptimizerService
             include_only_items = VALUES(include_only_items),
             updated_at = NOW()
         ");
-        
+
         $stmt->execute([
             'account_id' => $this->accountId,
             'enabled' => $config['enabled'] ? 1 : 0,
@@ -120,28 +120,28 @@ class AutoPricingOptimizerService
             'exclude' => json_encode($config['exclude_items'] ?? []),
             'include_only' => json_encode($config['include_only_items'] ?? [])
         ]);
-        
+
         return ['success' => true, 'message' => 'Configuração salva'];
     }
-    
+
     /**
      * Executa análise de otimização para todos os itens elegíveis
      */
     public function runOptimization(): array
     {
         $config = $this->getConfig();
-        
+
         if (!$config['enabled']) {
             return [
                 'success' => false,
                 'message' => 'Auto-otimização está desativada'
             ];
         }
-        
+
         $this->ensureLogTable();
-        
+
         $items = $this->getEligibleItems($config);
-        
+
         $results = [
             'total_analyzed' => 0,
             'suggestions' => [],
@@ -149,13 +149,13 @@ class AutoPricingOptimizerService
             'skipped' => [],
             'errors' => []
         ];
-        
+
         foreach ($items as $item) {
             $results['total_analyzed']++;
-            
+
             try {
                 $suggestion = $this->analyzeItem($item, $config);
-                
+
                 if (!$suggestion['should_adjust']) {
                     $results['skipped'][] = [
                         'item_id' => $item['id'],
@@ -163,14 +163,14 @@ class AutoPricingOptimizerService
                     ];
                     continue;
                 }
-                
+
                 // Registrar sugestão
                 $this->logSuggestion($item['id'], $suggestion);
-                
+
                 if ($config['mode'] === 'auto_apply') {
                     // Aplicar automaticamente
                     $applied = $this->applyPriceChange($item['id'], $suggestion['suggested_price']);
-                    
+
                     if ($applied['success']) {
                         $results['applied'][] = [
                             'item_id' => $item['id'],
@@ -205,10 +205,10 @@ class AutoPricingOptimizerService
                 ];
             }
         }
-        
+
         // Atualizar última execução
         $this->updateLastRun(count($results['applied']));
-        
+
         return [
             'success' => true,
             'results' => $results,
@@ -218,21 +218,21 @@ class AutoPricingOptimizerService
             ]
         ];
     }
-    
+
     /**
      * Analisa um item específico e sugere ajuste de preço
      */
     public function analyzeItem(array $item, ?array $config = null): array
     {
         $config = $config ?? $this->getConfig();
-        
+
         $itemId = $item['id'];
         $currentPrice = (float)$item['price'];
         $categoryId = $item['category_id'] ?? null;
-        
+
         // Buscar custos do item
         $custos = $this->marginService->getCustosProduto($itemId);
-        
+
         if (!$custos) {
             return [
                 'should_adjust' => false,
@@ -240,21 +240,21 @@ class AutoPricingOptimizerService
                 'current_price' => $currentPrice
             ];
         }
-        
+
         // Calcular margem atual
         $margemAtual = $this->marginService->calcularMargem($currentPrice, $custos);
-        
+
         // Buscar preços dos concorrentes
         $competitorPrice = null;
         $competitorData = [];
-        
+
         if ($categoryId) {
             try {
                 $competitors = $this->strategyService->analyzeCompetitorPrices($categoryId);
-                
+
                 if (!empty($competitors['competitors'])) {
                     $competitorData = $competitors;
-                    
+
                     switch ($config['competitor_strategy']) {
                         case 'match_lowest':
                             $competitorPrice = $competitors['statistics']['min_price'] ?? null;
@@ -273,21 +273,21 @@ class AutoPricingOptimizerService
                 // Ignorar erro de concorrentes
             }
         }
-        
+
         // Determinar preço sugerido
         $suggestedPrice = $currentPrice;
         $reason = '';
         $shouldAdjust = false;
-        
+
         // Verificar margem mínima
         if ($margemAtual['margem_real'] < $config['min_margin_percent']) {
             // Calcular preço para atingir margem mínima
             $precoMinimo = $this->marginService->calcularPrecoMinimo($custos, $config['min_margin_percent']);
             $precoMinimoValor = $precoMinimo['preco_minimo'] ?? $currentPrice;
-            
+
             if ($precoMinimoValor > $currentPrice) {
                 $changePercent = (($precoMinimoValor - $currentPrice) / $currentPrice) * 100;
-                
+
                 if ($changePercent <= $config['max_price_increase_percent']) {
                     $suggestedPrice = $precoMinimoValor;
                     $reason = "Margem atual ({$margemAtual['margem_real']}%) abaixo do mínimo ({$config['min_margin_percent']}%)";
@@ -302,18 +302,18 @@ class AutoPricingOptimizerService
                 }
             }
         }
-        
+
         // Verificar se concorrente está mais barato (e ainda mantemos margem)
         if ($competitorPrice && $competitorPrice < $currentPrice && !$shouldAdjust) {
             // Calcular preço competitivo com buffer
             $targetPrice = $competitorPrice * (1 - ($config['competitor_margin_buffer'] / 100));
-            
+
             // Verificar se nova margem é aceitável
             $newMargin = $this->marginService->calcularMargem($targetPrice, $custos);
-            
+
             if ($newMargin['margem_real'] >= $config['min_margin_percent']) {
                 $changePercent = (($currentPrice - $targetPrice) / $currentPrice) * 100;
-                
+
                 if ($changePercent <= $config['max_price_decrease_percent']) {
                     $suggestedPrice = round($targetPrice, 2);
                     $reason = "Ajuste para competir (concorrente: R$ " . number_format($competitorPrice, 2, ',', '.') . ")";
@@ -321,10 +321,10 @@ class AutoPricingOptimizerService
                 }
             }
         }
-        
+
         // Calcular nova margem
         $newMargin = $this->marginService->calcularMargem($suggestedPrice, $custos);
-        
+
         return [
             'should_adjust' => $shouldAdjust,
             'current_price' => $currentPrice,
@@ -337,7 +337,7 @@ class AutoPricingOptimizerService
             'competitor_data' => $competitorData
         ];
     }
-    
+
     /**
      * Obtém itens elegíveis para otimização
      */
@@ -349,30 +349,30 @@ class AutoPricingOptimizerService
                 'status' => 'active',
                 'limit' => 100
             ]);
-            
+
             if (!$response || empty($response['results'])) {
                 return [];
             }
-            
+
             $itemIds = $response['results'];
-            
+
             // Aplicar filtros de exclusão/inclusão
             if (!empty($config['include_only_items'])) {
                 $itemIds = array_intersect($itemIds, $config['include_only_items']);
             }
-            
+
             if (!empty($config['exclude_items'])) {
                 $itemIds = array_diff($itemIds, $config['exclude_items']);
             }
-            
+
             // Buscar detalhes dos itens
             $items = [];
             $chunks = array_chunk($itemIds, 20);
-            
+
             foreach ($chunks as $chunk) {
                 $ids = implode(',', $chunk);
                 $itemsData = $this->mlClient->get('/items', ['ids' => $ids]);
-                
+
                 if ($itemsData) {
                     foreach ($itemsData as $itemResponse) {
                         if (isset($itemResponse['body'])) {
@@ -381,36 +381,46 @@ class AutoPricingOptimizerService
                     }
                 }
             }
-            
+
             return $items;
         } catch (\Throwable $e) {
             return [];
         }
     }
-    
+
     /**
      * Aplica alteração de preço no ML
      */
     private function applyPriceChange(string $itemId, float $newPrice): array
     {
+        $guard = \App\Helpers\MlWriteAutomation::guard('AutoPricingOptimizerService::applyPriceChange');
+        if (!$guard['allowed']) {
+            return [
+                'success' => false,
+                'blocked' => true,
+                'message' => $guard['reason'],
+                'mode' => 'recommend_only',
+            ];
+        }
+
         try {
             $response = $this->mlClient->put("/items/{$itemId}", [
                 'price' => $newPrice
             ]);
-            
+
             if ($response && isset($response['id'])) {
                 // Registrar no histórico
                 $this->logPriceChange($itemId, $newPrice, 'auto_optimizer');
-                
+
                 return ['success' => true];
             }
-            
+
             return ['success' => false, 'message' => 'Resposta inválida da API'];
         } catch (\Throwable $e) {
             return ['success' => false, 'message' => $e->getMessage()];
         }
     }
-    
+
     /**
      * Registra alteração no histórico
      */
@@ -418,7 +428,7 @@ class AutoPricingOptimizerService
     {
         try {
             $stmt = $this->db->prepare("
-                INSERT INTO pricing_history 
+                INSERT INTO pricing_history
                 (account_id, item_id, preco_novo, motivo, created_at)
                 VALUES (:account_id, :item_id, :preco, :motivo, NOW())
             ");
@@ -432,7 +442,7 @@ class AutoPricingOptimizerService
             // Ignorar erro de log
         }
     }
-    
+
     /**
      * Registra sugestão de otimização
      */
@@ -440,10 +450,10 @@ class AutoPricingOptimizerService
     {
         try {
             $stmt = $this->db->prepare("
-                INSERT INTO pricing_optimizer_log 
-                (account_id, item_id, current_price, suggested_price, change_percent, 
+                INSERT INTO pricing_optimizer_log
+                (account_id, item_id, current_price, suggested_price, change_percent,
                  current_margin, new_margin, reason, competitor_price, created_at)
-                VALUES 
+                VALUES
                 (:account_id, :item_id, :current, :suggested, :change_pct,
                  :current_margin, :new_margin, :reason, :competitor, NOW())
             ");
@@ -462,7 +472,7 @@ class AutoPricingOptimizerService
             // Ignorar erro de log
         }
     }
-    
+
     /**
      * Atualiza timestamp da última execução
      */
@@ -470,8 +480,8 @@ class AutoPricingOptimizerService
     {
         try {
             $stmt = $this->db->prepare("
-                UPDATE pricing_auto_optimizer_config 
-                SET last_run = NOW(), 
+                UPDATE pricing_auto_optimizer_config
+                SET last_run = NOW(),
                     total_adjustments = total_adjustments + :adj
                 WHERE account_id = :account_id
             ");
@@ -483,7 +493,7 @@ class AutoPricingOptimizerService
             // Ignorar
         }
     }
-    
+
     /**
      * Obtém histórico de otimizações
      */
@@ -492,10 +502,10 @@ class AutoPricingOptimizerService
         $this->ensureLogTable();
 
         $limitSql = max(1, min((int)$limit, 500));
-        
+
         $stmt = $this->db->prepare("
-            SELECT * FROM pricing_optimizer_log 
-            WHERE account_id = :account_id 
+            SELECT * FROM pricing_optimizer_log
+            WHERE account_id = :account_id
             AND created_at >= DATE_SUB(NOW(), INTERVAL :days DAY)
             ORDER BY created_at DESC
             LIMIT {$limitSql}
@@ -503,33 +513,33 @@ class AutoPricingOptimizerService
         $stmt->bindValue('account_id', $this->accountId, PDO::PARAM_INT);
         $stmt->bindValue('days', $days, PDO::PARAM_INT);
         $stmt->execute();
-        
+
         return $stmt->fetchAll(PDO::FETCH_ASSOC);
     }
-    
+
     /**
      * Obtém estatísticas do otimizador
      */
     public function getStats(): array
     {
         $this->ensureLogTable();
-        
+
         $stmt = $this->db->prepare("
-            SELECT 
+            SELECT
                 COUNT(*) as total_suggestions,
                 SUM(CASE WHEN change_percent > 0 THEN 1 ELSE 0 END) as increases,
                 SUM(CASE WHEN change_percent < 0 THEN 1 ELSE 0 END) as decreases,
                 AVG(ABS(change_percent)) as avg_change_percent,
                 AVG(new_margin - current_margin) as avg_margin_improvement
-            FROM pricing_optimizer_log 
-            WHERE account_id = :account_id 
+            FROM pricing_optimizer_log
+            WHERE account_id = :account_id
             AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
         ");
         $stmt->execute(['account_id' => $this->accountId]);
         $stats = $stmt->fetch(PDO::FETCH_ASSOC);
-        
+
         $config = $this->getConfig();
-        
+
         return [
             'config' => [
                 'enabled' => (bool)$config['enabled'],
@@ -547,7 +557,7 @@ class AutoPricingOptimizerService
             ]
         ];
     }
-    
+
     /**
      * Garante que a tabela de configuração existe
      */
@@ -577,7 +587,7 @@ class AutoPricingOptimizerService
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
         ");
     }
-    
+
     /**
      * Garante que a tabela de log existe
      */

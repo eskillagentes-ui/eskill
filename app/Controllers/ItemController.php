@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Services\ItemService;
-use App\Helpers\SessionHelper;
+use App\Security\AccountAccessException;
+use App\Security\AccountContextResolver;
 
 class ItemController extends BaseController
 {
@@ -15,10 +16,19 @@ class ItemController extends BaseController
     public function __construct()
     {
         parent::__construct();
-        // Permite override via GET, senão usa a conta ativa da sessão
-        $accountId = $this->request->get('account_id') ?? SessionHelper::getActiveAccountId();
-        $this->accountId = $accountId ? (int)$accountId : null;
+        // SEC-001: nunca confiar em account_id cru sem policy
+        $this->accountId = $this->resolveAuthorizedAccountIdOrNull();
         $this->itemService = new ItemService($this->accountId);
+    }
+
+    private function resolveAuthorizedAccountIdOrNull(): ?int
+    {
+        try {
+            $context = (new AccountContextResolver())->authorizeForCurrentActor('items.read');
+            return $context->accountId();
+        } catch (AccountAccessException $e) {
+            return null;
+        }
     }
 
     /**
@@ -134,7 +144,7 @@ class ItemController extends BaseController
         }
 
         $result = [];
-        
+
         // Atualizar Custo/Taxa (Local)
         if (array_key_exists('cost_price', $data) || array_key_exists('tax_rate', $data)) {
             $cost = isset($data['cost_price']) ? (float)$data['cost_price'] : null;
@@ -152,13 +162,13 @@ class ItemController extends BaseController
                 'auto_reprice' => isset($data['auto_reprice']) ? (int)$data['auto_reprice'] : 0,
                 'auto_negotiate' => isset($data['auto_negotiate']) ? (int)$data['auto_negotiate'] : 0,
             ];
-            // Remove nulls if key didn't exist in input (partial updates), 
+            // Remove nulls if key didn't exist in input (partial updates),
             // BUT we want to allow unsetting strategy, so we only filter if key missing from input
-            // Let's filter based on array_key_exists in the input $data for safety in Service, 
+            // Let's filter based on array_key_exists in the input $data for safety in Service,
             // but here we map specific keys.
             // Simplified: pass what is in data intersecting with allowed keys
             $updateData = array_intersect_key($data, array_flip(['pricing_strategy', 'min_price', 'max_price', 'auto_reprice', 'auto_negotiate']));
-            
+
             if (!empty($updateData)) {
                 $this->itemService->updateItemPricing($id, $updateData);
                 $result['local_update'] = true;
@@ -167,7 +177,7 @@ class ItemController extends BaseController
 
         // Se houver campos do ML, atualizar lá também
         $mlFields = ['title', 'price', 'available_quantity', 'description', 'pictures', 'attributes', 'variations', 'shipping', 'sku', 'seller_custom_field'];
-        
+
         // Map SKU to seller_custom_field for ML
         if (isset($data['sku'])) {
             $data['seller_custom_field'] = $data['sku'];
@@ -184,7 +194,7 @@ class ItemController extends BaseController
         if ($hasMlFields) {
             $mlResult = $this->itemService->updateItem($id, $data);
             $result = array_merge($result, $mlResult);
-            
+
             if (isset($mlResult['error'])) {
                 http_response_code(400);
             }

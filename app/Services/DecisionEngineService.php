@@ -30,7 +30,7 @@ class DecisionEngineService {
         $this->cache = new AdvancedRedisCacheService();
         $this->logger = new CentralizedLogService();
         $this->llm = new LLMService();
-        
+
         $this->config = [
             'ml_enabled' => $_ENV['ML_ENABLED'] ?? true,
             'decision_confidence_threshold' => $_ENV['DECISION_CONFIDENCE_THRESHOLD'] ?? 0.7,
@@ -49,26 +49,26 @@ class DecisionEngineService {
      */
     public function makePricingDecision(string $itemId, array $context = []): array {
         $startTime = microtime(true);
-        
+
         try {
             // Coletar dados para decisão
             $decisionData = $this->collectDecisionData($itemId, $context);
-            
+
             // Analisar fatores de decisão
             $factors = $this->analyzeDecisionFactors($decisionData);
-            
+
             // Aplicar modelo de ML para decisão
             $mlPrediction = $this->applyMlModel('pricing', $factors);
-            
+
             // Calcular preço otimizado
             $optimizedPrice = $this->calculateOptimizedPrice($decisionData, $mlPrediction);
-            
+
             // Validar decisão
             $decision = $this->validateDecision($decisionData['current_price'], $optimizedPrice, $mlPrediction['confidence']);
-            
+
             // Registrar decisão
             $decisionId = $this->logDecision($itemId, $decision, $factors, $mlPrediction);
-            
+
             $executionTime = round((microtime(true) - $startTime) * 1000, 2);
 
             $result = [
@@ -88,7 +88,7 @@ class DecisionEngineService {
             ];
 
             $this->cache->set("decision_result:{$itemId}", $result, 300);
-            
+
             $this->logger->log('info', 'AI Decision Made', [
                 'type' => 'ai_decision',
                 'decision_type' => 'pricing',
@@ -106,7 +106,7 @@ class DecisionEngineService {
                 'item_id' => $itemId,
                 'error' => $e->getMessage()
             ]);
-            
+
             throw new Exception("Decision engine failed: " . $e->getMessage());
         }
     }
@@ -119,7 +119,7 @@ class DecisionEngineService {
             $decisionData = $this->collectInventoryData($itemId, $context);
             $factors = $this->analyzeInventoryFactors($decisionData);
             $mlPrediction = $this->applyMlModel('inventory', $factors);
-            
+
             $decision = [
                 'action' => $this->determineInventoryAction($factors, $mlPrediction),
                 'quantity_recommended' => $this->calculateOptimalQuantity($decisionData, $mlPrediction),
@@ -257,6 +257,16 @@ class DecisionEngineService {
      */
     public function applyDecision(string $decisionId): array {
         try {
+            $guard = \App\Helpers\MlWriteAutomation::guard('DecisionEngineService::applyDecision');
+            if (!$guard['allowed']) {
+                return [
+                    'applied' => false,
+                    'blocked' => true,
+                    'error' => $guard['reason'],
+                    'mode' => 'recommend_only',
+                ];
+            }
+
             // Buscar decisão
             $stmt = $this->db->prepare("SELECT * FROM ai_decisions WHERE id = :id");
             $stmt->execute(['id' => $decisionId]);
@@ -286,7 +296,7 @@ class DecisionEngineService {
 
             // Atualizar status da decisão
             $stmt = $this->db->prepare("
-                UPDATE ai_decisions 
+                UPDATE ai_decisions
                 SET applied = :applied, applied_at = :applied_at, apply_result = :result
                 WHERE id = :id
             ");
@@ -310,7 +320,7 @@ class DecisionEngineService {
                 'decision_id' => $decisionId,
                 'error' => $e->getMessage()
             ]);
-            
+
             return ['applied' => false, 'error' => $e->getMessage()];
         }
     }
@@ -322,13 +332,13 @@ class DecisionEngineService {
         try {
             // Estatísticas gerais
             $stmt = $this->db->query("
-                SELECT 
+                SELECT
                     decision_type,
                     COUNT(*) as total_decisions,
                     SUM(applied) as applied_decisions,
                     AVG(confidence) as avg_confidence,
                     AVG(execution_time_ms) as avg_execution_time
-                FROM ai_decisions 
+                FROM ai_decisions
                 WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
                 GROUP BY decision_type
             ");
@@ -336,12 +346,12 @@ class DecisionEngineService {
 
             // Performance por dia
             $stmt = $this->db->query("
-                SELECT 
+                SELECT
                     DATE(created_at) as date,
                     COUNT(*) as decisions,
                     SUM(applied) as applied,
                     AVG(confidence) as avg_confidence
-                FROM ai_decisions 
+                FROM ai_decisions
                 WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
                 GROUP BY DATE(created_at)
                 ORDER BY date DESC
@@ -350,10 +360,10 @@ class DecisionEngineService {
 
             // Top fatores de decisão
             $stmt = $this->db->query("
-                SELECT 
+                SELECT
                     JSON_EXTRACT(factors, '$.top_factor') as factor,
                     COUNT(*) as frequency
-                FROM ai_decisions 
+                FROM ai_decisions
                 WHERE created_at >= DATE_SUB(NOW(), INTERVAL 7 DAY)
                 AND JSON_EXTRACT(factors, '$.top_factor') IS NOT NULL
                 GROUP BY factor
@@ -388,38 +398,38 @@ class DecisionEngineService {
         try {
             // Total decisions count
             $stmt = $this->db->query("
-                SELECT COUNT(*) as total FROM ai_decisions 
+                SELECT COUNT(*) as total FROM ai_decisions
                 WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
             ");
             $totalDecisions = $stmt->fetchColumn() ?: 0;
 
             // Pricing updates count
             $stmt = $this->db->query("
-                SELECT COUNT(*) as total FROM ai_decisions 
-                WHERE decision_type = 'pricing' 
+                SELECT COUNT(*) as total FROM ai_decisions
+                WHERE decision_type = 'pricing'
                 AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
             ");
             $pricingUpdates = $stmt->fetchColumn() ?: 0;
 
             // Inventory alerts count
             $stmt = $this->db->query("
-                SELECT COUNT(*) as total FROM ai_decisions 
-                WHERE decision_type = 'inventory' 
+                SELECT COUNT(*) as total FROM ai_decisions
+                WHERE decision_type = 'inventory'
                 AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
             ");
             $inventoryAlerts = $stmt->fetchColumn() ?: 0;
 
             // Calculate accuracy (applied vs total)
             $stmt = $this->db->query("
-                SELECT 
+                SELECT
                     COUNT(*) as total,
                     SUM(CASE WHEN applied = 1 THEN 1 ELSE 0 END) as applied
-                FROM ai_decisions 
+                FROM ai_decisions
                 WHERE created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
             ");
             $accuracyData = $stmt->fetch(PDO::FETCH_ASSOC);
-            $accuracy = $accuracyData['total'] > 0 
-                ? round(($accuracyData['applied'] / $accuracyData['total']) * 100) 
+            $accuracy = $accuracyData['total'] > 0
+                ? round(($accuracyData['applied'] / $accuracyData['total']) * 100)
                 : 0;
 
             return [
@@ -454,9 +464,9 @@ class DecisionEngineService {
         }
 
         $marketData = $this->getMarketData($itemId);
-        
+
         $salesHistory = $this->getSalesHistory($itemId);
-        
+
         // Dados sazonais
         $seasonalData = $this->getSeasonalData($item['category_id']);
 
@@ -513,21 +523,21 @@ class DecisionEngineService {
     private function applyMlModel(string $modelType, array $factors): array {
         $baseConfidence = 0.8;
         $factorWeight = $factors['factor_strength'] ?? 0.5;
-        
+
         $prediction = 0.0;
         $confidence = $baseConfidence;
-        
+
         switch ($modelType) {
             case 'pricing':
                 $prediction = $this->simulatePricingPrediction($factors);
                 $confidence = min(0.95, $baseConfidence + ($factorWeight * 0.2));
                 break;
-                
+
             case 'inventory':
                 $prediction = $this->calculateInventoryScore($factors);
                 $confidence = min(0.90, $baseConfidence + ($factorWeight * 0.15));
                 break;
-                
+
             case 'campaign':
                 $prediction = $this->calculateCampaignScore($factors);
                 $confidence = min(0.85, $baseConfidence + ($factorWeight * 0.1));
@@ -552,16 +562,16 @@ class DecisionEngineService {
         $currentPrice = $data['current_price'];
         $prediction = $mlPrediction['prediction'];
         $confidence = $mlPrediction['confidence'];
-        
+
         // Aplicar predição com base na confiança
         $priceChange = $prediction * $confidence;
         $newPrice = $currentPrice * (1 + $priceChange);
-        
+
         // Aplicar limites de segurança
         $maxChange = $this->config['max_price_change_percent'] / 100;
         $minPrice = $currentPrice * (1 - $maxChange);
         $maxPrice = $currentPrice * (1 + $maxChange);
-        
+
         return max($minPrice, min($maxPrice, $newPrice));
     }
 
@@ -571,7 +581,7 @@ class DecisionEngineService {
     private function validateDecision(float $currentPrice, float $newPrice, float $confidence): array {
         $changeAmount = $newPrice - $currentPrice;
         $changePercent = ($changeAmount / $currentPrice) * 100;
-        
+
         $shouldApply = (
             $confidence >= $this->config['decision_confidence_threshold'] &&
             abs($changePercent) <= $this->config['max_price_change_percent'] &&
@@ -595,7 +605,7 @@ class DecisionEngineService {
      */
     private function logDecision(string $targetId, array $decision, array $factors, array $mlPrediction, string $type = 'pricing'): string {
         $decisionId = uniqid('dec_', true);
-        
+
         $stmt = $this->db->prepare("
             INSERT INTO ai_decisions (
                 id, target_id, decision_type, decision_data, factors, ml_prediction,
@@ -605,7 +615,7 @@ class DecisionEngineService {
                 :confidence, :execution_time, NOW()
             )
         ");
-        
+
         $stmt->execute([
             'id' => $decisionId,
             'target_id' => $targetId,
@@ -705,12 +715,12 @@ class DecisionEngineService {
 
     private function getMarketData(string $itemId): array {
         $stmt = $this->db->prepare("
-            SELECT 
+            SELECT
                 COUNT(*) as competitor_count,
                 AVG(competitor_price) as avg_competitor_price,
                 MIN(competitor_price) as min_competitor_price,
                 MAX(competitor_price) as max_competitor_price
-            FROM competitor_tracking 
+            FROM competitor_tracking
             WHERE my_item_id = :item_id
         ");
         $stmt->execute(['item_id' => $itemId]);
@@ -738,7 +748,7 @@ class DecisionEngineService {
     private function getSalesHistory(string $itemId): array {
         // Fetch real metrics from history
         $stmt = $this->db->prepare("
-            SELECT 
+            SELECT
                 SUM(CASE WHEN date >= DATE_SUB(NOW(), INTERVAL 7 DAY) THEN sold_quantity ELSE 0 END) as last_7_days,
                 SUM(CASE WHEN date >= DATE_SUB(NOW(), INTERVAL 30 DAY) THEN sold_quantity ELSE 0 END) as last_30_days,
                 COUNT(DISTINCT date) as days_recorded
@@ -751,19 +761,19 @@ class DecisionEngineService {
         $last30 = (int)($data['last_30_days'] ?? 0);
         $days = (int)($data['days_recorded'] ?? 1);
         $avgDaily = $days > 0 ? $last30 / $days : 0;
-        
+
         // Calculate real conversion rate if visits data is available
         $totalVisits = 0; // Would need to SUM(visits) in query above
-        
+
         // Let's improve the query to get visits too
         $stmtVisits = $this->db->prepare("
-            SELECT COALESCE(SUM(visits), 0) as total_visits 
-            FROM item_metrics_history 
+            SELECT COALESCE(SUM(visits), 0) as total_visits
+            FROM item_metrics_history
             WHERE item_id = :item_id AND date >= DATE_SUB(NOW(), INTERVAL 30 DAY)
         ");
         $stmtVisits->execute(['item_id' => $itemId]);
         $totalVisits = (int)$stmtVisits->fetchColumn();
-        
+
         $realConversion = $totalVisits > 0 ? ($last30 / $totalVisits) * 100 : 0.0;
 
         return [
@@ -861,7 +871,7 @@ class DecisionEngineService {
     private function calculateFactorStrength(array $factors): float {
         $totalWeight = 0;
         $weightedSum = 0;
-        
+
         foreach ($factors as $key => $value) {
             if (isset($this->decisionFactors[$key])) {
                 $weight = $this->decisionFactors[$key]['weight'];
@@ -869,21 +879,21 @@ class DecisionEngineService {
                 $weightedSum += $value * $weight;
             }
         }
-        
+
         return $totalWeight > 0 ? $weightedSum / $totalWeight : 0.5;
     }
 
     private function simulatePricingPrediction(array $factors): float {
         try {
             $prompt = $this->buildPricingPredictionPrompt($factors);
-            
+
             $response = $this->llm->generate($prompt,
                 "You are a machine learning pricing prediction model. Analyze the factors and predict the optimal price adjustment percentage.
                 Return a single float value between -0.2 (20% price decrease) and 0.2 (20% price increase).
                 Consider: price competitiveness, demand level, inventory pressure, and seasonal factors.
                 Return only the number, no explanation."
             );
-            
+
             if ($response['success']) {
                 $prediction = (float) trim($response['content']);
                 // Ensure prediction is within reasonable bounds
@@ -895,21 +905,21 @@ class DecisionEngineService {
                 'error' => $e->getMessage()
             ]);
         }
-        
+
         // Fallback to basic calculation
         $prediction = 0;
         $prediction += ($factors['price_competitiveness'] - 0.5) * 0.15;
         $prediction += ($factors['demand_level'] - 0.5) * 0.1;
         $prediction -= ($factors['inventory_pressure'] - 0.5) * 0.08;
         $prediction += ($factors['seasonal_multiplier'] - 1.0) * 0.05;
-        
+
         return max(-0.2, min(0.2, $prediction));
     }
 
     private function generatePricingReasoning(float $currentPrice, float $newPrice, float $confidence, float $changePercent): string {
         $direction = $newPrice > $currentPrice ? 'aumento' : 'redução';
         $confidence_text = $confidence > 0.8 ? 'alta confiança' : ($confidence > 0.6 ? 'média confiança' : 'baixa confiança');
-        
+
         return "Recomendação de {$direction} de " . abs(round($changePercent, 1)) . "% no preço com {$confidence_text} (R$ " . number_format($currentPrice, 2, ',', '.') . " → R$ " . number_format($newPrice, 2, ',', '.') . ")";
     }
 
@@ -1127,15 +1137,15 @@ class DecisionEngineService {
         $prediction = ($roi - 1) + ($conversion * 5) - ($competition * 0.5);
         return max(-1, min(1, $prediction));
     }
-    private function applyPricingDecision(string $itemId, array $decision): array 
-    { 
+    private function applyPricingDecision(string $itemId, array $decision): array
+    {
         // Update real item price
         $stmt = $this->db->prepare("UPDATE items SET price = :price, updated_at = NOW() WHERE ml_item_id = :item_id");
         $success = $stmt->execute([
             'price' => $decision['price'],
             'item_id' => $itemId
         ]);
-        
+
         return [
             'applied' => $success,
             'new_price' => $decision['price'],
@@ -1183,7 +1193,7 @@ class DecisionEngineService {
 
         return ['applied' => false, 'message' => 'Tabela de campanhas não encontrada'];
     }
-    
+
     private function buildPricingPredictionPrompt(array $factors): string
     {
         return sprintf(

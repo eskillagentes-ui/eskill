@@ -8,6 +8,9 @@ use App\Core\EventBus;
 use App\Core\Paginator;
 use App\Core\Request;
 use App\Core\Validator;
+use App\Security\AccountAccessException;
+use App\Security\AccountContextResolver;
+use App\Security\AuthorizedAccountContext;
 
 abstract class BaseController
 {
@@ -91,45 +94,78 @@ abstract class BaseController
     }
 
     /**
-     * Obtém account_id com fallback para active_ml_account_id
+     * Candidato de account_id (sessão / header / query).
+     * NÃO valida ownership — use requireAuthorizedAccount() / authorizeAccountId().
      */
     protected function getActiveAccountId(): ?int
     {
-        // 1) Sessão (fluxo web)
-        $id = $_SESSION['active_ml_account_id'] ?? ($_SESSION['account_id'] ?? null);
-        if ($id !== null) {
-            $id = (int)$id;
-            return $id > 0 ? $id : null;
-        }
-
-        // 2) Header (fluxo API/CLI): X-ML-Account-Id
-        $header = $this->request->header('X-ML-Account-Id');
-        if (is_string($header) && $header !== '') {
-            $candidate = (int)$header;
-            if ($candidate > 0) {
-                return $candidate;
-            }
-        }
-
-        // 3) Query/Body/JSON: ml_account_id (fallback compat: account_id)
-        $candidate = $this->request->inputInt('ml_account_id', 0);
-        if ($candidate > 0) {
-            return $candidate;
-        }
-
-        $candidate = $this->request->inputInt('account_id', 0);
-        if ($candidate > 0) {
-            return $candidate;
-        }
-
-        return null;
+        return (new AccountContextResolver())->resolveRequestedAccountId();
     }
 
     /**
-     * Obtém user_id da sessão
+     * SEC-001: autoriza conta para o ator atual (sessão ou API Bearer).
+     * Header/GET/POST só indicam candidato; a policy decide.
+     *
+     * @throws AccountAccessException quando $respondOnFailure=false
+     */
+    protected function requireAuthorizedAccount(
+        string $capability = 'read',
+        bool $respondOnFailure = true
+    ): ?AuthorizedAccountContext {
+        try {
+            $explicit = $this->request->inputInt('ml_account_id', 0);
+            if ($explicit <= 0) {
+                $explicit = $this->request->inputInt('account_id', 0);
+            }
+
+            return (new AccountContextResolver())->authorizeForCurrentActor(
+                $capability,
+                $explicit > 0 ? $explicit : null
+            );
+        } catch (AccountAccessException $e) {
+            if ($respondOnFailure) {
+                $this->jsonError($e->getMessage(), $e->httpStatus(), [
+                    'error_code' => $e->errorCode(),
+                ]);
+                return null;
+            }
+            throw $e;
+        }
+    }
+
+    /**
+     * Autoriza um account_id explícito para o ator atual.
+     */
+    protected function authorizeAccountId(int $accountId, string $capability = 'read'): ?AuthorizedAccountContext
+    {
+        $actorId = $this->getUserId();
+        if ($actorId === null || $actorId <= 0) {
+            $this->jsonError('Autenticação necessária', 401, ['error_code' => 'missing_actor']);
+            return null;
+        }
+
+        try {
+            return (new AccountContextResolver())->authorizeForCurrentActor($capability, $accountId);
+        } catch (AccountAccessException $e) {
+            $this->jsonError($e->getMessage(), $e->httpStatus(), [
+                'error_code' => $e->errorCode(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * Obtém user_id da sessão ou do contexto API Bearer (ApiAuthMiddleware).
      */
     protected function getUserId(): ?int
     {
+        if (isset($_SERVER['API_USER_ID'])) {
+            $apiUserId = (int) $_SERVER['API_USER_ID'];
+            if ($apiUserId > 0) {
+                return $apiUserId;
+            }
+        }
+
         return isset($_SESSION['user_id']) ? (int) $_SESSION['user_id'] : null;
     }
 

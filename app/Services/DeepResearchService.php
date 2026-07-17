@@ -943,7 +943,9 @@ class DeepResearchService
                 : 0;
             $seller['min_price'] = count($seller['prices']) > 0 ? min($seller['prices']) : 0;
             $seller['max_price'] = count($seller['prices']) > 0 ? max($seller['prices']) : 0;
-            $seller['market_share'] = round(($seller['total_items'] / count($items)) * 100, 2);
+            // Métrica observada na amostra de busca — NÃO é market share real do ML
+            $seller['observed_sample_share'] = round(($seller['total_items'] / count($items)) * 100, 2);
+            $seller['market_share'] = $seller['observed_sample_share']; // alias legado
             $seller['free_shipping_rate'] = $seller['total_items'] > 0
                 ? round(($seller['free_shipping_items'] / $seller['total_items']) * 100, 1)
                 : 0;

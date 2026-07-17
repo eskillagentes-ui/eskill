@@ -5,69 +5,38 @@ declare(strict_types=1);
 namespace App\Services;
 
 /**
- * AI Service for SEO strategy enhancement
- * This service integrates with AI/LLM providers (OpenAI/Claude) as mentioned in the architecture
+ * @deprecated Use LLMService / UnifiedAIService. Mantido como fachada para consumidores legados.
+ *
+ * Delega geração ao AI Gateway interno (LLMService + AIProviderManager).
  */
 class AIService
 {
-    private string $provider;
-    private string $apiKey;
-    private \GuzzleHttp\Client $httpClient;
+    private LLMService $llm;
 
     public function __construct(string $provider = 'openai', ?string $apiKey = null)
     {
-        $this->provider = $provider;
-        $this->apiKey = $apiKey ?: $_ENV['AI_API_KEY'] ?? getenv('AI_API_KEY');
-
-        if (!$this->apiKey) {
-            throw new \Exception('AI API key not configured. Please set AI_API_KEY environment variable.');
-        }
-
-        // Initialize HTTP client
-        $this->httpClient = new \GuzzleHttp\Client([
-            'timeout' => 30,
-            'headers' => [
-                'Authorization' => 'Bearer ' . $this->apiKey,
-                'Content-Type' => 'application/json'
-            ]
-        ]);
+        // $provider/$apiKey ignorados — LLMService resolve provedores via AIConfigService.
+        unset($provider, $apiKey);
+        $this->llm = new LLMService();
     }
 
     /**
-     * Generate content using AI
+     * Generate content using AI gateway
      */
     public function generate(string $prompt): string
     {
-        try {
-            $url = 'https://api.openai.com/v1/chat/completions';
-
-            $payload = [
-                'model' => 'gpt-3.5-turbo',
-                'messages' => [
-                    ['role' => 'user', 'content' => $prompt]
-                ],
-                'temperature' => 0.7,
-                'max_tokens' => 500
-            ];
-
-            $response = $this->httpClient->post($url, [
-                'json' => $payload
-            ]);
-
-            $data = json_decode($response->getBody(), true);
-
-            if (isset($data['choices'][0]['message']['content'])) {
-                return $data['choices'][0]['message']['content'];
-            }
-
-            throw new \Exception('Invalid response from AI service');
-        } catch (\Exception $e) {
-            log_error('Erro no AI Service', [
-                'service' => 'AIService',
-                'error' => $e->getMessage(),
-            ]);
-            throw $e;
+        $result = $this->llm->generate($prompt, '', 'basic');
+        if (($result['success'] ?? false) === true) {
+            return (string) ($result['content'] ?? '');
         }
+
+        $error = (string) ($result['error'] ?? 'LLM unavailable');
+        log_error('AIService gateway failure', [
+            'service' => 'AIService',
+            'error' => $error,
+            'via' => 'LLMService',
+        ]);
+        throw new \RuntimeException('AI gateway: ' . $error);
     }
 
     /**
@@ -78,19 +47,17 @@ class AIService
         $prompt = "Generate a comprehensive list of synonyms and related terms for the keyword '{$keyword}' in the category {$categoryId}. Focus on Brazilian Portuguese terms. Return only as a JSON array.";
         $response = $this->generate($prompt);
 
-        // Try to parse as JSON first
         $synonyms = json_decode($response, true);
         if (is_array($synonyms)) {
             return $synonyms;
         }
 
-        // If not valid JSON, try to extract from plain text
         $lines = explode("\n", $response);
         $extracted = [];
 
         foreach ($lines as $line) {
             $cleanLine = trim($line, " \t\n\r\0\x0B-.\"");
-            if (!empty($cleanLine) && !preg_match('/^[0-9]+\.?\s*$/', $cleanLine)) {
+            if ($cleanLine !== '' && !preg_match('/^[0-9]+\.?\s*$/', $cleanLine)) {
                 $extracted[] = $cleanLine;
             }
         }
@@ -111,6 +78,9 @@ class AIService
 
     /**
      * Classify keywords using AI
+     *
+     * @param list<string> $keywords
+     * @return array<string, list<string>>
      */
     public function classifyKeywords(array $keywords, string $categoryId): array
     {
@@ -119,8 +89,6 @@ class AIService
 
         try {
             $response = $this->generate($prompt);
-
-            // Try to parse as JSON first
             $classification = json_decode($response, true);
 
             if (is_array($classification) &&
@@ -131,14 +99,13 @@ class AIService
                 return $classification;
             }
 
-            // If not properly formatted, return default classification
             return [
                 'core' => [],
                 'suporte' => [],
                 'tecnica' => [],
-                'contexto' => []
+                'contexto' => [],
             ];
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             log_warning('Erro na classificação de keywords por IA', [
                 'service' => 'AIService',
                 'error' => $e->getMessage(),
@@ -147,7 +114,7 @@ class AIService
                 'core' => [],
                 'suporte' => [],
                 'tecnica' => [],
-                'contexto' => []
+                'contexto' => [],
             ];
         }
     }
@@ -164,6 +131,9 @@ class AIService
 
     /**
      * Generate FAQ content using AI
+     *
+     * @param list<string> $keywords
+     * @return list<array<string, mixed>>
      */
     public function generateFAQ(array $keywords, string $productType): array
     {

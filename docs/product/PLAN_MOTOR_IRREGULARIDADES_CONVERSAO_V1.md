@@ -1,12 +1,12 @@
 # Plano Técnico — Motor de Irregularidades e Conversão (MLB / Facility)
 
-**Documento:** PLAN-IRR-001  
-**Versão:** 1.0  
-**Status:** Proposto — aguarda aprovação humana  
-**Data:** 17/07/2026  
-**Branch:** `docs/ml-conversion-irregularities`  
-**Base:** `origin/master` @ `98e54f33`  
-**Piloto:** Facility · Marketplace: Mercado Livre (MLB)  
+**Documento:** PLAN-IRR-001
+**Versão:** 1.0
+**Status:** Proposto — aguarda aprovação humana
+**Data:** 17/07/2026
+**Branch:** `docs/ml-conversion-irregularities`
+**Base:** `origin/master` @ `98e54f33`
+**Piloto:** Facility · Marketplace: Mercado Livre (MLB)
 **Fontes:** MCP Mercado Livre (qualidade-das-publicacoes, gerenciar-moderacoes, com-pausa, reputacao-de-vendedores, diagnostico-de-imagens) · inventário eSkill · código real
 
 **Relacionados:**
@@ -35,15 +35,17 @@ Humano        → aprova ações críticas
 
 | Capacidade oficial ML | Endpoint | No eSkill hoje |
 |----------------------|----------|----------------|
-| Score + ações | `GET /item/{id}/performance` | **Presente** (`MercadoLivreClient::getItemPerformance`, AccountHealth) |
-| Última moderação | `GET /moderations/last_moderation/{ref}-ITM` | **Ausente** (0 matches no `app/`) |
-| Histórico de infrações | `GET /moderations/infractions/{user_id}` | **Ausente** |
-| Diagnóstico de imagem pré-upload | `POST /moderations/pictures/diagnostic` | **Ausente** |
-| Busca itens `under_review` / `paused`+tag | `GET /users/{id}/items/search` | **Parcial** (AccountHealth conta under_review; não materializa reason/remedy) |
+| Score + ações | `GET /item/{id}/performance` | **Presente** (`MercadoLivreClient::getItemPerformance`, AccountHealth, ListingSearchVisibilityService) |
+| Última moderação | `GET /moderations/last_moderation/{ref}-ITM` | **Presente** (`MercadoLivreClient::getLastModeration` + `ListingIrregularityScanService`) |
+| Histórico de infrações | `GET /moderations/infractions/{user_id}` | **Presente** (`MercadoLivreClient::getInfractions` + API `/api/listings/infractions`) |
+| Diagnóstico de imagem pré-upload | `POST /moderations/pictures/diagnostic` | **Presente** (`MercadoLivreClient::diagnosePicture` + UI listing-visibility) |
+| Busca itens `under_review` / `paused`+tag | `GET /users/{id}/items/search` | **Presente** no scan de irregularidades (materializa reason/remedy via last_moderation) |
 | Reputação | `GET /users/{id}` → `seller_reputation` | **Parcial** |
 | Compatibilidades autopeças | API de compatibilidades | **Presente** (Controllers Compatibility / BulkCompatibility) |
+| Persistência fila (`SalesBlockerStore`) | — | **Em implementação** (scan on-demand já existe; store + cron na Fase 2 do plano de execução) |
+| SEC-001 isolamento de contas | — | **Pré-condição** — policy central obrigatória antes de escrita ML |
 
-**Conclusão:** o maior gap para “o que trava venda” é o **motor de moderations**, não mais SEO genérico.
+**Conclusão (atualizada 2026-07-17):** a coleta read-only de moderations já está no código da branch de visibilidade. O gap restante é **persistência/cron da fila**, **SEC-001 wired**, e **desarme de escrita automática** — não mais “zero moderations no app”.
 
 ---
 
@@ -81,7 +83,7 @@ Limites oficiais (MCP reputacao-de-vendedores), termômetro Green:
 
 ### 3.4 Facility / autopeças
 
-Compatibilidades incompletas → menos match na busca e mais perguntas/devoluções.  
+Compatibilidades incompletas → menos match na busca e mais perguntas/devoluções.
 Módulo existente deve entrar na **fila de cobertura**, não em clone.
 
 ---
@@ -122,16 +124,16 @@ Módulo existente deve entrar na **fila de cobertura**, não em clone.
 
 ## 5. Vertical slice 1 (ponta a ponta, read-only)
 
-1. Selecionar conta Facility autorizada (SEC-001).  
+1. Selecionar conta Facility autorizada (SEC-001).
 2. Buscar itens:
    - `status=under_review`
    - `status=paused` + `tags=moderation_penalty`
    - `status=active` + tag `poor_quality_thumbnail` (quando aplicável)
-3. Para cada item, chamar `GET /moderations/last_moderation/{ITEM_ID}-ITM`.  
-4. Normalizar: `name`, `reason`, `remedy`, `evidences`, `filter_subgroup` (via infractions se necessário).  
-5. Exibir fila: **bloqueados → perda exposição → oportunidade performance**.  
-6. Em paralelo (amostra ou lazy): `GET /item/{id}/performance` → rules PENDING/WARNING.  
-7. Registrar auditoria da sincronização (sem segredos).  
+3. Para cada item, chamar `GET /moderations/last_moderation/{ITEM_ID}-ITM`.
+4. Normalizar: `name`, `reason`, `remedy`, `evidences`, `filter_subgroup` (via infractions se necessário).
+5. Exibir fila: **bloqueados → perda exposição → oportunidade performance**.
+6. Em paralelo (amostra ou lazy): `GET /item/{id}/performance` → rules PENDING/WARNING.
+7. Registrar auditoria da sincronização (sem segredos).
 8. **Não** PUT status=active; **não** alterar preço/título/foto.
 
 **Critério de aceite do slice:**
@@ -144,17 +146,17 @@ Módulo existente deve entrar na **fila de cobertura**, não em clone.
 
 ## 6. Vertical slice 2 (alavancagem)
 
-1. Para itens `active` com score &lt; limiar (ex.: &lt; 70) ou level Básica.  
-2. Extrair rules `WARNING` primeiro, depois `OPPORTUNITY`.  
-3. Mapear para rascunhos: atributos required, fotos, GTIN, título (handoff Concept Engine).  
+1. Para itens `active` com score &lt; limiar (ex.: &lt; 70) ou level Básica.
+2. Extrair rules `WARNING` primeiro, depois `OPPORTUNITY`.
+3. Mapear para rascunhos: atributos required, fotos, GTIN, título (handoff Concept Engine).
 4. Compatibilidades: listar itens sem cobertura (BulkCompatibility já lista missing).
 
 ---
 
 ## 7. Vertical slice 3 (prevenção)
 
-1. Antes de upload de imagem: `POST /moderations/pictures/diagnostic`.  
-2. Mostrar REMEDY_SHORT ao operador.  
+1. Antes de upload de imagem: `POST /moderations/pictures/diagnostic`.
+2. Mostrar REMEDY_SHORT ao operador.
 3. Não bloquear o fluxo se a API falhar (recomendação oficial ML); avisar.
 
 ---
@@ -253,27 +255,27 @@ Módulo existente deve entrar na **fila de cobertura**, não em clone.
 
 ## 12. Testes planejados (quando houver código)
 
-- Unit: normalizador de moderação (reason/remedy/evidences).  
-- Unit: classificação de severidade (block / exposure / opportunity).  
-- Integration: client methods com HTTP mock (sem token real).  
-- Regressão: PHPUnit suite completa = 0 failures / 0 errors.  
+- Unit: normalizador de moderação (reason/remedy/evidences).
+- Unit: classificação de severidade (block / exposure / opportunity).
+- Integration: client methods com HTTP mock (sem token real).
+- Regressão: PHPUnit suite completa = 0 failures / 0 errors.
 - Proibido: testes que escrevem em conta real no CI.
 
 ---
 
 ## 13. Decisões que precisam de aprovação humana
 
-1. Aprovar este plano como **norte operacional** do eSkill Marketplace Core.  
-2. Confirmar congelamento de Clone/Ads/Pricing auto (sem delete).  
-3. Confirmar que escrita ML (reativar, patch) só após SEC-001 + UI de aprovação.  
-4. Prioridade relativa vs. push do PRD Concept Engine (`docs/concept-engine-prd`).  
+1. Aprovar este plano como **norte operacional** do eSkill Marketplace Core.
+2. Confirmar congelamento de Clone/Ads/Pricing auto (sem delete).
+3. Confirmar que escrita ML (reativar, patch) só após SEC-001 + UI de aprovação.
+4. Prioridade relativa vs. push do PRD Concept Engine (`docs/concept-engine-prd`).
 5. Nome do primeiro módulo PHP (sugestão: `App\Services\MercadoLivre\IrregularitySyncService`) — só após aprovação.
 
 ---
 
 ## 14. Recomendação
 
-**Aprovado para revisão humana.**  
+**Aprovado para revisão humana.**
 Não implementar código até merge deste plano + SEC-001.
 
 *Documento gerado com apoio do MCP Mercado Livre. Nenhum endpoint de escrita foi chamado; nenhum token foi manipulado.*

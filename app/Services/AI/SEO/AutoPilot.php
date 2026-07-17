@@ -209,6 +209,15 @@ class AutoPilot
      */
     public function run(): array
     {
+        $guard = \App\Helpers\MlWriteAutomation::guard('SEO\\AutoPilot::run');
+        if (!$guard['allowed']) {
+            return [
+                'error' => $guard['reason'],
+                'blocked' => true,
+                'mode' => 'recommend_only',
+            ];
+        }
+
         $config = $this->getConfig();
 
         if (!$config['enabled']) {

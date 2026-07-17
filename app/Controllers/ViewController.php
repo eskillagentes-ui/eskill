@@ -171,6 +171,15 @@ class ViewController
     }
 
     /**
+     * Alias legado → workspace canônico de Ficha Técnica.
+     */
+    public function techSheetRedirect(): void
+    {
+        header('Location: /dashboard/tech-sheet', true, 301);
+        exit;
+    }
+
+    /**
      * @deprecated Consolidated into SEO Killer. Redirects to /dashboard/seo-killer
      */
     public function seoIntelligence(): void

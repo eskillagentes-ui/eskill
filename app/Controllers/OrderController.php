@@ -5,7 +5,8 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Services\OrderService;
-use App\Helpers\SessionHelper;
+use App\Security\AccountAccessException;
+use App\Security\AccountContextResolver;
 
 class OrderController extends BaseController
 {
@@ -14,9 +15,16 @@ class OrderController extends BaseController
     public function __construct()
     {
         parent::__construct();
-        // Permite override via GET, senão usa a conta ativa da sessão
-        $accountId = $this->request->get('account_id') ?? SessionHelper::getActiveAccountId();
-        $this->orderService = new OrderService($accountId ? (int)$accountId : null);
+        // SEC-001: nunca confiar em account_id cru sem policy
+        $accountId = null;
+        try {
+            $accountId = (new AccountContextResolver())
+                ->authorizeForCurrentActor('orders.read')
+                ->accountId();
+        } catch (AccountAccessException $e) {
+            $accountId = null;
+        }
+        $this->orderService = new OrderService($accountId);
     }
 
     /**

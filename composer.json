@@ -3,6 +3,11 @@
   "description": "Advanced SEO optimization system for Mercado Livre",
   "type": "project",
   "license": "MIT",
+  "homepage": "https://github.com/jessestainx/eskill",
+  "support": {
+    "source": "https://github.com/jessestainx/eskill",
+    "issues": "https://github.com/jessestainx/eskill/issues"
+  },
   "authors": [
     {
       "name": "SEO Team",
