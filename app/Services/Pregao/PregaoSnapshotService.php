@@ -92,11 +92,32 @@ final class PregaoSnapshotService
             'qa' => $qa,
             'semaforo' => $semaforo,
             'baselines' => $baselines,
+            'sentinela' => $this->loadSentinelaSummary($accountId),
             'seed_enabled' => (bool) ($this->config['seed_enabled'] ?? false),
             'rank_tracker_enabled' => (bool) ($this->config['rank_tracker_enabled'] ?? false),
             'read_only' => true,
             'v' => \App\Services\Pregao\PregaoEmitService::VERSION,
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function loadSentinelaSummary(int $accountId): array
+    {
+        try {
+            return (new \App\Services\Sentinela\Sentinela($this->db))->getSummaryCard($accountId);
+        } catch (Throwable $e) {
+            return [
+                'available' => false,
+                'semaforo' => 'nd',
+                'monitored' => 0,
+                'total' => 11,
+                'label' => 'SENTINELA — n/d',
+                'href' => '/dashboard/sentinela',
+                'pode_expandir' => false,
+            ];
+        }
     }
 
     /**

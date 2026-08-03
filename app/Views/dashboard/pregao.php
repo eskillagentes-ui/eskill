@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/css/pregao.css?v=4">
+<link rel="stylesheet" href="/css/pregao.css?v=5">
 
 <div id="pregao-root" data-account-id="<?= (int)($pregaoAccountId ?? 0) ?>" data-read-only="1">
     <header class="pg-header">
@@ -84,6 +84,11 @@
                     <div class="vl" id="vAcoes">—</div>
                     <div class="sb" id="sAcoes">somente leitura · zero escrita ML</div>
                 </div>
+                <a class="card sn-card" id="cSentinela" href="/dashboard/sentinela" data-metric="sentinela">
+                    <div class="lb">SENTINELA</div>
+                    <div class="vl" id="vSentinela">—</div>
+                    <div class="sb" id="sSentinela">abrindo painel de riscos…</div>
+                </a>
             </div>
         </div>
 
@@ -128,4 +133,4 @@
     };
 </script>
 <script src="/js/pregao-chart-layout.js?v=1"></script>
-<script src="/js/pregao.js?v=6" defer></script>
+<script src="/js/pregao.js?v=7" defer></script>

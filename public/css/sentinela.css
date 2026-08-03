@@ -1,0 +1,144 @@
+/* Sentinela — reusa tokens do Pregão */
+#sentinela-root {
+    --bg: #070B14;
+    --panel: #0D1424;
+    --line: #16203A;
+    --up: #16C784;
+    --down: #EA3943;
+    --warn: #F5A623;
+    --ml: #FFE600;
+    --txt: #E8EEF9;
+    --mut: #7C8AA5;
+    --mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace;
+    --sans: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--txt);
+    font-family: var(--sans);
+    margin: -1.5rem -1.5rem -2rem;
+    min-height: calc(100vh - 80px);
+}
+
+.main-content:has(#sentinela-root) {
+    background: #070B14;
+    padding-bottom: 0;
+}
+
+#sentinela-root .sn-back {
+    color: var(--ml);
+    text-decoration: none;
+    font-size: 13px;
+    letter-spacing: 1px;
+    font-weight: 600;
+}
+
+#sentinela-root .sn-note {
+    padding: 10px 22px;
+    border-bottom: 1px solid var(--line);
+    color: var(--mut);
+    font-size: 12px;
+}
+
+#sentinela-root .sn-grid {
+    padding: 18px 22px 32px;
+}
+
+#sentinela-root .sn-table-wrap {
+    overflow-x: auto;
+}
+
+#sentinela-root .sn-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+#sentinela-root .sn-table th {
+    text-align: left;
+    color: var(--mut);
+    font-weight: 600;
+    letter-spacing: 0.5px;
+    font-size: 11px;
+    text-transform: uppercase;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--line);
+}
+
+#sentinela-root .sn-table td {
+    padding: 12px;
+    border-bottom: 1px solid var(--line);
+    vertical-align: top;
+}
+
+#sentinela-root .sn-risk-name {
+    font-weight: 600;
+    color: var(--txt);
+}
+
+#sentinela-root .sn-risk-reason {
+    color: var(--mut);
+    font-size: 11px;
+    margin-top: 4px;
+    max-width: 360px;
+    line-height: 1.35;
+}
+
+#sentinela-root .mono {
+    font-family: var(--mono);
+    font-size: 12px;
+}
+
+#sentinela-root .mut {
+    color: var(--mut);
+}
+
+#sentinela-root .pill {
+    display: inline-block;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+}
+
+#sentinela-root .pill.st-green,
+#sentinela-root .st-green .pill {
+    background: rgba(22, 199, 132, 0.15);
+    color: var(--up);
+}
+
+#sentinela-root .pill.st-yellow,
+#sentinela-root .st-yellow .pill {
+    background: rgba(245, 166, 35, 0.15);
+    color: var(--warn);
+}
+
+#sentinela-root .pill.st-red,
+#sentinela-root .st-red .pill {
+    background: rgba(234, 57, 67, 0.15);
+    color: var(--down);
+}
+
+#sentinela-root .pill.st-nd,
+#sentinela-root .st-nd .pill {
+    background: rgba(124, 138, 165, 0.15);
+    color: var(--mut);
+}
+
+#sentinela-root .sema.st-verde .s { background: var(--up); }
+#sentinela-root .sema.st-amarelo .s { background: var(--warn); }
+#sentinela-root .sema.st-vermelho .s { background: var(--down); }
+
+#sentinela-root .spark {
+    color: var(--mut);
+    display: block;
+}
+
+#sentinela-root tr.st-red .spark { color: var(--down); }
+#sentinela-root tr.st-yellow .spark { color: var(--warn); }
+#sentinela-root tr.st-green .spark { color: var(--up); }
+
+#sentinela-root .spark-empty {
+    color: var(--mut);
+    font-size: 11px;
+}

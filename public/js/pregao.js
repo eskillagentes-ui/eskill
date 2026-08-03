@@ -219,6 +219,7 @@
         $('vHealth').textContent = nd(m.health_medio, (v) => fmtNum(v, 2));
         applyPerguntasCard(m);
         $('vAcoes').textContent = nd(m.acoes_hora);
+        applySentinelaCard(window.__pregaoLastSentinela || null);
 
         const rep = m.reputacao;
         if (!rep) {
@@ -262,6 +263,26 @@
             card.classList.add('status-' + st);
         }
         renderOpenQuestions(Array.isArray(p7.lista_abertas) ? p7.lista_abertas : []);
+    }
+
+    function applySentinelaCard(sn) {
+        const card = $('cSentinela');
+        if (!card) return;
+        card.classList.remove('status-verde', 'status-amarelo', 'status-vermelho');
+        if (!sn || !sn.available) {
+            if ($('vSentinela')) $('vSentinela').textContent = 'n/d';
+            if ($('sSentinela')) $('sSentinela').textContent = 'aguardando primeira coleta';
+            return;
+        }
+        const sem = sn.semaforo || 'verde';
+        if ($('vSentinela')) {
+            const icon = sem === 'vermelho' ? '🔴' : (sem === 'amarelo' ? '🟡' : '🟢');
+            $('vSentinela').textContent = icon + ' ' + String(sem).toUpperCase();
+        }
+        if ($('sSentinela')) {
+            $('sSentinela').textContent = (sn.monitored || 0) + ' de ' + (sn.total || 11) + ' monitorados · abrir painel';
+        }
+        card.classList.add('status-' + sem);
     }
 
     function renderOpenQuestions(list) {
@@ -457,6 +478,18 @@
             flash('cPerg', p.flash === 'yellow' ? 'flash-y' : 'flash-g');
             return;
         }
+        if (p.key === 'sentinela' && p.value && typeof p.value === 'object') {
+            window.__pregaoLastSentinela = {
+                available: true,
+                semaforo: p.value.semaforo,
+                monitored: p.value.monitored,
+                total: p.value.total || 11,
+                pode_expandir: !!p.value.pode_expandir
+            };
+            applySentinelaCard(window.__pregaoLastSentinela);
+            flash('cSentinela', p.flash === 'yellow' ? 'flash-y' : 'flash-g');
+            return;
+        }
         const ids = map[p.key];
         if (!ids) return;
         const el = $(ids[0]);
@@ -563,6 +596,8 @@
         draw();
 
         applyMetrics(d.metrics);
+        window.__pregaoLastSentinela = d.sentinela || null;
+        applySentinelaCard(window.__pregaoLastSentinela);
         applySemaforo(d.semaforo);
         renderTape(d.ranks != null ? d.ranks : d.keywords, d.rank_tracker_enabled);
         applyQa(d.qa);

@@ -13,3 +13,6 @@ use App\Controllers\PregaoController;
 $router->get('api/pregao/snapshot', PregaoController::class, 'snapshot');
 $router->get('api/pregao/stream', PregaoController::class, 'stream');
 $router->get('api/pregao/ticket', PregaoController::class, 'ticket');
+
+use App\Controllers\SentinelaController;
+$router->get('api/sentinela/snapshot', SentinelaController::class, 'snapshot');

@@ -36,7 +36,9 @@ $router->post('api/account-health/refresh', AccountHealthController::class, 'ref
 
 // Pregão — painel read-only em tempo real (índice ESKL11)
 use App\Controllers\PregaoController;
+use App\Controllers\SentinelaController;
 $router->get('dashboard/pregao', PregaoController::class, 'index');
+$router->get('dashboard/sentinela', SentinelaController::class, 'index');
 // APIs em app/Routes/api/pregao.php
 
 // 🆕 Advanced Account Health Diagnostics
