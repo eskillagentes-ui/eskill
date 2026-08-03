@@ -135,6 +135,11 @@ jobs:
         env:
           APP_ENV: testing
 
+      - name: Run Agent Safety Gate
+        run: php vendor/bin/phpunit tests/Unit/Services/Agents --colors=always
+        env:
+          APP_ENV: testing
+
       - name: Upload test results
         if: always()
         uses: actions/upload-artifact@v4

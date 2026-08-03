@@ -57,6 +57,7 @@ jobs:
         } >> .env
         cp .env .env.testing
         ./vendor/bin/phpunit --testsuite Unit
+        ./vendor/bin/phpunit tests/Unit/Services/Agents
 
     - name: Install Dependencies (production, no-dev)
       if: success()

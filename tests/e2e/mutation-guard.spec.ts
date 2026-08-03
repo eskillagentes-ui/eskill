@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
-import { requireMutationAllowed } from './helpers/mutation-guard';
+import { assertSafePlaywrightTarget, requireMutationAllowed } from './helpers/mutation-guard';
 
 const originalAllowMutation = process.env.E2E_ALLOW_MUTATION;
 const originalBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
@@ -62,6 +62,15 @@ test.describe('Mutation guard contract @readonly', () => {
     expect(() => requireMutationAllowed('guard-test')).not.toThrow();
   });
 
+  test('@readonly target global permite apenas loopback ou staging', () => {
+    expect(() => assertSafePlaywrightTarget('http://127.0.0.1:8080')).not.toThrow();
+    expect(() => assertSafePlaywrightTarget('http://localhost:8080')).not.toThrow();
+    expect(() => assertSafePlaywrightTarget('http://staging.eskill.com.br')).not.toThrow();
+    expect(() => assertSafePlaywrightTarget('https://eskill.com.br')).toThrow(/destino E2E/);
+    expect(() => assertSafePlaywrightTarget('https://www.eskill.com.br')).toThrow(/destino E2E/);
+    expect(() => assertSafePlaywrightTarget('https://example.com')).toThrow(/destino E2E/);
+  });
+
   test('@readonly script npm usa o projeto readonly, não chromium', () => {
     const packagePath = path.resolve(__dirname, '../../package.json');
     const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8')) as {
@@ -71,5 +80,15 @@ test.describe('Mutation guard contract @readonly', () => {
 
     expect(command).toContain('--project=readonly');
     expect(command).not.toContain('--project=chromium');
+  });
+
+  test('@readonly package não expõe smoke mutante de produção', () => {
+    const packagePath = path.resolve(__dirname, '../../package.json');
+    const packageJson = JSON.parse(fs.readFileSync(packagePath, 'utf8')) as {
+      scripts?: Record<string, string>;
+    };
+
+    expect(packageJson.scripts).not.toHaveProperty('smoke:prod');
+    expect(packageJson.scripts).not.toHaveProperty('smoke:prod:ui');
   });
 });

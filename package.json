@@ -6,9 +6,7 @@
     "test:e2e:staging": "mkdir -p .tmp/playwright-transform-cache-0 && TMPDIR=.tmp E2E_ALLOW_MUTATION=true PLAYWRIGHT_BASE_URL=http://staging.eskill.com.br PLAYWRIGHT_SKIP_WEBSERVER=1 playwright test --project=chromium",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",
-    "test:e2e:debug": "playwright test --debug",
-    "smoke:prod": "RUN_PROD_VALIDATION=1 PLAYWRIGHT_SKIP_WEBSERVER=1 playwright test production-validation --project=chromium",
-    "smoke:prod:ui": "RUN_PROD_VALIDATION=1 PLAYWRIGHT_SKIP_WEBSERVER=1 playwright test production-validation --project=chromium --ui"
+    "test:e2e:debug": "playwright test --debug"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

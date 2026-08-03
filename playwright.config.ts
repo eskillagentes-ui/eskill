@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { assertSafePlaywrightTarget } from './tests/e2e/helpers/mutation-guard';
 
 /**
  * Read environment variables from file.
@@ -10,13 +11,13 @@ import { defineConfig, devices } from '@playwright/test';
 
 const PORT = process.env.PLAYWRIGHT_PORT || '8080';
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${PORT}`;
+assertSafePlaywrightTarget(BASE_URL);
 
 /**
- * production-validation.spec.ts roda contra https://eskill.com.br real e exige
- * credenciais dedicadas (PROD_EMAIL/PROD_PASSWORD). Fica de fora do pipeline
- * padrão (PR/full) e só é executado quando RUN_PROD_VALIDATION=1.
+ * production-validation.spec.ts usa URLs absolutas de produção e permanece
+ * desabilitado em todos os projetos. Produção aceita somente auditoria manual
+ * read-only fora deste harness mutante.
  */
-const runProdValidation = process.env.RUN_PROD_VALIDATION === '1';
 
 /**
  * Subconjunto seguro (npm run test:e2e:readonly): exclui os 6 specs com
@@ -35,11 +36,8 @@ const mutatingSpecs = [
   '**/production-validation.spec.ts',
 ];
 
-const testIgnore: string[] = [];
-if (!runProdValidation) {
-  testIgnore.push('**/production-validation.spec.ts');
-}
-if (e2eReadonly || (!mutationAllowed && !runProdValidation)) {
+const testIgnore: string[] = ['**/production-validation.spec.ts'];
+if (e2eReadonly || !mutationAllowed) {
   for (const pattern of mutatingSpecs) {
     if (!testIgnore.includes(pattern)) {
       testIgnore.push(pattern);
