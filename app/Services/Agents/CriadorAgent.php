@@ -6,12 +6,7 @@ namespace App\Services\Agents;
 
 use Throwable;
 
-/**
- * Prepara rascunhos locais; publicacao permanece fora deste contrato.
- *
- * As portas legadas retornam payloads heterogeneos. O uso de mixed nos
- * PHPDocs e restrito a esses payloads, que sao validados antes de qualquer uso.
- */
+/** Gera exclusivamente rascunhos determinísticos em memória a partir de uma fonte read-only. */
 final class CriadorAgent implements AgentInterface
 {
     public const NAME = 'criador';
@@ -19,20 +14,13 @@ final class CriadorAgent implements AgentInterface
     /** @var callable(int, array<string, mixed>): array<string, mixed> */
     private $sourcePort;
 
-    /** @var callable(int, array<string, mixed>): array<string, mixed> */
-    private $draftPort;
-
     /** @var array<string, AgentResult> */
     private array $successfulResults = [];
 
-    /**
-     * @param callable(int, array<string, mixed>): array<string, mixed> $sourcePort
-     * @param callable(int, array<string, mixed>): array<string, mixed> $draftPort
-     */
-    public function __construct(callable $sourcePort, callable $draftPort)
+    /** @param callable(int, array<string, mixed>): array<string, mixed> $sourcePort */
+    public function __construct(callable $sourcePort)
     {
         $this->sourcePort = $sourcePort;
-        $this->draftPort = $draftPort;
     }
 
     public function name(): string
@@ -42,8 +30,7 @@ final class CriadorAgent implements AgentInterface
 
     public function run(AgentContext $context): AgentResult
     {
-        $metadata = $context->metadata();
-        $requested = $metadata['creator_request'] ?? null;
+        $requested = $context->metadata()['creator_request'] ?? null;
         if (!is_array($requested)
             || !isset($requested['source_mlb_id'])
             || !is_string($requested['source_mlb_id'])
@@ -52,22 +39,21 @@ final class CriadorAgent implements AgentInterface
             return AgentResult::blocked(self::NAME, 'creator_request_blocked');
         }
 
-        // Somente dados necessarios ao rascunho atravessam as portas. Campos de
-        // aprovacao, publicacao ou acao vindos da metadata sao descartados.
+        $idempotencyKey = hash(
+            'sha256',
+            $context->accountId() . ':' . $requested['source_mlb_id']
+        );
+        if (isset($this->successfulResults[$idempotencyKey])) {
+            return $this->successfulResults[$idempotencyKey];
+        }
+
         $request = [
             'source_mlb_id' => $requested['source_mlb_id'],
             'start_paused' => true,
             'include_description' => false,
             'include_pictures' => false,
+            'idempotency_key' => $idempotencyKey,
         ];
-        $idempotencyKey = hash(
-            'sha256',
-            $context->accountId() . ':' . $request['source_mlb_id']
-        );
-        $request['idempotency_key'] = $idempotencyKey;
-        if (isset($this->successfulResults[$idempotencyKey])) {
-            return $this->successfulResults[$idempotencyKey];
-        }
 
         try {
             $source = ($this->sourcePort)($context->accountId(), $request);
@@ -75,11 +61,7 @@ final class CriadorAgent implements AgentInterface
             return AgentResult::failed(self::NAME, 'creator_unavailable');
         }
 
-        if (!is_array($source)) {
-            return AgentResult::failed(self::NAME, 'creator_unavailable');
-        }
-
-        if ($this->isRemoteFailure($source)) {
+        if (!is_array($source) || $this->isRemoteFailure($source)) {
             return AgentResult::failed(self::NAME, 'creator_unavailable');
         }
 
@@ -92,42 +74,20 @@ final class CriadorAgent implements AgentInterface
             return AgentResult::blocked(self::NAME, 'creator_request_blocked');
         }
 
-        try {
-            $draftPayload = ($this->draftPort)($context->accountId(), $request);
-        } catch (Throwable) {
-            return AgentResult::failed(self::NAME, 'creator_unavailable');
-        }
-
-        if (!is_array($draftPayload)) {
-            return AgentResult::failed(self::NAME, 'creator_unavailable');
-        }
-
-        if ($this->isRemoteFailure($draftPayload)) {
-            return AgentResult::failed(self::NAME, 'creator_unavailable');
-        }
-
-        $draft = $draftPayload['draft'] ?? null;
-        if (!is_array($draft)
-            || !isset($draft['id'])
-            || !is_string($draft['id'])
-            || trim($draft['id']) === ''
-            || preg_match('/^MLB[0-9]+$/', $draft['id']) === 1
+        $draft = [
+            'id' => 'draft-' . substr($idempotencyKey, 0, 24),
+            'source_mlb_id' => $request['source_mlb_id'],
+            'status' => 'draft',
+            'start_paused' => true,
+            'include_description' => false,
+            'include_pictures' => false,
+        ];
+        if (isset($sourceItem['title'])
+            && is_string($sourceItem['title'])
+            && trim($sourceItem['title']) !== ''
         ) {
-            return AgentResult::failed(self::NAME, 'creator_unavailable');
+            $draft['title'] = trim($sourceItem['title']);
         }
-
-        unset(
-            $draft['published'],
-            $draft['publish_allowed'],
-            $draft['item_id'],
-            $draft['permalink'],
-            $draft['description'],
-            $draft['pictures']
-        );
-        $draft['status'] = 'draft';
-        $draft['start_paused'] = true;
-        $draft['include_description'] = false;
-        $draft['include_pictures'] = false;
 
         $result = AgentResult::success(
             self::NAME,

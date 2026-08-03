@@ -42,7 +42,9 @@ final class CollectorAgent extends LegacyReadOnlyAgentAdapter
             'api_calls' => $payload['api_calls'],
         ];
 
-        if ($payload['ok'] === false && $payload['available'] === false) {
+        if ($payload['ok'] === false
+            && !($payload['available'] && $payload['cached'] && $payload['stale'])
+        ) {
             return $this->failed('collector_unavailable', $data);
         }
 

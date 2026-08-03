@@ -158,6 +158,22 @@ final class LegacyAgentAdaptersTest extends TestCase
         ], $result->data());
     }
 
+    public function testCollectorRejeitaOkFalseSemSnapshotCacheadoEStale(): void
+    {
+        $result = (new CollectorAgent(static fn (int $accountId): array => [
+            'ok' => false,
+            'available' => true,
+            'cached' => false,
+            'stale' => false,
+            'api_calls' => 4,
+        ]))->run($this->context());
+
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('collector_unavailable', $result->reason());
+        $this->assertFalse($result->stateChanged());
+        $this->assertSame([], $result->emittedOps());
+    }
+
     public function testCollectorFalhaQuandoOkFalseEAvailableFalse(): void
     {
         $result = (new CollectorAgent(static fn (int $accountId): array => [

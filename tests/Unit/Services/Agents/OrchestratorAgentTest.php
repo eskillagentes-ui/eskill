@@ -70,6 +70,37 @@ class OrchestratorAgentTest extends TestCase
         $this->assertSame('sobrevive', $results[1]->agent());
     }
 
+    public function testIsolaExcecaoDeNameSemVazamentoEContinua(): void
+    {
+        $invalid = new class implements AgentInterface {
+            public function name(): string
+            {
+                throw new RuntimeException('segredo-no-name');
+            }
+
+            public function run(AgentContext $context): AgentResult
+            {
+                throw new RuntimeException('run-nao-deve-ser-chamado');
+            }
+        };
+        $next = $this->agent('seguinte', static fn (AgentContext $ctx): AgentResult =>
+            AgentResult::success('seguinte', 'ok')
+        );
+
+        $result = (new OrchestratorAgent([$invalid, $next], new AgentPolicy()))->run(
+            new AgentContext(10, 'local', 'corr-name-exception', false)
+        );
+        /** @var list<AgentResult> $results */
+        $results = $result->data()['results'];
+
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('unknown-agent-0', $results[0]->agent());
+        $this->assertSame('agent_name_exception', $results[0]->reason());
+        $this->assertStringNotContainsString('segredo', $results[0]->reason());
+        $this->assertSame('success', $results[1]->status());
+        $this->assertSame(['unknown-agent-0', 'seguinte'], $result->data()['order']);
+    }
+
     public function testPreservaCorrelationIdNoAgregado(): void
     {
         $seen = [];

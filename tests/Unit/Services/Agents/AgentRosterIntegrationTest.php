@@ -81,16 +81,14 @@ final class AgentRosterIntegrationTest extends TestCase
                     'duplicate' => false,
                     'item' => ['id' => $request['source_mlb_id']],
                 ];
-            },
-            static function (int $accountId, array $request): array {
-                return ['draft' => ['id' => 'draft-roster']];
             }
         );
-        $qa = new QaAgent([
-            'runtime-contracts' => static function (AgentContext $context): AgentResult {
-                return AgentResult::success('runtime-contracts', 'ok');
-            },
-        ]);
+        $qaChecks = [];
+        foreach (QaMergeGate::REQUIRED_CHECK_IDS as $id) {
+            $qaChecks[$id] = static fn (AgentContext $context): AgentResult =>
+                AgentResult::success($id, 'ok');
+        }
+        $qa = new QaAgent($qaChecks);
         $context = new AgentContext(
             10,
             'local',
@@ -120,7 +118,7 @@ final class AgentRosterIntegrationTest extends TestCase
         $this->assertFalse($result->stateChanged());
         $this->assertSame([], $result->emittedOps());
 
-        (new QaMergeGate(['runtime-contracts']))->assertPasses($qa->run($context));
+        (new QaMergeGate())->assertPasses($qa, $context);
         $this->assertTrue(true);
     }
 }

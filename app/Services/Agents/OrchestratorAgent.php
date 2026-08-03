@@ -42,14 +42,24 @@ final class OrchestratorAgent implements AgentInterface
         $hasBlocked = false;
         $hasFailed = false;
 
-        foreach ($this->agents as $agent) {
-            $order[] = $agent->name();
+        foreach ($this->agents as $index => $agent) {
+            try {
+                $agentName = $agent->name();
+            } catch (Throwable) {
+                $agentName = 'unknown-agent-' . $index;
+                $order[] = $agentName;
+                $results[] = AgentResult::failed($agentName, 'agent_name_exception');
+                $hasFailed = true;
+                continue;
+            }
+
+            $order[] = $agentName;
 
             try {
                 $agentResult = $agent->run($context);
             } catch (Throwable) {
                 $agentResult = AgentResult::failed(
-                    $agent->name(),
+                    $agentName,
                     'agent_exception'
                 );
             }
