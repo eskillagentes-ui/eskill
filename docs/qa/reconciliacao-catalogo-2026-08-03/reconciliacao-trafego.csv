@@ -1,0 +1,4 @@
+periodo,dias_calendario,visitas_originais,visitas_sucessores,soma,media_originais_dia,media_sucessores_dia,media_soma_dia,delta_vs_baseline_dia,delta_vs_baseline_pct
+"01/07–19/07 (antes, dias completos)",19,3774,0,3774,198.632,0.0,198.632,0.0,0.0
+"22/07–02/08 (depois, dias completos)",12,139,49,188,11.583,4.083,15.667,-182.965,-92.11
+22/07–03/08 06h (hoje parcial),13,139,50,189,10.692,3.846,14.538,-184.093,-92.68
