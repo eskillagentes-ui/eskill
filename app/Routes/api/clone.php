@@ -72,7 +72,6 @@ use App\Controllers\OpenClawConnectorController;
 use App\Controllers\UserController;
 use App\Controllers\OnboardingController;
 use App\Controllers\MarketDataController;
-use App\Controllers\ProxyController;
 
 $router->get('api/catalog/metrics', CatalogCloneController::class, 'getMetrics');
 $router->get('api/catalog/schedules', CatalogCloneController::class, 'getSchedules');

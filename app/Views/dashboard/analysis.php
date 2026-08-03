@@ -1046,7 +1046,7 @@ include __DIR__ . '/../components/account-selector.php';
                     </div>
                     <a href="/dashboard" class="btn btn-dark">
                         <i class="fas fa-arrow-left me-2"></i> Voltar
-                    </a>
+                    </button>
                 </div>
             </div>
         </div>
@@ -2911,7 +2911,7 @@ include __DIR__ . '/../components/account-selector.php';
                                     </p>
                                     <a href="/items" class="btn btn-success btn-sm mt-2">
                                         <i class="fas fa-arrow-right me-1"></i> Ir para Meus Anúncios
-                                    </a>
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -2923,9 +2923,9 @@ include __DIR__ . '/../components/account-selector.php';
                                     <p class="text-white-50 small mb-0">
                                         Configure um proxy residencial para acessar pesquisas completas.
                                     </p>
-                                    <a href="/settings/proxies" class="btn btn-warning btn-sm mt-2">
+                                    <button class="btn btn-secondary btn-sm mt-2" disabled title="Proxies removidos em 2026-08-03 (auditoria TAREFA 1)">
                                         <i class="fas fa-cog me-1"></i> Configurar Proxy
-                                    </a>
+                                    </button>
                                 </div>
                             </div>
                         </div>
@@ -2935,7 +2935,7 @@ include __DIR__ . '/../components/account-selector.php';
                         <a href="https://lista.mercadolivre.com.br/" target="_blank" class="btn btn-outline-info">
                             <i class="fas fa-external-link-alt me-2"></i>
                             Pesquisar no ML
-                        </a>
+                        </button>
                         <button onclick="location.reload()" class="btn btn-outline-secondary">
                             <i class="fas fa-redo me-2"></i>
                             Tentar Novamente
@@ -2962,7 +2962,7 @@ include __DIR__ . '/../components/account-selector.php';
                     <a href="/auth/authorize" class="btn btn-warning btn-lg">
                         <i class="fas fa-link me-2"></i>
                         Reconectar Conta do Mercado Livre
-                    </a>
+                    </button>
                 </div>
             `;
             container.scrollIntoView({

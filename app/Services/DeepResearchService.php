@@ -210,34 +210,10 @@ class DeepResearchService
             log_warning('Fallback via sellers falhou', ['error' => $e->getMessage()]);
         }
 
-        // Fallback 2: Serviço alternativo com scraping
-        try {
-            log_info('Tentando scraping como fallback');
-            $altService = new AlternativeSearchService($this->client->getAccountId());
-            $result = $altService->analyzeBrandSellers($categoryId, $brand);
-
-            if ($result['success'] && !empty($result['sellers'])) {
-                // Converter formato do serviço alternativo para formato esperado
-                $items = [];
-                foreach ($result['sellers'] as $seller) {
-                    foreach ($seller['items'] ?? [] as $item) {
-                        $items[] = array_merge($item, [
-                            'seller' => [
-                                'id' => $seller['id'],
-                                'nickname' => $seller['nickname'],
-                            ],
-                        ]);
-                    }
-                }
-
-                if (!empty($items)) {
-                    log_info('Sucesso via scraping', ['count' => count($items)]);
-                    return $items;
-                }
-            }
-        } catch (\Exception $e) {
-            log_warning('Fallback via scraping falhou', ['error' => $e->getMessage()]);
-        }
+        // Fallback 2: REMOVIDO em 2026-08-03 (auditoria TAREFA 1) - scraping do ML
+        // violava a regra "somente leitura via API oficial, nunca scraping".
+        // Caminho legitimo: seguir para Fallback 3 (cache) ou Fallback 1 (sellers).
+        log_warning('Fallback via scraping DESATIVADO por politica (2026-08-03)');
 
         // Fallback 3: Dados do cache histórico
         $cacheKey = "research_cache_{$categoryId}_{$brand}";

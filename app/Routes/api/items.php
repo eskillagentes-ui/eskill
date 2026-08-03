@@ -74,7 +74,6 @@ use App\Controllers\OpenClawConnectorController;
 use App\Controllers\UserController;
 use App\Controllers\OnboardingController;
 use App\Controllers\MarketDataController;
-use App\Controllers\ProxyController;
 
 $router->get('api/sync/history', SyncController::class, 'history');
 
@@ -93,13 +92,6 @@ $router->post('api/settings/telegram', \App\Controllers\SettingsController::clas
 $router->post('api/settings/sync', \App\Controllers\SettingsController::class, 'saveSync');
 
 // Proxy management
-$router->get('api/proxies', ProxyController::class, 'index');
-$router->get('api/proxies/status', ProxyController::class, 'status');
-$router->post('api/proxies', ProxyController::class, 'store');
-$router->post('api/proxies/{id}/test', ProxyController::class, 'test');
-$router->post('api/proxies/test-all', ProxyController::class, 'testAll');
-$router->delete('api/proxies/{id}', ProxyController::class, 'destroy');
-$router->post('api/proxies/clear-blacklist', ProxyController::class, 'clearBlacklist');
 
 // Rotas de pedidos
 $router->get('api/orders', OrderController::class, 'index');

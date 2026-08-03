@@ -73,7 +73,6 @@ use App\Controllers\OpenClawConnectorController;
 use App\Controllers\UserController;
 use App\Controllers\OnboardingController;
 use App\Controllers\MarketDataController;
-use App\Controllers\ProxyController;
 
 // ========================================
 // 🧠 SEO Phase 1: Synonyms & Semantics

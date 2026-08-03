@@ -74,7 +74,6 @@ use App\Controllers\OpenClawConnectorController;
 use App\Controllers\UserController;
 use App\Controllers\OnboardingController;
 use App\Controllers\MarketDataController;
-use App\Controllers\ProxyController;
 
 // ========================================
 // 📩 Integrações - Brevo (Marketing API)
