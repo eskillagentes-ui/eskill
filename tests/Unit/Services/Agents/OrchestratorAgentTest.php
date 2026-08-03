@@ -50,7 +50,7 @@ class OrchestratorAgentTest extends TestCase
     public function testIsolaExcecaoPorAgenteEContinua(): void
     {
         $a = $this->agent('bomba', static function (AgentContext $ctx): AgentResult {
-            throw new RuntimeException('boom');
+            throw new RuntimeException('segredo-interno-orquestrador');
         });
         $b = $this->agent('sobrevive', static function (AgentContext $ctx): AgentResult {
             return AgentResult::success('sobrevive', 'ainda ok');
@@ -64,7 +64,8 @@ class OrchestratorAgentTest extends TestCase
         $results = $result->data()['results'];
         $this->assertSame('failed', $results[0]->status());
         $this->assertSame('bomba', $results[0]->agent());
-        $this->assertStringContainsString('boom', $results[0]->reason());
+        $this->assertSame('agent_exception', $results[0]->reason());
+        $this->assertStringNotContainsString('segredo-interno', $results[0]->reason());
         $this->assertSame('success', $results[1]->status());
         $this->assertSame('sobrevive', $results[1]->agent());
     }

@@ -45,10 +45,10 @@ final class OrchestratorAgent implements AgentInterface
 
             try {
                 $agentResult = $agent->run($context);
-            } catch (Throwable $e) {
+            } catch (Throwable) {
                 $agentResult = AgentResult::failed(
                     $agent->name(),
-                    $e->getMessage() !== '' ? $e->getMessage() : $e::class
+                    'agent_exception'
                 );
             }
 
