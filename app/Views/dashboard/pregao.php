@@ -133,4 +133,4 @@
     };
 </script>
 <script src="/js/pregao-chart-layout.js?v=1"></script>
-<script src="/js/pregao.js?v=8" defer></script>
+<script src="/js/pregao.js?v=10" defer></script>

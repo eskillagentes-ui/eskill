@@ -16,6 +16,7 @@
     /** @type {Set<string>} */
     const seenOps = new Set();
     let candles = [];
+    let currentDate = null;
     let open0 = 1000;
     let cur = { o: 1000, c: 1000, h: 1000, l: 1000 };
     let reconnectAttempt = 0;
@@ -79,26 +80,34 @@
     const layoutApi = window.PregaoChartLayout || null;
 
     function updateHeader() {
-        if (!candles.length) {
-            if ($('px')) $('px').textContent = 'n/d';
-            return;
-        }
         const p = cur.c;
         if (!Number.isFinite(p)) {
             $('px').textContent = 'n/d';
+            $('px').style.color = '';
+            $('chg').textContent = 'n/d';
+            $('chg').className = 'chg';
+            $('fOpen').textContent = 'n/d';
+            $('fHigh').textContent = 'n/d';
+            $('fLow').textContent = 'n/d';
             return;
         }
-        const pc = (p / open0 - 1) * 100;
+        const pc = Object.prototype.hasOwnProperty.call(cur, 'change_pct')
+            ? (Number.isFinite(cur.change_pct) ? cur.change_pct : null)
+            : (Number.isFinite(open0) && open0 > 0 ? (p / open0 - 1) * 100 : null);
         $('px').textContent = fmtNum(p, 2);
-        $('px').style.color = pc >= 0 ? 'var(--up)' : 'var(--down)';
         const e = $('chg');
-        e.textContent = (pc >= 0 ? '▲ +' : '▼ ') + fmtNum(Math.abs(pc), 2) + '%';
-        e.className = 'chg ' + (pc >= 0 ? 'up' : 'down');
-        let hi = -1e9, lo = 1e9;
-        candles.forEach((k) => { hi = Math.max(hi, k.h); lo = Math.min(lo, k.l); });
-        $('fOpen').textContent = open0.toFixed(0);
-        $('fHigh').textContent = hi.toFixed(0);
-        $('fLow').textContent = lo.toFixed(0);
+        if (pc === null || !Number.isFinite(pc)) {
+            $('px').style.color = '';
+            e.textContent = 'n/d';
+            e.className = 'chg';
+        } else {
+            $('px').style.color = pc >= 0 ? 'var(--up)' : 'var(--down)';
+            e.textContent = (pc >= 0 ? '▲ +' : '▼ ') + fmtNum(Math.abs(pc), 2) + '%';
+            e.className = 'chg ' + (pc >= 0 ? 'up' : 'down');
+        }
+        $('fOpen').textContent = Number.isFinite(open0) ? open0.toFixed(0) : 'n/d';
+        $('fHigh').textContent = Number.isFinite(cur.h) ? cur.h.toFixed(0) : 'n/d';
+        $('fLow').textContent = Number.isFinite(cur.l) ? cur.l.toFixed(0) : 'n/d';
     }
 
     function setChartEmpty(show) {
@@ -172,16 +181,19 @@
                 ctx.shadowBlur = 0;
             }
         });
-        const ly = y(cur.c);
-        ctx.setLineDash([4, 4]);
-        ctx.strokeStyle = 'rgba(255,230,0,.55)';
-        ctx.beginPath(); ctx.moveTo(0, ly); ctx.lineTo(W - padR, ly); ctx.stroke();
-        ctx.setLineDash([]);
-        ctx.fillStyle = '#FFE600';
-        ctx.fillRect(W - padR + 2, ly - 8, padR - 8, 16);
-        ctx.fillStyle = '#070B14';
-        ctx.font = 'bold 10px monospace';
-        ctx.fillText(cur.c.toFixed(0), W - padR + 10, ly + 3.5);
+        const chartPrice = Number.isFinite(cur.c) ? cur.c : null;
+        if (chartPrice !== null) {
+            const ly = y(chartPrice);
+            ctx.setLineDash([4, 4]);
+            ctx.strokeStyle = 'rgba(255,230,0,.55)';
+            ctx.beginPath(); ctx.moveTo(0, ly); ctx.lineTo(W - padR, ly); ctx.stroke();
+            ctx.setLineDash([]);
+            ctx.fillStyle = '#FFE600';
+            ctx.fillRect(W - padR + 2, ly - 8, padR - 8, 16);
+            ctx.fillStyle = '#070B14';
+            ctx.font = 'bold 10px monospace';
+            ctx.fillText(chartPrice.toFixed(0), W - padR + 10, ly + 3.5);
+        }
     }
 
     addEventListener('resize', draw);
@@ -431,22 +443,31 @@
         const v = Number(value);
         if (!Number.isFinite(v)) return;
         cur.c = v;
-        cur.h = Math.max(cur.h, v);
-        cur.l = Math.min(cur.l, v);
-        if (candles.length) candles[candles.length - 1] = { ...cur };
+        const currentIndex = currentDate ? findCandleIndex(currentDate) : -1;
+        if (currentIndex >= 0) {
+            cur.h = cur.h == null ? v : Math.max(cur.h, v);
+            cur.l = cur.l == null ? v : Math.min(cur.l, v);
+            candles[currentIndex] = { ...candles[currentIndex], c: v, h: cur.h, l: cur.l };
+        }
         updateHeader();
         draw();
+    }
+
+    function findCandleIndex(date) {
+        return candles.findIndex((candle) => candle.date === date);
     }
 
     function applyCandle(c) {
         if (!c || !c.date) return;
         const row = { o: +c.o, h: +c.h, l: +c.l, c: +c.c, date: c.date };
-        const idx = candles.findIndex((x) => x.date === c.date);
+        const idx = findCandleIndex(c.date);
         if (idx >= 0) candles[idx] = row;
         else candles.push(row);
         if (candles.length > 90) candles = candles.slice(-90);
-        cur = { ...row };
-        open0 = candles[0].o;
+        if (c.date === currentDate) {
+            cur = { ...row };
+            open0 = row.o;
+        }
         updateHeader();
         draw();
     }
@@ -557,7 +578,7 @@
                 break;
             case 'sale':
                 // cadeia metric/op já vem do backend; só bump visual no candle
-                applyIndexTick((cur.c || open0) + 3);
+                applyIndexTick((Number.isFinite(cur.c) ? cur.c : (Number.isFinite(open0) ? open0 : 0)) + 3);
                 break;
             case 'keyword.rank':
                 if (ev.payload) {
@@ -598,25 +619,50 @@
         candles = (d.candles || []).map((c) => ({
             o: +c.o, h: +c.h, l: +c.l, c: +c.c, date: c.date
         }));
-        if (candles.length) {
-            cur = { ...candles[candles.length - 1] };
-            // Índice live do snapshot prevalece sobre candle stale (ex.: tick antigo sem Ft)
-            if (d.index && d.index.value != null) {
-                const live = Number(d.index.value);
-                if (Number.isFinite(live)) {
-                    cur.c = live;
-                    cur.h = Math.max(cur.h, live);
-                    cur.l = Math.min(cur.l, live);
-                    candles[candles.length - 1] = { ...candles[candles.length - 1], c: live, h: cur.h, l: cur.l };
-                }
+        currentDate = typeof d.server_ts === 'string' ? d.server_ts.slice(0, 10) : null;
+        const currentIndex = currentDate
+            ? findCandleIndex(currentDate)
+            : -1;
+        const index = d.index || {};
+        const liveValue = index.value == null ? null : Number(index.value);
+        const indexOpen = index.open == null ? null : Number(index.open);
+        const indexChange = index.change_pct == null ? null : Number(index.change_pct);
+        const hasLiveValue = Number.isFinite(liveValue);
+        const hasDailyOpen = Number.isFinite(indexOpen) && indexOpen > 0;
+        const hasDailyChange = Number.isFinite(indexChange);
+        if (currentIndex >= 0) {
+            // Candle do dia + índice live prevalece sobre fechamento persistido (stale pós-Ft).
+            cur = { ...candles[currentIndex] };
+            open0 = hasDailyOpen ? indexOpen : cur.o;
+            if (hasLiveValue) {
+                cur.c = liveValue;
+                cur.h = Number.isFinite(cur.h) ? Math.max(cur.h, liveValue) : liveValue;
+                cur.l = Number.isFinite(cur.l) ? Math.min(cur.l, liveValue) : liveValue;
+                candles[currentIndex] = {
+                    ...candles[currentIndex],
+                    c: cur.c,
+                    h: cur.h,
+                    l: cur.l
+                };
             }
-            open0 = candles[0].o;
-        } else if (d.index && d.index.value != null) {
-            const v = Number(d.index.value);
-            if (Number.isFinite(v)) {
-                cur = { o: v, c: v, h: v, l: v };
-                open0 = v;
-            }
+            const indexHigh = index.high == null ? null : Number(index.high);
+            const indexLow = index.low == null ? null : Number(index.low);
+            if (Number.isFinite(indexHigh)) cur.h = Number.isFinite(cur.h) ? Math.max(cur.h, indexHigh) : indexHigh;
+            if (Number.isFinite(indexLow)) cur.l = Number.isFinite(cur.l) ? Math.min(cur.l, indexLow) : indexLow;
+            if (hasDailyOpen && hasDailyChange) cur.change_pct = indexChange;
+        } else if (hasLiveValue) {
+            cur = {
+                o: hasDailyOpen ? indexOpen : null,
+                c: liveValue,
+                h: null,
+                l: null,
+                date: currentDate,
+                change_pct: hasDailyOpen && hasDailyChange ? indexChange : null
+            };
+            open0 = hasDailyOpen ? indexOpen : null;
+        } else {
+            cur = { o: null, c: null, h: null, l: null, date: currentDate, change_pct: null };
+            open0 = null;
         }
         setFactorsBadge(d.index || {});
         updateHeader();

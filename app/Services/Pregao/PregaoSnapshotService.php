@@ -60,21 +60,37 @@ final class PregaoSnapshotService
             $indexValue = (float) $metrics['indice_atual'];
         }
 
-        $openRef = $candles !== [] ? (float) $candles[0]['o'] : $indexValue;
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('America/Sao_Paulo'));
+        $today = $now->format('Y-m-d');
+        $currentCandle = null;
+        foreach (array_reverse($candles) as $candle) {
+            if ($candle['date'] === $today) {
+                $currentCandle = $candle;
+                break;
+            }
+        }
+        $openRef = $currentCandle !== null ? (float) $currentCandle['o'] : null;
         $changePct = ($openRef !== null && $openRef > 0 && $indexValue !== null)
             ? (($indexValue / $openRef) - 1.0) * 100.0
             : null;
 
+        $high = $currentCandle !== null ? (float) $currentCandle['h'] : null;
+        $low = $currentCandle !== null ? (float) $currentCandle['l'] : null;
+        if ($indexValue !== null) {
+            $high = $high === null ? $indexValue : max($high, $indexValue);
+            $low = $low === null ? $indexValue : min($low, $indexValue);
+        }
+
         return [
             'account_id' => $accountId,
-            'server_ts' => (new \DateTimeImmutable('now', new \DateTimeZone('America/Sao_Paulo')))->format('Y-m-d\TH:i:sP'),
+            'server_ts' => $now->format('Y-m-d\TH:i:sP'),
             'index' => [
                 'symbol' => 'ESKL11',
                 'value' => $indexValue !== null ? round($indexValue, 2) : null,
                 'change_pct' => $changePct !== null ? round($changePct, 2) : null,
                 'open' => $openRef !== null ? round($openRef, 2) : null,
-                'high' => $candles !== [] ? round(max(array_column($candles, 'h')), 2) : ($indexValue !== null ? round($indexValue, 2) : null),
-                'low' => $candles !== [] ? round(min(array_column($candles, 'l')), 2) : ($indexValue !== null ? round($indexValue, 2) : null),
+                'high' => $high !== null ? round($high, 2) : null,
+                'low' => $low !== null ? round($low, 2) : null,
                 'factors_active' => $calc['factors_active'],
                 'factors_total' => $calc['factors_total'],
                 'label' => $calc['label'],
@@ -512,9 +528,13 @@ final class PregaoSnapshotService
             }
         }
 
-        // Ft só com TACOS marcado available=true no meta do coletor Ads
+        // Ft só contribui com TACOS explicitamente disponível e numericamente completo.
         $tacosMeta = is_array($meta['metrics']['tacos'] ?? null) ? $meta['metrics']['tacos'] : [];
-        $available['Ft'] = (($tacosMeta['available'] ?? false) === true);
+        $tacosValue = $tacosMeta['value'] ?? null;
+        $available['Ft'] = (($tacosMeta['available'] ?? false) === true)
+            && is_numeric($tacosValue)
+            && is_finite((float) $tacosValue)
+            && (float) $tacosValue >= 0.0;
 
         return $available;
     }

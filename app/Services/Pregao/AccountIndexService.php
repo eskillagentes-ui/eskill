@@ -163,9 +163,13 @@ final class AccountIndexService
             }
         }
 
-        // Ft ativo somente quando o coletor Ads marcar TACOS available=true
+        // Ft ativo somente com TACOS available=true e valor numérico finito ≥ 0 (mesmo contrato do Snapshot).
         $tacosMeta = is_array($meta['metrics']['tacos'] ?? null) ? $meta['metrics']['tacos'] : [];
-        $available['Ft'] = (($tacosMeta['available'] ?? false) === true);
+        $tacosValue = $tacosMeta['value'] ?? null;
+        $available['Ft'] = (($tacosMeta['available'] ?? false) === true)
+            && is_numeric($tacosValue)
+            && is_finite((float) $tacosValue)
+            && (float) $tacosValue >= 0.0;
 
         return $available;
     }

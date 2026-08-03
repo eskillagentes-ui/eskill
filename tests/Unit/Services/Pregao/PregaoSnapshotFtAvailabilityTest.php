@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Services\Pregao;
 
+use App\Services\Pregao\AccountIndexCalculator;
 use App\Services\Pregao\PregaoSnapshotService;
 use PHPUnit\Framework\TestCase;
+use ReflectionClass;
 use ReflectionMethod;
 
 /**
@@ -13,9 +15,14 @@ use ReflectionMethod;
  */
 class PregaoSnapshotFtAvailabilityTest extends TestCase
 {
+    private function serviceWithoutDatabase(): PregaoSnapshotService
+    {
+        return (new ReflectionClass(PregaoSnapshotService::class))->newInstanceWithoutConstructor();
+    }
+
     public function testFtAtivoQuandoTacosAvailableTrue(): void
     {
-        $svc = new PregaoSnapshotService();
+        $svc = $this->serviceWithoutDatabase();
         $method = new ReflectionMethod(PregaoSnapshotService::class, 'factorAvailability');
         $method->setAccessible(true);
 
@@ -30,7 +37,7 @@ class PregaoSnapshotFtAvailabilityTest extends TestCase
 
     public function testFtInativoQuandoTacosUnavailable(): void
     {
-        $svc = new PregaoSnapshotService();
+        $svc = $this->serviceWithoutDatabase();
         $method = new ReflectionMethod(PregaoSnapshotService::class, 'factorAvailability');
         $method->setAccessible(true);
 
@@ -44,7 +51,7 @@ class PregaoSnapshotFtAvailabilityTest extends TestCase
 
     public function testFtInativoSemMetaTacos(): void
     {
-        $svc = new PregaoSnapshotService();
+        $svc = $this->serviceWithoutDatabase();
         $method = new ReflectionMethod(PregaoSnapshotService::class, 'factorAvailability');
         $method->setAccessible(true);
 
@@ -54,5 +61,26 @@ class PregaoSnapshotFtAvailabilityTest extends TestCase
         ]);
 
         $this->assertFalse($available['Ft']);
+    }
+
+    public function testFtInativoENaoContribuiQuandoTacosNulo(): void
+    {
+        $svc = $this->serviceWithoutDatabase();
+        $method = new ReflectionMethod(PregaoSnapshotService::class, 'factorAvailability');
+        $method->setAccessible(true);
+
+        $available = $method->invoke($svc, [
+            'available' => ['Fv' => true, 'Ft' => true],
+            'metrics' => ['tacos' => ['available' => true, 'value' => null]],
+        ]);
+        $result = (new AccountIndexCalculator())->calculate([
+            'vendas_7d' => 10,
+            'vendas_7d_baseline' => 10,
+            'available' => $available,
+        ]);
+
+        $this->assertFalse($available['Ft']);
+        $this->assertNull($result['factors']['Ft']);
+        $this->assertSame(1, $result['factors_active']);
     }
 }
