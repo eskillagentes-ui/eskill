@@ -1,0 +1,17 @@
+[Unit]
+Description=eskill Pregao WebSocket gateway
+After=network.target
+
+[Service]
+Type=simple
+User=eskill
+Group=eskill
+WorkingDirectory=/home/eskill/htdocs/eskill.com.br
+ExecStart=/usr/bin/php /home/eskill/htdocs/eskill.com.br/bin/pregao-ws-gateway.php
+Restart=always
+RestartSec=3
+StandardOutput=append:/home/eskill/htdocs/eskill.com.br/storage/logs/pregao-ws.log
+StandardError=append:/home/eskill/htdocs/eskill.com.br/storage/logs/pregao-ws.log
+
+[Install]
+WantedBy=multi-user.target

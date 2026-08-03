@@ -1,0 +1,17 @@
+[Unit]
+Description=eskill Pregao ESKL11 index tick
+After=network.target
+
+[Service]
+Type=simple
+User=eskill
+Group=eskill
+WorkingDirectory=/home/eskill/htdocs/eskill.com.br
+ExecStart=/usr/bin/php /home/eskill/htdocs/eskill.com.br/bin/pregao-index-tick.php --account-id=1335 --loop --interval=45
+Restart=always
+RestartSec=5
+StandardOutput=append:/home/eskill/htdocs/eskill.com.br/storage/logs/pregao-tick.log
+StandardError=append:/home/eskill/htdocs/eskill.com.br/storage/logs/pregao-tick.log
+
+[Install]
+WantedBy=multi-user.target

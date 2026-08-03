@@ -81,3 +81,12 @@ php bin/pregao-index-tick.php --account-id=1335 --loop --interval=45
 - `pregao_emit_sale` → 5 eventos; snapshot autenticado **17ms**, vendas_hoje=2, fita com VENDA
 - Página `/dashboard/pregao` → **200** com `#pregao-root` / ESKL11
 - Ticket WS + handshake → **101 Switching Protocols**
+
+## Continuação agente (2026-08-02 21:42 -03)
+
+- DOM/página: pregao-root, ESKL11, canvas, feed, css/js/boot — todos OK
+- Snapshot autenticado: **7ms**
+- Workers persistentes via **systemd**: `pregao-ws.service` + `pregao-tick.service` (active)
+- Units versionadas em `config/systemd/`
+- **Push/PR bloqueado**: sem credencial GitHub neste host (`git push` → could not read Username)
+  - Rodar localmente: `git push -u origin feature/pregao` e `gh pr create`
