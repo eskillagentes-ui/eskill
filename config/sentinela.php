@@ -110,10 +110,10 @@ return [
     'queda_vendas' => [
         'label' => 'Queda brusca de vendas',
         'limit' => 50.0,
-        'yellow_at' => 25.0,
-        'red_at' => 50.0,
+        'yellow_at' => 40.0,
+        'red_at' => 40.0,
         'unit' => '% queda',
         'higher_is_worse' => true,
-        'criterion' => '≥25% vs baseline 28d = amarelo; ≥50% = vermelho; dia -40% imediato',
+        'criterion' => 'Baseline por dia da semana (últimos 4 iguais); 1 dia −40% = amarelo; 3 consecutivos = vermelho; dia corrente excluído',
     ],
 ];

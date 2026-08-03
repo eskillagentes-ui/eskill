@@ -53,11 +53,21 @@ final class Sentinela
     }
 
     /**
-     * Poder de veto para Criador/Otimizador (ainda não consumido por outros robôs).
+     * Poder de veto de CRESCIMENTO para Criador/Otimizador (ainda não consumido).
+     * false quando semáforo amarelo ou vermelho.
      */
     public function podeExpandir(int $accountId): bool
     {
         return $this->evaluateSemaforo($this->listRisks($accountId)) === 'verde';
+    }
+
+    /**
+     * Poder de RECUPERAÇÃO — true sempre, exceto suspensão/bloqueio de conta.
+     * Reparo nunca é bloqueado por saúde ruim: é a saída dela.
+     */
+    public function podeReparar(int $accountId): bool
+    {
+        return !$this->contaSuspensaOuBloqueada($accountId);
     }
 
     public function motivoVeto(int $accountId): ?string
@@ -88,6 +98,35 @@ final class Sentinela
             (string) $top['label'],
             (string) ($top['reason'] ?? 'limiar atingido')
         );
+    }
+
+    /**
+     * Conta suspensa/bloqueada impede até o reparo (não há o que o robô consiga curar sozinho).
+     */
+    public function contaSuspensaOuBloqueada(int $accountId): bool
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT status, last_refresh_error FROM ml_accounts WHERE id = ?'
+            );
+            $stmt->execute([$accountId]);
+            $acc = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($acc === false) {
+                return true;
+            }
+            $status = strtolower((string) ($acc['status'] ?? ''));
+            if (in_array($status, ['suspended', 'blocked', 'banned', 'disabled'], true)) {
+                return true;
+            }
+            $err = strtolower((string) ($acc['last_refresh_error'] ?? ''));
+            if (str_contains($err, 'invalid_grant') && in_array($status, ['disconnected', 'expired', 'error'], true)) {
+                return true;
+            }
+            return false;
+        } catch (Throwable $e) {
+            // sem dado confiável: não bloquear reparo por falha de leitura
+            return false;
+        }
     }
 
     /**
@@ -163,6 +202,7 @@ final class Sentinela
                 'monitored' => $monitored,
                 'total' => 11,
                 'pode_expandir' => $semaforo === 'verde',
+                'pode_reparar' => $this->podeReparar($accountId),
             ],
             'flash' => $semaforo === 'vermelho' ? 'yellow' : ($semaforo === 'amarelo' ? 'yellow' : 'green'),
         ], $accountId, 'live');
@@ -279,11 +319,14 @@ final class Sentinela
             $monitored = 0;
         }
         $semaforo = $this->semaforoGlobal($accountId);
+        $podeExpandir = $semaforo === 'verde';
+        $podeReparar = $this->podeReparar($accountId);
         return [
             'semaforo' => $semaforo,
             'monitored' => min(10, max($monitored, $this->countCollected($accountId))),
             'total' => 11,
-            'pode_expandir' => $semaforo === 'verde',
+            'pode_expandir' => $podeExpandir,
+            'pode_reparar' => $podeReparar,
             'motivo_veto' => $this->motivoVeto($accountId),
             'risks' => $risks,
             'history' => $this->history30d($accountId),
@@ -306,6 +349,7 @@ final class Sentinela
             ),
             'href' => '/dashboard/sentinela',
             'pode_expandir' => $dash['pode_expandir'],
+            'pode_reparar' => $dash['pode_reparar'] ?? true,
         ];
     }
 
@@ -705,17 +749,195 @@ final class Sentinela
         );
     }
 
+    /**
+     * Avalia queda de vendas com baseline por dia da semana + persistência.
+     * Dia corrente (incompleto) é sempre excluído.
+     *
+     * @param array<string, int> $byDate mapa Y-m-d => contagem de vendas
+     * @param string|null $today Y-m-d de referência (default: hoje); excluído do cálculo
+     * @return array{
+     *   status: 'verde'|'amarelo'|'vermelho'|'nd',
+     *   drop_pct: float,
+     *   consecutive_below: int,
+     *   amostra_n: int,
+     *   amostra_reduzida: bool,
+     *   last_closed_day: ?string,
+     *   last_count: int,
+     *   baseline: float,
+     *   days_detail: list<array<string, mixed>>,
+     *   reason: string
+     * }
+     */
+    public function evaluateQuedaVendasFromHistory(array $byDate, ?string $today = null): array
+    {
+        $today = $today ?? date('Y-m-d');
+        $thresholdPct = 40.0;
+        $redConsecutive = 3;
+
+        // Remove dia corrente incompleto
+        unset($byDate[$today]);
+
+        if ($byDate === []) {
+            return [
+                'status' => 'nd',
+                'drop_pct' => 0.0,
+                'consecutive_below' => 0,
+                'amostra_n' => 0,
+                'amostra_reduzida' => true,
+                'last_closed_day' => null,
+                'last_count' => 0,
+                'baseline' => 0.0,
+                'days_detail' => [],
+                'reason' => 'sem dias fechados para baseline',
+            ];
+        }
+
+        // Avaliar últimos 7 dias fechados (ontem → −7)
+        $daysDetail = [];
+        $consecutiveBelow = 0;
+        $stillCounting = true;
+        $lastDrop = 0.0;
+        $lastBaseline = 0.0;
+        $lastCount = 0;
+        $lastDay = null;
+        $lastAmostraN = 0;
+        $lastAmostraReduzida = false;
+
+        for ($i = 1; $i <= 14; $i++) {
+            $d = date('Y-m-d', strtotime($today . " -{$i} day"));
+            $dow = (int) date('w', strtotime($d)); // 0=dom … 6=sáb
+            $count = $byDate[$d] ?? 0;
+
+            // Baseline: até 4 ocorrências anteriores do mesmo dia da semana
+            $peers = [];
+            for ($w = 1; $w <= 8 && count($peers) < 4; $w++) {
+                $peer = date('Y-m-d', strtotime($d . " -{$w} week"));
+                if ($peer >= $today) {
+                    continue;
+                }
+                // só conta se o dia existe no histórico OU se há qualquer venda registrada naquele dia
+                // (ausência no mapa = 0 vendas naquele dia, se estiver dentro da janela conhecida)
+                if (array_key_exists($peer, $byDate) || $this->dateWithinKnownSpan($peer, $byDate, $today)) {
+                    $peers[] = $byDate[$peer] ?? 0;
+                }
+            }
+            $amostraN = count($peers);
+            $amostraReduzida = $amostraN < 4;
+            $baseline = $amostraN > 0 ? array_sum($peers) / $amostraN : 0.0;
+
+            $dropPct = 0.0;
+            $below = false;
+            if ($baseline > 0) {
+                $dropPct = max(0.0, (1.0 - ($count / $baseline)) * 100.0);
+                $below = $dropPct > $thresholdPct;
+            }
+            // baseline 0 e count 0: domingo estruturalmente morto → não é queda
+            // baseline 0 e count > 0: crescimento, ok
+
+            $daysDetail[] = [
+                'date' => $d,
+                'dow' => $dow,
+                'count' => $count,
+                'baseline' => round($baseline, 2),
+                'drop_pct' => round($dropPct, 1),
+                'below' => $below,
+                'amostra_n' => $amostraN,
+                'amostra_reduzida' => $amostraReduzida,
+            ];
+
+            if ($i === 1) {
+                $lastDrop = $dropPct;
+                $lastBaseline = $baseline;
+                $lastCount = $count;
+                $lastDay = $d;
+                $lastAmostraN = $amostraN;
+                $lastAmostraReduzida = $amostraReduzida;
+            }
+
+            if ($stillCounting) {
+                if ($below) {
+                    $consecutiveBelow++;
+                } else {
+                    $stillCounting = false;
+                }
+            }
+
+            // basta 3+ ou 7 dias avaliados para decidir
+            if ($i >= 7 && !$stillCounting) {
+                break;
+            }
+            if ($consecutiveBelow >= $redConsecutive && !$stillCounting) {
+                break;
+            }
+        }
+
+        $status = 'verde';
+        $reason = sprintf(
+            'dia %s = %d vs baseline mesmo DOW %.1f (−%.0f%%) · %d dia(s) abaixo',
+            (string) $lastDay,
+            $lastCount,
+            $lastBaseline,
+            $lastDrop,
+            $consecutiveBelow
+        );
+
+        if ($consecutiveBelow >= 1) {
+            $status = 'amarelo';
+            $reason = sprintf(
+                'queda vs mesmo dia da semana (−%.0f%%) · %d dia(s) consecutivo(s) abaixo do limiar',
+                $lastDrop,
+                $consecutiveBelow
+            );
+        }
+        if ($consecutiveBelow >= $redConsecutive) {
+            $status = 'vermelho';
+            $reason = sprintf(
+                '%d dias consecutivos com queda >%.0f%% vs mesmo dia da semana — tendência',
+                $consecutiveBelow,
+                $thresholdPct
+            );
+        }
+        if ($lastAmostraReduzida && $status !== 'nd') {
+            $reason .= sprintf(' · amostra reduzida (%d/4)', $lastAmostraN);
+        }
+
+        return [
+            'status' => $status,
+            'drop_pct' => round($lastDrop, 2),
+            'consecutive_below' => $consecutiveBelow,
+            'amostra_n' => $lastAmostraN,
+            'amostra_reduzida' => $lastAmostraReduzida,
+            'last_closed_day' => $lastDay,
+            'last_count' => $lastCount,
+            'baseline' => round($lastBaseline, 2),
+            'days_detail' => $daysDetail,
+            'reason' => $reason,
+        ];
+    }
+
+    /**
+     * @param array<string, int> $byDate
+     */
+    private function dateWithinKnownSpan(string $peer, array $byDate, string $today): bool
+    {
+        if ($byDate === []) {
+            return false;
+        }
+        $min = min(array_keys($byDate));
+        return $peer >= $min && $peer < $today;
+    }
+
     /** @return array<string, mixed> */
     private function collectQuedaVendas(int $accountId): array
     {
-        $def = $this->defs['queda_vendas'];
+        $def = $this->defs['queda_vendas'] ?? [];
         $limit = (float) ($def['limit'] ?? 50);
 
         $sql = 'SELECT DATE(date_created) AS d, COUNT(*) AS c
                 FROM ml_orders
                 WHERE ml_account_id = ?
                   AND status NOT IN (\'cancelled\')
-                  AND date_created >= DATE_SUB(CURDATE(), INTERVAL 35 DAY)
+                  AND date_created >= DATE_SUB(CURDATE(), INTERVAL 70 DAY)
                 GROUP BY DATE(date_created)
                 ORDER BY d ASC';
         $stmt = $this->db->prepare($sql);
@@ -730,80 +952,38 @@ final class Sentinela
             $byDate[(string) $r['d']] = (int) $r['c'];
         }
 
-        $today = date('Y-m-d');
-        $hour = (int) date('G');
-        // Dia ainda em andamento: usar ontem como referência do “dia atual” até 18h
-        $refDay = $hour >= 18 ? $today : date('Y-m-d', strtotime('-1 day'));
-        $refCount = $byDate[$refDay] ?? 0;
-
-        // média 7d (exclui hoje) vs média 28d anterior (dias -35..-8)
-        $sum7 = 0;
-        $n7 = 0;
-        $sum28 = 0;
-        $n28 = 0;
-        for ($i = 1; $i <= 7; $i++) {
-            $d = date('Y-m-d', strtotime("-{$i} day"));
-            if (isset($byDate[$d])) {
-                $sum7 += $byDate[$d];
-                $n7++;
-            }
-        }
-        for ($i = 8; $i <= 35; $i++) {
-            $d = date('Y-m-d', strtotime("-{$i} day"));
-            if (isset($byDate[$d])) {
-                $sum28 += $byDate[$d];
-                $n28++;
-            }
-        }
-        $avg7 = $n7 > 0 ? $sum7 / $n7 : 0.0;
-        $avg28 = $n28 > 0 ? $sum28 / $n28 : 0.0;
-
-        $drop7vs28 = 0.0;
-        if ($avg28 > 0) {
-            $drop7vs28 = max(0.0, (1.0 - ($avg7 / $avg28)) * 100.0);
+        $eval = $this->evaluateQuedaVendasFromHistory($byDate, date('Y-m-d'));
+        if ($eval['status'] === 'nd') {
+            return $this->riskResult('queda_vendas', null, null, 'nd', $eval['reason'], 'ml_orders', $limit, null, $eval);
         }
 
-        $dropRef = 0.0;
-        if ($avg7 > 0) {
-            $dropRef = max(0.0, (1.0 - ($refCount / $avg7)) * 100.0);
-        }
-
-        $status = 'verde';
-        $pct = 0.0;
-        $reason = sprintf('média 7d %.1f vs baseline 28d %.1f (queda %.0f%%)', $avg7, $avg28, $drop7vs28);
-
-        if ($drop7vs28 >= 25.0) {
-            $status = 'amarelo';
-            $pct = max(50.0, min(79.0, $drop7vs28));
-            $reason = sprintf('vendas/dia em queda (−%.0f%% vs baseline 28d)', $drop7vs28);
-        }
-        if ($drop7vs28 >= 50.0 || ($avg7 > 0 && $dropRef >= 40.0 && $refCount === 0 && $n7 >= 3)) {
-            $status = 'vermelho';
-            $pct = max(85.0, min(100.0, max($drop7vs28, $dropRef)));
-            $reason = sprintf(
-                'queda brusca de vendas (−%.0f%% 7d / dia %s = %d vs média %.1f) — investigar',
-                $drop7vs28,
-                $refDay,
-                $refCount,
-                $avg7
-            );
-        }
+        $drop = (float) $eval['drop_pct'];
+        $status = (string) $eval['status'];
+        $pct = match ($status) {
+            'vermelho' => max(85.0, min(100.0, $drop)),
+            'amarelo' => max(50.0, min(79.0, $drop)),
+            default => min(49.0, $drop),
+        };
 
         return $this->riskResult(
             'queda_vendas',
-            round($drop7vs28, 2),
-            sprintf('−%.0f%%', $drop7vs28),
+            $drop,
+            sprintf('−%.0f%%', $drop),
             $status,
-            $reason,
+            (string) $eval['reason'],
             'ml_orders',
             $limit,
             $pct,
             [
-                'avg_7d' => round($avg7, 2),
-                'avg_28d' => round($avg28, 2),
-                'ref_day' => $refDay,
-                'ref_count' => $refCount,
-                'drop_ref_pct' => round($dropRef, 2),
+                'consecutive_below' => $eval['consecutive_below'],
+                'amostra_n' => $eval['amostra_n'],
+                'amostra_reduzida' => $eval['amostra_reduzida'],
+                'last_closed_day' => $eval['last_closed_day'],
+                'last_count' => $eval['last_count'],
+                'baseline_same_dow' => $eval['baseline'],
+                'days_detail' => $eval['days_detail'],
+                'threshold_pct' => 40.0,
+                'red_after_consecutive' => 3,
             ]
         );
     }
