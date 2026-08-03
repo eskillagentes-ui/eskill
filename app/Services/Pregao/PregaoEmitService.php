@@ -20,6 +20,9 @@ final class PregaoEmitService
     public const CHANNEL = 'pregao';
     public const VERSION = 1;
 
+    /** Heartbeat de op por coletor: no máximo 1× por hora. */
+    public const OP_HEARTBEAT_TTL_SECONDS = 3600;
+
     /** @var list<string> */
     public const VALID_TYPES = [
         'index.tick',
@@ -36,6 +39,12 @@ final class PregaoEmitService
     private ?Redis $redis = null;
     private bool $redisTried = false;
 
+    /** @var array<string, string> fallback in-process quando Redis indisponível */
+    private array $lastStateMemory = [];
+
+    /** @var array<string, int> unix ts do último heartbeat por chave */
+    private array $lastHeartbeatMemory = [];
+
     public function __construct(?PDO $db = null, ?Redis $redis = null)
     {
         $this->db = $db;
@@ -49,12 +58,18 @@ final class PregaoEmitService
      * Emite um evento no envelope canônico.
      *
      * @param array<string, mixed> $payload
-     * @return array{v: int, type: string, ts: string, payload: array<string, mixed>, account_id?: int}
+     * @param 'live'|'seed' $source
+     * @return array{v: int, type: string, ts: string, payload: array<string, mixed>, source: string, account_id?: int}
      */
-    public function emit(string $type, array $payload, ?int $accountId = null): array
+    public function emit(string $type, array $payload, ?int $accountId = null, string $source = 'live'): array
     {
         if (!in_array($type, self::VALID_TYPES, true)) {
             throw new \InvalidArgumentException("Tipo de evento pregao inválido: {$type}");
+        }
+
+        $source = $source === 'seed' ? 'seed' : 'live';
+        if ($source === 'seed' && !$this->seedEnabled()) {
+            throw new \RuntimeException('PREGAO_SEED=false — emissão seed bloqueada');
         }
 
         $ts = $this->nowIso();
@@ -63,6 +78,7 @@ final class PregaoEmitService
             'type' => $type,
             'ts' => $ts,
             'payload' => $payload,
+            'source' => $source,
         ];
         if ($accountId !== null && $accountId > 0) {
             $event['account_id'] = $accountId;
@@ -73,6 +89,125 @@ final class PregaoEmitService
         $this->publish($event);
 
         return $event;
+    }
+
+    public function seedEnabled(): bool
+    {
+        $raw = $_ENV['PREGAO_SEED'] ?? getenv('PREGAO_SEED') ?: 'false';
+        return filter_var($raw, FILTER_VALIDATE_BOOLEAN);
+    }
+
+    /**
+     * Emite `op` somente em transição de estado (fingerprint diferente do último).
+     * Exceção: heartbeat info no máximo 1×/hora por chave/robô, para provar que o coletor está vivo.
+     *
+     * Chave Redis: pregao:last_state:{accountId}:{stateKey}
+     *
+     * @param array<string, mixed> $payload payload do op (robot, level, icon, msg, …)
+     * @param array<string, mixed>|string $stateFingerprint valor comparado com o último persistido
+     * @param 'live'|'seed' $source
+     * @return array<string, mixed>|null evento emitido, ou null se silenciado
+     */
+    public function emitOpOnTransition(
+        string $stateKey,
+        array $payload,
+        array|string $stateFingerprint,
+        ?int $accountId = null,
+        string $source = 'live'
+    ): ?array {
+        $accountPart = ($accountId !== null && $accountId > 0) ? (string) $accountId : '0';
+        $cacheKey = 'pregao:last_state:' . $accountPart . ':' . $stateKey;
+        $fingerprint = is_string($stateFingerprint)
+            ? $stateFingerprint
+            : (string) json_encode($stateFingerprint, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+
+        $previous = $this->readLastState($cacheKey);
+        $changed = $previous === null || $previous !== $fingerprint;
+
+        if ($changed) {
+            $this->writeLastState($cacheKey, $fingerprint);
+            // reinicia janela de heartbeat — próximo heartbeat só após 1h sem mudança
+            $this->markHeartbeat('pregao:heartbeat:' . $accountPart . ':' . $stateKey);
+            return $this->emit('op', $payload, $accountId, $source);
+        }
+
+        $hbKey = 'pregao:heartbeat:' . $accountPart . ':' . $stateKey;
+        if ($this->shouldEmitHeartbeat($hbKey)) {
+            $hbPayload = $payload;
+            $hbPayload['level'] = 'info';
+            $hbPayload['heartbeat'] = true;
+            $msg = (string) ($payload['msg'] ?? '');
+            $hbPayload['msg'] = ($msg !== '' ? $msg . ' · ' : '') . 'heartbeat (coletor vivo)';
+            $this->markHeartbeat($hbKey);
+            return $this->emit('op', $hbPayload, $accountId, $source);
+        }
+
+        return null;
+    }
+
+    private function readLastState(string $cacheKey): ?string
+    {
+        $redis = $this->redis();
+        if ($redis !== null) {
+            try {
+                $val = $redis->get($cacheKey);
+                if (is_string($val) && $val !== '') {
+                    return $val;
+                }
+            } catch (Throwable $e) {
+                log_warning('PregaoEmitService: falha ao ler last_state', ['error' => $e->getMessage()]);
+            }
+        }
+
+        return $this->lastStateMemory[$cacheKey] ?? null;
+    }
+
+    private function writeLastState(string $cacheKey, string $fingerprint): void
+    {
+        $this->lastStateMemory[$cacheKey] = $fingerprint;
+        $redis = $this->redis();
+        if ($redis === null) {
+            return;
+        }
+        try {
+            $redis->set($cacheKey, $fingerprint);
+        } catch (Throwable $e) {
+            log_warning('PregaoEmitService: falha ao gravar last_state', ['error' => $e->getMessage()]);
+        }
+    }
+
+    private function shouldEmitHeartbeat(string $hbKey): bool
+    {
+        $now = time();
+        $redis = $this->redis();
+        if ($redis !== null) {
+            try {
+                $last = $redis->get($hbKey);
+                if (is_string($last) && $last !== '') {
+                    return ($now - (int) $last) >= self::OP_HEARTBEAT_TTL_SECONDS;
+                }
+            } catch (Throwable $e) {
+                log_warning('PregaoEmitService: falha heartbeat Redis', ['error' => $e->getMessage()]);
+            }
+        }
+
+        $lastMem = $this->lastHeartbeatMemory[$hbKey] ?? 0;
+        return ($now - $lastMem) >= self::OP_HEARTBEAT_TTL_SECONDS;
+    }
+
+    private function markHeartbeat(string $hbKey): void
+    {
+        $now = time();
+        $this->lastHeartbeatMemory[$hbKey] = $now;
+        $redis = $this->redis();
+        if ($redis === null) {
+            return;
+        }
+        try {
+            $redis->set($hbKey, (string) $now, ['ex' => self::OP_HEARTBEAT_TTL_SECONDS * 2]);
+        } catch (Throwable $e) {
+            log_warning('PregaoEmitService: falha ao gravar heartbeat', ['error' => $e->getMessage()]);
+        }
     }
 
     /**
@@ -111,9 +246,10 @@ final class PregaoEmitService
      * Processa venda confirmada: sale + metric.update derivados + op VENDA.
      *
      * @param array{order_id: string, valor: float|int|string, titulo?: string, sku?: string} $sale
+     * @param 'live'|'seed' $source
      * @return list<array<string, mixed>>
      */
-    public function emitSale(array $sale, ?int $accountId = null): array
+    public function emitSale(array $sale, ?int $accountId = null, string $source = 'live'): array
     {
         $orderId = (string) ($sale['order_id'] ?? '');
         $valor = (float) ($sale['valor'] ?? 0);
@@ -126,7 +262,7 @@ final class PregaoEmitService
             'valor' => $valor,
             'titulo' => $titulo,
             'sku' => $sku,
-        ], static fn ($v) => $v !== null && $v !== ''), $accountId);
+        ], static fn ($v) => $v !== null && $v !== ''), $accountId, $source);
 
         $metrics = $this->bumpSaleMetrics($accountId, $valor);
 
@@ -135,21 +271,21 @@ final class PregaoEmitService
             'value' => $metrics['vendas_hoje'],
             'delta' => '+1',
             'flash' => 'green',
-        ], $accountId);
+        ], $accountId, $source);
 
         $events[] = $this->emit('metric.update', [
             'key' => 'receita_hoje',
             'value' => $metrics['receita_hoje'],
             'delta' => '+' . number_format($valor, 2, '.', ''),
             'flash' => 'green',
-        ], $accountId);
+        ], $accountId, $source);
 
         $events[] = $this->emit('metric.update', [
             'key' => 'ticket_medio',
             'value' => $metrics['ticket_medio'],
             'delta' => null,
             'flash' => 'green',
-        ], $accountId);
+        ], $accountId, $source);
 
         $msg = sprintf(
             'VENDA — +1 · R$ %s · %s',
@@ -164,7 +300,7 @@ final class PregaoEmitService
             'msg' => $msg,
             'sku' => $sku,
             'meta' => ['order_id' => $orderId, 'valor' => $valor],
-        ], static fn ($v) => $v !== null), $accountId);
+        ], static fn ($v) => $v !== null), $accountId, $source);
 
         return $events;
     }
@@ -218,22 +354,38 @@ final class PregaoEmitService
     }
 
     /**
-     * @param array{v: int, type: string, ts: string, payload: array<string, mixed>, account_id?: int} $event
+     * @param array{v: int, type: string, ts: string, payload: array<string, mixed>, source?: string, account_id?: int} $event
      */
     private function persist(array $event): void
     {
         try {
             $pdo = $this->pdo();
-            $stmt = $pdo->prepare(
-                'INSERT INTO pregao_events (account_id, type, ts, payload) VALUES (?, ?, ?, ?)'
-            );
             $tsMysql = $this->isoToMysql($event['ts']);
-            $stmt->execute([
-                $event['account_id'] ?? null,
-                $event['type'],
-                $tsMysql,
-                json_encode($event['payload'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES),
-            ]);
+            $payloadJson = json_encode($event['payload'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $source = (string) ($event['source'] ?? 'live');
+
+            if ($this->hasSourceColumn()) {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO pregao_events (account_id, type, ts, payload, source) VALUES (?, ?, ?, ?, ?)'
+                );
+                $stmt->execute([
+                    $event['account_id'] ?? null,
+                    $event['type'],
+                    $tsMysql,
+                    $payloadJson,
+                    $source,
+                ]);
+            } else {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO pregao_events (account_id, type, ts, payload) VALUES (?, ?, ?, ?)'
+                );
+                $stmt->execute([
+                    $event['account_id'] ?? null,
+                    $event['type'],
+                    $tsMysql,
+                    $payloadJson,
+                ]);
+            }
         } catch (Throwable $e) {
             // Persistência não deve derrubar o worker; o canal Redis ainda pode entregar.
             log_warning('PregaoEmitService: falha ao persistir evento', [
@@ -241,6 +393,30 @@ final class PregaoEmitService
                 'error' => $e->getMessage(),
             ]);
         }
+    }
+
+    private function hasSourceColumn(): bool
+    {
+        static $has = null;
+        if ($has !== null) {
+            return $has;
+        }
+        try {
+            $stmt = $this->pdo()->query(
+                "SELECT COUNT(*) FROM information_schema.COLUMNS
+                 WHERE TABLE_SCHEMA = DATABASE()
+                   AND TABLE_NAME = 'pregao_events'
+                   AND COLUMN_NAME = 'source'"
+            );
+            if (!is_object($stmt)) {
+                $has = false;
+                return false;
+            }
+            $has = ((int) $stmt->fetchColumn()) > 0;
+        } catch (Throwable $e) {
+            $has = false;
+        }
+        return $has;
     }
 
     /**
