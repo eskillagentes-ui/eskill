@@ -10,6 +10,7 @@ declare(strict_types=1);
  *   php bin/pregao-index-tick.php --account-id=1335
  *   php bin/pregao-index-tick.php --all
  *   php bin/pregao-index-tick.php --all --loop --interval=45
+ *   php bin/pregao-index-tick.php --account-id=1335 --collect
  */
 
 require dirname(__DIR__) . '/vendor/autoload.php';
@@ -19,11 +20,13 @@ $dotenv->safeLoad();
 
 use App\Database;
 use App\Services\Pregao\AccountIndexService;
+use App\Services\Pregao\PregaoMetricsCollector;
 
-$opts = getopt('', ['account-id:', 'all', 'loop', 'interval:', 'consolidate']);
+$opts = getopt('', ['account-id:', 'all', 'loop', 'interval:', 'consolidate', 'collect']);
 $interval = max(15, (int) ($opts['interval'] ?? 45));
 $loop = isset($opts['loop']);
 $consolidate = isset($opts['consolidate']);
+$collect = isset($opts['collect']);
 
 function pregao_resolve_account_ids(array $opts): array
 {
@@ -39,13 +42,13 @@ function pregao_resolve_account_ids(array $opts): array
         "SELECT id FROM ml_accounts WHERE status IN ('active','connected') OR status IS NULL LIMIT 200"
     )->fetchAll(PDO::FETCH_COLUMN);
     if ($rows === []) {
-        // fallback: contas que já têm métricas
         $rows = $pdo->query('SELECT account_id FROM account_index_metrics')->fetchAll(PDO::FETCH_COLUMN);
     }
     return array_map('intval', $rows ?: []);
 }
 
 $service = new AccountIndexService();
+$collector = $collect ? new PregaoMetricsCollector() : null;
 
 do {
     $ids = pregao_resolve_account_ids($opts);
@@ -54,12 +57,22 @@ do {
             continue;
         }
         try {
+            if ($collector !== null) {
+                // Coleta leve a cada tick (visitas Fe; keywords só com RANK_TRACKER_ENABLED)
+                $collector->collect($accountId, ['reputation', 'health', 'questions', 'sales', 'visits', 'robots']);
+                try {
+                    (new \App\Services\Sentinela\Sentinela())->collect($accountId);
+                } catch (Throwable $sentinelaErr) {
+                    fwrite(STDERR, "[sentinela] account={$accountId} {$sentinelaErr->getMessage()}\n");
+                }
+            }
             $result = $service->tick($accountId);
             fwrite(STDOUT, sprintf(
-                "[%s] account=%d indice=%.2f\n",
+                "[%s] account=%d indice=%s · %s\n",
                 date('H:i:s'),
                 $accountId,
-                $result['indice']
+                $result['indice'] === null ? 'n/d' : number_format((float) $result['indice'], 2, '.', ''),
+                $result['label']
             ));
             if ($consolidate) {
                 $service->consolidateDailyCandle($accountId);

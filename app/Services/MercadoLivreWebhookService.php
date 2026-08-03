@@ -178,6 +178,20 @@ class MercadoLivreWebhookService
                 ];
             }
 
+            // Sentinela: observação read-only em tópicos com risco (nunca escreve no ML)
+            if (in_array((string) $topic, ['items', 'claims', 'orders_v2', 'orders'], true)
+                && is_int($this->accountId) && $this->accountId > 0) {
+                try {
+                    (new \App\Services\Sentinela\Sentinela())->onWebhook($this->accountId, (string) $topic);
+                } catch (\Throwable $sentinelaErr) {
+                    $this->logger->warning('Sentinela onWebhook falhou (não-bloqueante)', [
+                        'account_id' => $this->accountId,
+                        'topic' => $topic,
+                        'error' => $sentinelaErr->getMessage(),
+                    ]);
+                }
+            }
+
             return ['success' => true, 'event_id' => $eventId];
         } catch (\Throwable $e) {
             $this->logger->error("Error processing webhook [{$eventId}]", [
