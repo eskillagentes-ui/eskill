@@ -34,7 +34,8 @@
     "files": [
       "app/Helpers/LogHelper.php",
       "app/Helpers/CacheHelper.php",
-      "app/Helpers/Functions.php"
+      "app/Helpers/Functions.php",
+      "app/Helpers/PregaoHelper.php"
     ]
   },
   "autoload-dev": {
