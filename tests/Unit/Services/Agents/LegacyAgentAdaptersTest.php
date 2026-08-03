@@ -32,8 +32,6 @@ final class LegacyAgentAdaptersTest extends TestCase
                     'semaforo' => 'amarelo',
                     'risks' => [['risk_key' => 'oauth', 'status' => 'amarelo']],
                     'monitored' => 10,
-                    'state_changed' => true,
-                    'emitted_ops' => ['op:sentinela'],
                 ];
             }
         );
@@ -49,11 +47,11 @@ final class LegacyAgentAdaptersTest extends TestCase
             'risks' => [['risk_key' => 'oauth', 'status' => 'amarelo']],
             'monitored' => 10,
         ], $result->data());
-        $this->assertTrue($result->stateChanged());
-        $this->assertSame(['op:sentinela'], $result->emittedOps());
+        $this->assertFalse($result->stateChanged());
+        $this->assertSame([], $result->emittedOps());
     }
 
-    public function testSentinelaSuprimeOpsSemMarcadorBooleanoLiteral(): void
+    public function testSentinelaFalhaFechadaQuandoPayloadTentaEmitirOps(): void
     {
         foreach ([null, false, 1, 'true'] as $marker) {
             $payload = [
@@ -70,6 +68,8 @@ final class LegacyAgentAdaptersTest extends TestCase
             $result = (new SentinelaAgent(static fn (int $accountId): array => $payload))
                 ->run($this->context());
 
+            $this->assertSame('failed', $result->status());
+            $this->assertSame('read_only_violation', $result->reason());
             $this->assertFalse($result->stateChanged());
             $this->assertSame([], $result->emittedOps());
         }
@@ -101,8 +101,6 @@ final class LegacyAgentAdaptersTest extends TestCase
                     'cached' => false,
                     'stale' => false,
                     'api_calls' => 4,
-                    'state_changed' => true,
-                    'emitted_ops' => ['op:collector'],
                 ];
             }
         );
@@ -119,8 +117,26 @@ final class LegacyAgentAdaptersTest extends TestCase
             'stale' => false,
             'api_calls' => 4,
         ], $result->data());
-        $this->assertTrue($result->stateChanged());
-        $this->assertSame(['op:collector'], $result->emittedOps());
+        $this->assertFalse($result->stateChanged());
+        $this->assertSame([], $result->emittedOps());
+    }
+
+    public function testCollectorFalhaFechadaQuandoPayloadTentaMudarEstado(): void
+    {
+        $result = (new CollectorAgent(static fn (int $accountId): array => [
+            'ok' => true,
+            'available' => true,
+            'cached' => false,
+            'stale' => false,
+            'api_calls' => 4,
+            'state_changed' => true,
+            'emitted_ops' => [],
+        ]))->run($this->context());
+
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('read_only_violation', $result->reason());
+        $this->assertFalse($result->stateChanged());
+        $this->assertSame([], $result->emittedOps());
     }
 
     public function testCollectorAceitaSnapshotStaleDisponivelMesmoComOkFalse(): void
@@ -150,8 +166,6 @@ final class LegacyAgentAdaptersTest extends TestCase
             'cached' => false,
             'stale' => true,
             'api_calls' => 4,
-            'state_changed' => true,
-            'emitted_ops' => ['op:nao-pode'],
         ]))->run($this->context());
 
         $this->assertSame('failed', $result->status());
@@ -188,7 +202,6 @@ final class LegacyAgentAdaptersTest extends TestCase
                     'ok' => true,
                     'resumo' => ['periodo' => '30d', 'receita' => 1200.50],
                     'metrics' => ['tacos' => 8.2, 'margem' => 19.4],
-                    'emitted_ops' => ['op:financeiro-nao-pode'],
                 ];
             }
         );
@@ -207,7 +220,7 @@ final class LegacyAgentAdaptersTest extends TestCase
         $this->assertSame([], $result->emittedOps());
     }
 
-    public function testFinanceiroPreservaOpsSomenteComMudancaExplicita(): void
+    public function testFinanceiroFalhaFechadaQuandoPayloadTentaMudarEstado(): void
     {
         $result = (new FinanceiroAgent(static fn (int $accountId): array => [
             'ok' => true,
@@ -217,8 +230,10 @@ final class LegacyAgentAdaptersTest extends TestCase
             'emitted_ops' => ['op:financeiro-state-change'],
         ]))->run($this->context());
 
-        $this->assertTrue($result->stateChanged());
-        $this->assertSame(['op:financeiro-state-change'], $result->emittedOps());
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('read_only_violation', $result->reason());
+        $this->assertFalse($result->stateChanged());
+        $this->assertSame([], $result->emittedOps());
     }
 
     public function testFinanceiroFalhaFechadaEmPayloadIncompleto(): void

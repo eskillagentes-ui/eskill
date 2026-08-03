@@ -39,6 +39,6 @@ final class FinanceiroAgent extends LegacyReadOnlyAgentAdapter
             return $this->failed('financeiro_unavailable', $data);
         }
 
-        return $this->success($payload, $data);
+        return $this->success($data);
     }
 }

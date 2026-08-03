@@ -56,6 +56,10 @@ abstract class LegacyReadOnlyAgentAdapter implements AgentInterface
             return $this->failed('invalid_legacy_payload');
         }
 
+        if ($this->violatesReadOnlyContract($payload)) {
+            return $this->failed('read_only_violation');
+        }
+
         return $this->mapPayload($payload);
     }
 
@@ -65,28 +69,14 @@ abstract class LegacyReadOnlyAgentAdapter implements AgentInterface
     abstract protected function mapPayload(array $payload): AgentResult;
 
     /**
-     * @param array<string, mixed> $payload
      * @param array<string, mixed> $data
      */
-    final protected function success(array $payload, array $data): AgentResult
+    final protected function success(array $data): AgentResult
     {
-        $stateChanged = ($payload['state_changed'] ?? null) === true;
-        $emittedOps = [];
-
-        if ($stateChanged) {
-            $candidateOps = $payload['emitted_ops'] ?? [];
-            if (!is_array($candidateOps) || !$this->isStringList($candidateOps)) {
-                return $this->failed('invalid_emitted_ops');
-            }
-            $emittedOps = $candidateOps;
-        }
-
         return AgentResult::success(
             $this->name(),
             'legacy_read_complete',
-            $data,
-            $stateChanged,
-            $emittedOps
+            $data
         );
     }
 
@@ -125,19 +115,17 @@ abstract class LegacyReadOnlyAgentAdapter implements AgentInterface
         return null;
     }
 
-    /** @param array<array-key, mixed> $value */
-    private function isStringList(array $value): bool
+    /** @param array<string, mixed> $payload */
+    private function violatesReadOnlyContract(array $payload): bool
     {
-        if ($value !== [] && array_keys($value) !== range(0, count($value) - 1)) {
+        if (array_key_exists('state_changed', $payload) && $payload['state_changed'] !== false) {
+            return true;
+        }
+
+        if (!array_key_exists('emitted_ops', $payload)) {
             return false;
         }
 
-        foreach ($value as $item) {
-            if (!is_string($item)) {
-                return false;
-            }
-        }
-
-        return true;
+        return !is_array($payload['emitted_ops']) || $payload['emitted_ops'] !== [];
     }
 }

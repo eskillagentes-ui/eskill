@@ -45,7 +45,7 @@ final class SentinelaAgent extends LegacyReadOnlyAgentAdapter
             return $this->failed('sentinela_unavailable', $data);
         }
 
-        return $this->success($payload, $data);
+        return $this->success($data);
     }
 
     /** @param array<array-key, mixed> $value */

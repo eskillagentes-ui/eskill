@@ -46,6 +46,6 @@ final class CollectorAgent extends LegacyReadOnlyAgentAdapter
             return $this->failed('collector_unavailable', $data);
         }
 
-        return $this->success($payload, $data);
+        return $this->success($data);
     }
 }
