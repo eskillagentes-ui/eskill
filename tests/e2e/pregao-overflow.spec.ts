@@ -9,6 +9,23 @@ import fs from 'fs';
 const FIXTURE = path.join(__dirname, '../fixtures/pregao-overflow.html');
 
 test.describe('Pregão overflow @readonly', () => {
+  test('@readonly atributo hidden oculta o placeholder do gráfico', async ({ page }) => {
+    const cssPath = path.resolve(__dirname, '../../public/css/pregao.css');
+    const css = fs.readFileSync(cssPath, 'utf8');
+    let html = fs.readFileSync(FIXTURE, 'utf8');
+    html = html.replace('/*__PREGAO_CSS__*/', css);
+
+    await page.setContent(html, { waitUntil: 'domcontentloaded' });
+
+    const chartEmpty = page.locator('#chartEmpty');
+    await expect(chartEmpty).toHaveCSS('display', 'none');
+
+    await chartEmpty.evaluate((element) => {
+      (element as HTMLElement).hidden = false;
+    });
+    await expect(chartEmpty).toHaveCSS('display', 'flex');
+  });
+
   test('@readonly 380×844 sem overflow horizontal', async ({ page }) => {
     const cssPath = path.resolve(__dirname, '../../public/css/pregao.css');
     const css = fs.readFileSync(cssPath, 'utf8');
