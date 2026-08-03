@@ -69,9 +69,42 @@ final class PregaoEmitService
         }
 
         $this->persist($event);
+        $this->persistSideEffects($event);
         $this->publish($event);
 
         return $event;
+    }
+
+    /**
+     * Efeitos colaterais de persistência tipados (ranks, etc.).
+     *
+     * @param array{v: int, type: string, ts: string, payload: array<string, mixed>, account_id?: int} $event
+     */
+    private function persistSideEffects(array $event): void
+    {
+        if (($event['type'] ?? '') !== 'keyword.rank') {
+            return;
+        }
+        $accountId = isset($event['account_id']) ? (int) $event['account_id'] : 0;
+        if ($accountId <= 0) {
+            return;
+        }
+        $kw = (string) ($event['payload']['kw'] ?? '');
+        $pos = (int) ($event['payload']['pos'] ?? 0);
+        if ($kw === '' || $pos <= 0) {
+            return;
+        }
+        $delta = isset($event['payload']['delta']) ? (int) $event['payload']['delta'] : null;
+        $date = (new \DateTimeImmutable('now', new \DateTimeZone('America/Sao_Paulo')))->format('Y-m-d');
+        try {
+            $this->pdo()->prepare(
+                'INSERT INTO keyword_ranks (account_id, kw, `date`, pos, delta)
+                 VALUES (?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE pos = VALUES(pos), delta = VALUES(delta)'
+            )->execute([$accountId, $kw, $date, $pos, $delta]);
+        } catch (Throwable $e) {
+            log_warning('PregaoEmitService: falha ao persistir keyword.rank', ['error' => $e->getMessage()]);
+        }
     }
 
     /**

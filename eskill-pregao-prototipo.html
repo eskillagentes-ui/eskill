@@ -1,0 +1,853 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESKILL PREGÃO — Índice da Conta ao vivo</title>
+    <style>
+        :root {
+            --bg: #070B14;
+            --panel: #0D1424;
+            --panel2: #0A101E;
+            --line: #16203A;
+            --up: #16C784;
+            --down: #EA3943;
+            --ml: #FFE600;
+            --txt: #E8EEF9;
+            --mut: #7C8AA5;
+            --mut2: #4A5670;
+            --mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', Consolas, 'Courier New', monospace;
+            --sans: -apple-system, 'Segoe UI', Roboto, Arial, sans-serif;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box
+        }
+
+        body {
+            background: var(--bg);
+            color: var(--txt);
+            font-family: var(--sans);
+            overflow-x: hidden
+        }
+
+        ::-webkit-scrollbar {
+            width: 6px
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--line);
+            border-radius: 3px
+        }
+
+        /* ---------- HEADER ---------- */
+        header {
+            display: flex;
+            align-items: center;
+            gap: 18px;
+            padding: 14px 22px;
+            border-bottom: 1px solid var(--line);
+            flex-wrap: wrap
+        }
+
+        .brand {
+            display: flex;
+            align-items: center;
+            gap: 10px
+        }
+
+        .brand .dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--ml);
+            box-shadow: 0 0 12px var(--ml);
+            animation: blink 2s infinite
+        }
+
+        .brand h1 {
+            font-size: 15px;
+            letter-spacing: 3px;
+            font-weight: 800
+        }
+
+        .brand h1 span {
+            color: var(--ml)
+        }
+
+        .ticker-main {
+            display: flex;
+            align-items: baseline;
+            gap: 14px;
+            font-family: var(--mono)
+        }
+
+        .ticker-main .sym {
+            font-size: 13px;
+            color: var(--mut);
+            letter-spacing: 2px
+        }
+
+        .ticker-main .px {
+            font-size: 34px;
+            font-weight: 700;
+            transition: color .3s
+        }
+
+        .ticker-main .chg {
+            font-size: 15px;
+            font-weight: 700;
+            padding: 3px 10px;
+            border-radius: 6px
+        }
+
+        .chg.up {
+            color: var(--up);
+            background: rgba(22, 199, 132, .12)
+        }
+
+        .chg.down {
+            color: var(--down);
+            background: rgba(234, 57, 67, .12)
+        }
+
+        .spacer {
+            flex: 1
+        }
+
+        .sema {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            font-size: 12px;
+            color: var(--mut);
+            letter-spacing: 1px
+        }
+
+        .sema .s {
+            width: 12px;
+            height: 12px;
+            border-radius: 50%;
+            background: var(--up);
+            box-shadow: 0 0 10px var(--up)
+        }
+
+        .clock {
+            font-family: var(--mono);
+            font-size: 13px;
+            color: var(--mut)
+        }
+
+        @keyframes blink {
+
+            0%,
+            100% {
+                opacity: 1
+            }
+
+            50% {
+                opacity: .35
+            }
+        }
+
+        /* ---------- MARQUEE ---------- */
+        .tape {
+            border-bottom: 1px solid var(--line);
+            overflow: hidden;
+            white-space: nowrap;
+            background: var(--panel2)
+        }
+
+        .tape-in {
+            display: inline-block;
+            padding: 8px 0;
+            font-family: var(--mono);
+            font-size: 12.5px;
+            animation: roll 40s linear infinite
+        }
+
+        .tape-in span {
+            margin: 0 26px;
+            color: var(--mut)
+        }
+
+        .tape-in b {
+            color: var(--txt);
+            font-weight: 600
+        }
+
+        .tape-in .u {
+            color: var(--up)
+        }
+
+        .tape-in .d {
+            color: var(--down)
+        }
+
+        .tape-in .y {
+            color: var(--ml)
+        }
+
+        @keyframes roll {
+            from {
+                transform: translateX(0)
+            }
+
+            to {
+                transform: translateX(-50%)
+            }
+        }
+
+        /* ---------- LAYOUT ---------- */
+        .wrap {
+            display: grid;
+            grid-template-columns: minmax(0, 1fr) 380px;
+            gap: 14px;
+            padding: 14px 22px;
+            max-width: 1600px;
+            margin: 0 auto
+        }
+
+        @media(max-width:980px) {
+            .wrap {
+                grid-template-columns: 1fr
+            }
+        }
+
+        .panel {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 10px
+        }
+
+        .p-head {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 12px 16px;
+            border-bottom: 1px solid var(--line);
+            font-size: 11px;
+            letter-spacing: 2px;
+            color: var(--mut);
+            font-weight: 700
+        }
+
+        .p-head .live {
+            margin-left: auto;
+            color: var(--down);
+            font-size: 10px;
+            display: flex;
+            align-items: center;
+            gap: 5px
+        }
+
+        .p-head .live::before {
+            content: '';
+            width: 7px;
+            height: 7px;
+            border-radius: 50%;
+            background: var(--down);
+            animation: blink 1.2s infinite
+        }
+
+        /* ---------- CHART ---------- */
+        #chart {
+            width: 100%;
+            height: 380px;
+            display: block
+        }
+
+        .chart-foot {
+            display: flex;
+            gap: 22px;
+            padding: 10px 16px;
+            border-top: 1px solid var(--line);
+            font-family: var(--mono);
+            font-size: 11.5px;
+            color: var(--mut);
+            flex-wrap: wrap
+        }
+
+        .chart-foot b {
+            color: var(--txt)
+        }
+
+        /* ---------- CARDS ---------- */
+        .cards {
+            display: grid;
+            grid-template-columns: repeat(4, 1fr);
+            gap: 12px;
+            margin-top: 14px
+        }
+
+        @media(max-width:720px) {
+            .cards {
+                grid-template-columns: repeat(2, 1fr)
+            }
+        }
+
+        .card {
+            background: var(--panel);
+            border: 1px solid var(--line);
+            border-radius: 10px;
+            padding: 14px 16px;
+            position: relative;
+            overflow: hidden
+        }
+
+        .card .lb {
+            font-size: 10px;
+            letter-spacing: 1.6px;
+            color: var(--mut);
+            font-weight: 700;
+            margin-bottom: 8px
+        }
+
+        .card .vl {
+            font-family: var(--mono);
+            font-size: 24px;
+            font-weight: 700
+        }
+
+        .card .sb {
+            font-family: var(--mono);
+            font-size: 11px;
+            color: var(--mut);
+            margin-top: 5px
+        }
+
+        .card .sb .u {
+            color: var(--up)
+        }
+
+        .card .sb .d {
+            color: var(--down)
+        }
+
+        .card.flash-g {
+            animation: fg .8s
+        }
+
+        .card.flash-y {
+            animation: fy .8s
+        }
+
+        @keyframes fg {
+            0% {
+                box-shadow: inset 0 0 0 1px var(--up), 0 0 18px rgba(22, 199, 132, .35)
+            }
+
+            100% {
+                box-shadow: none
+            }
+        }
+
+        @keyframes fy {
+            0% {
+                box-shadow: inset 0 0 0 1px var(--ml), 0 0 18px rgba(255, 230, 0, .25)
+            }
+
+            100% {
+                box-shadow: none
+            }
+        }
+
+        /* ---------- FEED ---------- */
+        .right {
+            display: flex;
+            flex-direction: column;
+            gap: 14px;
+            min-width: 0
+        }
+
+        .pl-line {
+            display: flex;
+            justify-content: space-between;
+            padding: 10px 16px;
+            border-bottom: 1px solid var(--line);
+            font-family: var(--mono);
+            font-size: 12px;
+            color: var(--mut)
+        }
+
+        .pl-line b {
+            color: var(--up)
+        }
+
+        #feed {
+            list-style: none;
+            max-height: 430px;
+            overflow-y: auto;
+            padding: 6px 0
+        }
+
+        #feed li {
+            display: flex;
+            gap: 10px;
+            padding: 8px 16px;
+            border-bottom: 1px solid rgba(22, 32, 58, .5);
+            font-size: 12.5px;
+            line-height: 1.45;
+            animation: slidein .35s ease
+        }
+
+        #feed li .ic {
+            flex: 0 0 auto
+        }
+
+        #feed li .tx b {
+            font-family: var(--mono);
+            font-weight: 600
+        }
+
+        #feed li .ts {
+            font-family: var(--mono);
+            color: var(--mut2);
+            font-size: 10.5px;
+            display: block;
+            margin-top: 2px
+        }
+
+        #feed li.sale {
+            background: rgba(22, 199, 132, .07);
+            border-left: 2px solid var(--up)
+        }
+
+        #feed li.alert {
+            background: rgba(234, 57, 67, .06);
+            border-left: 2px solid var(--down)
+        }
+
+        @keyframes slidein {
+            from {
+                opacity: 0;
+                transform: translateY(-8px)
+            }
+
+            to {
+                opacity: 1;
+                transform: none
+            }
+        }
+
+        /* ---------- QA LIVE ---------- */
+        .qa-stage {
+            position: relative;
+            height: 210px;
+            background: var(--panel2);
+            border-radius: 0 0 10px 10px;
+            overflow: hidden
+        }
+
+        .mini {
+            position: absolute;
+            inset: 14px;
+            background: #101A30;
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            display: grid;
+            grid-template-columns: 86px 1fr
+        }
+
+        .mini .sb {
+            border-right: 1px solid var(--line);
+            padding: 10px 8px;
+            font-size: 8.5px;
+            color: var(--mut);
+            display: flex;
+            flex-direction: column;
+            gap: 8px
+        }
+
+        .mini .sb div {
+            padding: 5px 6px;
+            border-radius: 4px
+        }
+
+        .mini .sb .on {
+            background: rgba(255, 230, 0, .12);
+            color: var(--ml)
+        }
+
+        .mini .bd {
+            padding: 10px 12px;
+            font-size: 9px;
+            color: var(--mut)
+        }
+
+        .mini .bd h4 {
+            font-size: 10px;
+            color: var(--txt);
+            margin-bottom: 8px;
+            letter-spacing: 1px
+        }
+
+        .mbtn {
+            display: inline-block;
+            padding: 5px 10px;
+            border: 1px solid var(--line);
+            border-radius: 5px;
+            margin: 0 6px 6px 0;
+            font-size: 9px;
+            color: var(--txt);
+            background: #0D1526;
+            transition: all .15s
+        }
+
+        .mbtn.hot {
+            background: rgba(22, 199, 132, .18);
+            border-color: var(--up);
+            color: var(--up)
+        }
+
+        .mfield {
+            height: 16px;
+            border: 1px solid var(--line);
+            border-radius: 4px;
+            margin: 6px 0;
+            background: #0A121F;
+            font-size: 8.5px;
+            color: var(--up);
+            font-family: var(--mono);
+            padding: 2px 6px;
+            line-height: 12px;
+            overflow: hidden;
+            white-space: nowrap
+        }
+
+        #cursor {
+            position: absolute;
+            width: 16px;
+            height: 16px;
+            z-index: 5;
+            transition: left 1.1s cubic-bezier(.5, .05, .3, 1), top 1.1s cubic-bezier(.5, .05, .3, 1);
+            filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .6))
+        }
+
+        #cursor svg {
+            display: block
+        }
+
+        .ripple {
+            position: absolute;
+            width: 26px;
+            height: 26px;
+            border: 2px solid var(--ml);
+            border-radius: 50%;
+            z-index: 4;
+            animation: rip .55s ease-out forwards;
+            pointer-events: none
+        }
+
+        @keyframes rip {
+            from {
+                transform: scale(.3);
+                opacity: .9
+            }
+
+            to {
+                transform: scale(1.5);
+                opacity: 0
+            }
+        }
+
+        .qa-log {
+            position: absolute;
+            left: 14px;
+            right: 14px;
+            bottom: 14px;
+            background: rgba(7, 11, 20, .88);
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 5px 10px;
+            font-family: var(--mono);
+            font-size: 9.5px;
+            color: var(--up)
+        }
+
+        footer {
+            text-align: center;
+            padding: 16px;
+            font-size: 11px;
+            color: var(--mut2);
+            font-family: var(--mono)
+        }
+
+        @media (prefers-reduced-motion:reduce) {
+            .tape-in {
+                animation: none
+            }
+
+            #cursor {
+                transition: none
+            }
+        }
+    </style>
+</head>
+
+<body>
+
+    <header>
+        <div class="brand">
+            <div class="dot"></div>
+            <h1>ESKILL <span>PREGÃO</span></h1>
+        </div>
+        <div class="ticker-main">
+            <span class="sym">ESKL11 · ÍNDICE DA CONTA</span>
+            <span class="px" id="px">1.180,00</span>
+            <span class="chg up" id="chg">▲ +0,00%</span>
+        </div>
+        <div class="spacer"></div>
+        <div class="sema">
+            <div class="s"></div>CONTA VERDE · TODOS OS LIMITES &lt;50%
+        </div>
+        <div class="clock" id="clock">--:--:--</div>
+    </header>
+
+    <div class="tape">
+        <div class="tape-in" id="tape"></div>
+    </div>
+
+    <div class="wrap">
+        <div>
+            <div class="panel">
+                <div class="p-head">📈 ESKL11 — EVOLUÇÃO DA CONTA · CANDLE 1 SESSÃO ≈ 1 DIA <span class="live">AO
+                        VIVO</span></div>
+                <canvas id="chart"></canvas>
+                <div class="chart-foot">
+                    <span>ABERTURA <b id="fOpen">—</b></span><span>MÁXIMA <b id="fHigh">—</b></span>
+                    <span>MÍNIMA <b id="fLow">—</b></span><span>VENDAS 30D <b>68 → <span
+                                style="color:var(--up)">projeção 91</span></b></span>
+                </div>
+            </div>
+
+            <div class="cards">
+                <div class="card" id="cVendas">
+                    <div class="lb">VENDAS HOJE</div>
+                    <div class="vl" id="vVendas">7</div>
+                    <div class="sb"><span class="u">▲ +40%</span> vs. ontem</div>
+                </div>
+                <div class="card" id="cRec">
+                    <div class="lb">RECEITA HOJE</div>
+                    <div class="vl" id="vRec">R$ 1.494</div>
+                    <div class="sb">ticket médio <b id="vTicket">R$ 213</b></div>
+                </div>
+                <div class="card" id="cTacos">
+                    <div class="lb">TACOS</div>
+                    <div class="vl" id="vTacos">8,4%</div>
+                    <div class="sb"><span class="u">▼ caindo</span> — Ads alimentando orgânico</div>
+                </div>
+                <div class="card" id="cPos">
+                    <div class="lb">POSIÇÃO MÉDIA BUSCA</div>
+                    <div class="vl" id="vPos">#6,2</div>
+                    <div class="sb"><span class="u">▲ 3 posições</span> na semana</div>
+                </div>
+                <div class="card" id="cHealth">
+                    <div class="lb">HEALTH MÉDIO</div>
+                    <div class="vl" id="vHealth">0,93</div>
+                    <div class="sb">2 anúncios com pendência</div>
+                </div>
+                <div class="card" id="cRep">
+                    <div class="lb">REPUTAÇÃO</div>
+                    <div class="vl" style="color:var(--up)">🟢 VERDE</div>
+                    <div class="sb">reclamações 0,8% · atrasos 3%</div>
+                </div>
+                <div class="card" id="cPerg">
+                    <div class="lb">PERGUNTAS HOJE</div>
+                    <div class="vl" id="vPerg">12</div>
+                    <div class="sb">tempo médio <b id="vTmed">51s</b></div>
+                </div>
+                <div class="card" id="cAcoes">
+                    <div class="lb">AÇÕES DOS ROBÔS / H</div>
+                    <div class="vl" id="vAcoes">34</div>
+                    <div class="sb">3 robôs ativos · 0 erros</div>
+                </div>
+            </div>
+        </div>
+
+        <div class="right">
+            <div class="panel">
+                <div class="p-head">🎞️ FITA DE OPERAÇÕES <span class="live">AO VIVO</span></div>
+                <div class="pl-line"><span>P&amp;L DO DIA</span><b id="pnl">+ R$ 1.494,30</b></div>
+                <ul id="feed"></ul>
+            </div>
+
+            <div class="panel">
+                <div class="p-head">🖱️ QA PLAYWRIGHT — HERMES TESTANDO O ESKILL <span class="live">AO VIVO</span></div>
+                <div class="qa-stage" id="stage">
+                    <div class="mini">
+                        <div class="sb">
+                            <div>Dashboard</div>
+                            <div class="on" id="m0">Meus Anúncios</div>
+                            <div id="m1">SEO Killer</div>
+                            <div id="m2">Ficha Técnica</div>
+                            <div id="m3">Validação</div>
+                        </div>
+                        <div class="bd">
+                            <h4>VALIDAÇÃO DE ANÚNCIOS</h4>
+                            <span class="mbtn" id="b0">Sincronizar</span><span class="mbtn" id="b1">Validar
+                                título</span><span class="mbtn" id="b2">Checar ficha</span>
+                            <div class="mfield" id="fld"></div>
+                            <span class="mbtn" id="b3">Rodar health-check</span>
+                        </div>
+                    </div>
+                    <div id="cursor"><svg width="16" height="16" viewBox="0 0 16 16">
+                            <path d="M1 1 L1 12 L4.2 9.4 L6.2 14 L8.4 13 L6.4 8.6 L10.5 8.2 Z" fill="#fff" stroke="#000"
+                                stroke-width="1" />
+                        </svg></div>
+                    <div class="qa-log" id="qalog">▶ test: validar-titulo-60-caracteres… </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer>PROTÓTIPO · dados simulados · referência de UI para implementação no eskill.com.br</footer>
+
+    <script>
+        (function () {
+            "use strict";
+            const $ = id => document.getElementById(id);
+            const rm = matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+            /* ---------- CLOCK ---------- */
+            setInterval(() => { $('clock').textContent = new Date().toLocaleTimeString('pt-BR') }, 1000);
+
+            /* ---------- TAPE ---------- */
+            const kws = [['portao pet', '#3', 'u', '▲2'], ['grade proteção bebê', '#5', 'u', '▲1'], ['portao 80cm', '#2', 'u', '▲4'],
+            ['portaozinho pet', '#1', 'y', 'TOPO'], ['grade retratil', '#8', 'd', '▼1'], ['portao para escada', '#4', 'u', '▲2'],
+            ['cercadinho pet', '#6', 'u', '▲3'], ['extensor portao', '#2', 'u', '▲1']];
+            let tp = ''; kws.forEach(k => { tp += `<span><b>${k[0]}</b> ${k[1]} <span class="${k[2]}">${k[3]}</span></span>` });
+            $('tape').innerHTML = tp + tp;
+
+            /* ---------- CANDLE ENGINE ---------- */
+            const cv = $('chart'), ctx = cv.getContext('2d');
+            let candles = [], price = 1120, drift = 1.7;
+            for (let i = 0; i < 58; i++) {
+                const o = price, v = (Math.random() - .42) * 14 + drift; const c = o + v;
+                candles.push({ o, c, h: Math.max(o, c) + Math.random() * 6, l: Math.min(o, c) - Math.random() * 6 }); price = c;
+            }
+            let cur = { o: price, c: price, h: price, l: price }; candles.push(cur);
+            const open0 = candles[0].o;
+
+            function tick() {
+                const v = (Math.random() - .44) * 6 + (drift / 4);
+                cur.c = Math.max(900, cur.c + v); cur.h = Math.max(cur.h, cur.c); cur.l = Math.min(cur.l, cur.c);
+                updateHeader(); draw();
+            }
+            function newCandle() { cur = { o: cur.c, c: cur.c, h: cur.c, l: cur.c }; candles.push(cur); if (candles.length > 70) candles.shift(); }
+            function bump(a) { cur.c += a; cur.h = Math.max(cur.h, cur.c); updateHeader(); draw(); }
+
+            function updateHeader() {
+                const p = cur.c, pc = (p / open0 - 1) * 100;
+                $('px').textContent = p.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                $('px').style.color = pc >= 0 ? 'var(--up)' : 'var(--down)';
+                const e = $('chg'); e.textContent = (pc >= 0 ? '▲ +' : '▼ ') + pc.toLocaleString('pt-BR', { maximumFractionDigits: 2 }) + '%';
+                e.className = 'chg ' + (pc >= 0 ? 'up' : 'down');
+                let hi = -1e9, lo = 1e9; candles.forEach(k => { hi = Math.max(hi, k.h); lo = Math.min(lo, k.l) });
+                $('fOpen').textContent = open0.toFixed(0); $('fHigh').textContent = hi.toFixed(0); $('fLow').textContent = lo.toFixed(0);
+            }
+
+            function draw() {
+                const dpr = devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight || 380;
+                if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+                ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, W, H);
+                const padR = 62, padT = 18, padB = 14, cw = (W - padR) / candles.length;
+                let hi = -1e9, lo = 1e9; candles.forEach(k => { hi = Math.max(hi, k.h); lo = Math.min(lo, k.l) });
+                const sp = (hi - lo) || 1; hi += sp * .06; lo -= sp * .06;
+                const y = v => padT + (hi - v) / (hi - lo) * (H - padT - padB);
+                ctx.strokeStyle = '#16203A'; ctx.fillStyle = '#5B6B8C'; ctx.font = '10px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+                for (let i = 0; i <= 4; i++) {
+                    const vy = padT + i * (H - padT - padB) / 4, pv = hi - (hi - lo) * i / 4;
+                    ctx.beginPath(); ctx.moveTo(0, vy); ctx.lineTo(W - padR, vy); ctx.stroke();
+                    ctx.fillText(pv.toFixed(0), W - padR + 8, vy + 3);
+                }
+                candles.forEach((k, i) => {
+                    const x = i * cw + cw / 2, up = k.c >= k.o, col = up ? '#16C784' : '#EA3943';
+                    ctx.strokeStyle = col; ctx.beginPath(); ctx.moveTo(x, y(k.h)); ctx.lineTo(x, y(k.l)); ctx.stroke();
+                    ctx.fillStyle = col; const bw = Math.max(2, cw * .55), by = y(Math.max(k.o, k.c)), bh = Math.max(1.5, Math.abs(y(k.o) - y(k.c)));
+                    ctx.fillRect(x - bw / 2, by, bw, bh);
+                    if (i === candles.length - 1 && !rm) { ctx.shadowColor = col; ctx.shadowBlur = 10; ctx.fillRect(x - bw / 2, by, bw, bh); ctx.shadowBlur = 0; }
+                });
+                const ly = y(cur.c); ctx.setLineDash([4, 4]); ctx.strokeStyle = 'rgba(255,230,0,.55)';
+                ctx.beginPath(); ctx.moveTo(0, ly); ctx.lineTo(W - padR, ly); ctx.stroke(); ctx.setLineDash([]);
+                ctx.fillStyle = '#FFE600'; ctx.fillRect(W - padR + 2, ly - 8, padR - 8, 16);
+                ctx.fillStyle = '#070B14'; ctx.font = 'bold 10px ' + getComputedStyle(document.body).getPropertyValue('--mono');
+                ctx.fillText(cur.c.toFixed(0), W - padR + 10, ly + 3.5);
+            }
+            setInterval(tick, rm ? 2500 : 900); setInterval(newCandle, 8000);
+            addEventListener('resize', draw); updateHeader(); draw();
+
+            /* ---------- STATE / CARDS ---------- */
+            let vendas = 7, rec = 1494.3, perg = 12, acoes = 34, tacos = 8.4, pos = 6.2;
+            const flash = (id, cls) => { const e = $(id); e.classList.remove('flash-g', 'flash-y'); void e.offsetWidth; e.classList.add(cls) };
+            function sale(val) {
+                vendas++; rec += val;
+                $('vVendas').textContent = vendas;
+                $('vRec').textContent = 'R$ ' + Math.round(rec).toLocaleString('pt-BR');
+                $('vTicket').textContent = 'R$ ' + Math.round(rec / vendas);
+                $('pnl').textContent = '+ R$ ' + rec.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+                flash('cVendas', 'flash-g'); flash('cRec', 'flash-g'); bump(3 + Math.random() * 4);
+            }
+
+            /* ---------- FEED ---------- */
+            const feed = $('feed');
+            const skus = ['MLB6654685380', 'MLB6574534100', 'MLB6654697288', 'MLB6574413814', 'MLB6654735702'];
+            const sku = () => skus[Math.floor(Math.random() * skus.length)];
+            const prices = [189.9, 214.9, 229.9, 249.9, 269.9];
+            const pool = [
+                () => ({ i: '🤖', t: `<b>R2·OTIMIZADOR</b> — preço ${sku()} R$219→R$214 <span style="color:var(--up)">(price_to_win)</span>`, c: '', f: () => { flash('cPos', 'flash-y'); pos = Math.max(1.4, pos - .1); $('vPos').textContent = '#' + pos.toFixed(1).replace('.', ',') } }),
+                () => ({ i: '💬', t: `<b>R-Q&A</b> — pergunta respondida em <b>${38 + Math.floor(Math.random() * 40)}s</b>: “serve em vão de 78cm?”`, c: '', f: () => { perg++; $('vPerg').textContent = perg; flash('cPerg', 'flash-y') } }),
+                () => ({ i: '🛡️', t: `<b>SENTINELA</b> — pedido #20008${Math.floor(Math.random() * 90) + 10} a <b>11h do prazo</b> → despacho priorizado`, c: 'alert' }),
+                () => ({ i: '📋', t: `<b>R2·OTIMIZADOR</b> — ficha 100% em ${sku()} → entrou no filtro <b>Fixação: Pressão</b>`, c: '', f: () => flash('cHealth', 'flash-y') }),
+                () => ({ i: '🏷️', t: `<b>R2·OTIMIZADOR</b> — promoção <b>25%</b> aplicada dentro do teto crível (${sku()})`, c: '' }),
+                () => ({ i: '🚀', t: `<b>R1·CRIADOR</b> — anúncio publicado: <b>Kit Portão + 2 Extensores</b> · health 0,94`, c: '' }),
+                () => ({ i: '📡', t: `<b>ESPIÃO</b> — concorrente sem estoque em <b>“portao pet”</b> → sugerido Ads +20% na keyword`, c: '', f: () => flash('cTacos', 'flash-y') }),
+                () => ({ i: '⭐', t: `<b>PÓS-VENDA</b> — nova avaliação <b style="color:var(--ml)">5★</b> recebida`, c: '' }),
+                () => ({ i: '📉', t: `<b>R2·ADS</b> — TACOS caiu para <b>${(tacos = Math.max(6, tacos - .1)).toFixed(1).replace('.', ',')}%</b> — orgânico crescendo`, c: '', f: () => { $('vTacos').textContent = tacos.toFixed(1).replace('.', ',') + '%'; flash('cTacos', 'flash-g') } }),
+                () => { const v = prices[Math.floor(Math.random() * prices.length)]; return { i: '🛒', t: `<b>VENDA</b> — +1 · R$ ${v.toFixed(2).replace('.', ',')} · Portão 74-79cm Branco`, c: 'sale', f: () => sale(v) } },
+            ];
+            function push(ev) {
+                const li = document.createElement('li'); if (ev.c) li.className = ev.c;
+                li.innerHTML = `<span class="ic">${ev.i}</span><span class="tx">${ev.t}<span class="ts">${new Date().toLocaleTimeString('pt-BR')} · executado via API oficial</span></span>`;
+                feed.prepend(li); while (feed.children.length > 28) feed.lastChild.remove();
+                if (ev.f) ev.f(); acoes++; $('vAcoes').textContent = acoes;
+            }
+            push(pool[9]()); push(pool[0]()); push(pool[1]());
+            (function loop() {
+                const r = Math.random();
+                const ev = r < .22 ? pool[9]() : pool[Math.floor(Math.random() * (pool.length - 1))]();
+                push(ev); setTimeout(loop, rm ? 6000 : 2200 + Math.random() * 2600);
+            })();
+
+            /* ---------- QA CURSOR ---------- */
+            const stage = $('stage'), cursor = $('cursor'), fld = $('fld'), qalog = $('qalog');
+            const steps = [
+                { t: 'b0', log: '▶ sync: puxando 360 produtos… OK ✓' },
+                { t: 'm3', log: '▶ nav: /validacao-anuncios… 200 OK ✓' },
+                { t: 'b1', log: '▶ test: titulo-60-caracteres… PASS ✓', type: 'Portão Grade Proteção Bebê Pet 74 a 79cm' },
+                { t: 'b2', log: '▶ test: ficha-sem-NA… PASS ✓' },
+                { t: 'b3', log: '▶ health-check: 0.94 ≥ 0.90… PASS ✓' },
+            ];
+            let si = 0;
+            function qstep() {
+                const st = steps[si % steps.length], el = $(st.t), sr = stage.getBoundingClientRect(), er = el.getBoundingClientRect();
+                const x = er.left - sr.left + er.width / 2 - 3, ycur = er.top - sr.top + er.height / 2 - 2;
+                cursor.style.left = x + 'px'; cursor.style.top = ycur + 'px';
+                setTimeout(() => {
+                    const rp = document.createElement('div'); rp.className = 'ripple'; rp.style.left = (x - 6) + 'px'; rp.style.top = (ycur - 6) + 'px';
+                    stage.appendChild(rp); setTimeout(() => rp.remove(), 600);
+                    el.classList.add('hot'); setTimeout(() => el.classList.remove('hot'), 700);
+                    qalog.textContent = st.log;
+                    if (st.type) { let k = 0; fld.textContent = ''; const ti = setInterval(() => { fld.textContent += st.type[k++] || ''; if (k > st.type.length) clearInterval(ti) }, 28); }
+                    si++; setTimeout(qstep, rm ? 4000 : 1600);
+                }, rm ? 300 : 1150);
+            }
+            cursor.style.left = '40px'; cursor.style.top = '40px'; setTimeout(qstep, 800);
+        })();
+    </script>
+</body>
+
+</html>
