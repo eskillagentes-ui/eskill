@@ -1,5 +1,5 @@
 <link rel="stylesheet" href="/css/pregao.css?v=4">
-<link rel="stylesheet" href="/css/sentinela.css?v=1">
+<link rel="stylesheet" href="/css/sentinela.css?v=2">
 
 <?php
 /** @var array $dash */
@@ -79,9 +79,28 @@ $spark = static function (array $series): string {
 
     <div class="sn-note">
         Observador read-only · limiar de alerta a 50% do limite ML · zero escrita no Mercado Livre
-        <?php if (!empty($dash['motivo_veto'])): ?>
-            · <strong>veto:</strong> <?= htmlspecialchars((string) $dash['motivo_veto']) ?>
-        <?php endif; ?>
+    </div>
+
+    <div class="sn-gates">
+        <?php
+        $podeExpandir = (bool) ($dash['pode_expandir'] ?? false);
+        $podeReparar = (bool) ($dash['pode_reparar'] ?? true);
+        $motivoVeto = (string) ($dash['motivo_veto'] ?? '');
+        ?>
+        <div class="sn-gate <?= $podeExpandir ? 'ok' : 'blocked' ?>">
+            <span class="sn-gate-lb">Expansão</span>
+            <span class="sn-gate-vl">
+                <?php if ($podeExpandir): ?>
+                    LIBERADA
+                <?php else: ?>
+                    BLOQUEADA<?= $motivoVeto !== '' ? ' (' . htmlspecialchars($motivoVeto) . ')' : '' ?>
+                <?php endif; ?>
+            </span>
+        </div>
+        <div class="sn-gate <?= $podeReparar ? 'ok' : 'blocked' ?>">
+            <span class="sn-gate-lb">Reparo</span>
+            <span class="sn-gate-vl"><?= $podeReparar ? 'LIBERADO' : 'BLOQUEADO (conta suspensa/bloqueada)' ?></span>
+        </div>
     </div>
 
     <div class="sn-grid">

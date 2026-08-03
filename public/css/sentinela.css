@@ -38,6 +38,54 @@
     font-size: 12px;
 }
 
+#sentinela-root .sn-gates {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 14px 22px 0;
+}
+
+@media (max-width: 720px) {
+    #sentinela-root .sn-gates {
+        grid-template-columns: 1fr;
+    }
+}
+
+#sentinela-root .sn-gate {
+    background: var(--panel);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 12px 14px;
+}
+
+#sentinela-root .sn-gate.ok {
+    box-shadow: inset 3px 0 0 var(--up);
+}
+
+#sentinela-root .sn-gate.blocked {
+    box-shadow: inset 3px 0 0 var(--down);
+}
+
+#sentinela-root .sn-gate-lb {
+    display: block;
+    font-size: 10px;
+    letter-spacing: 1.4px;
+    text-transform: uppercase;
+    color: var(--mut);
+    font-weight: 700;
+    margin-bottom: 6px;
+}
+
+#sentinela-root .sn-gate-vl {
+    font-size: 13px;
+    font-weight: 600;
+    line-height: 1.35;
+    color: var(--txt);
+}
+
+#sentinela-root .sn-gate.ok .sn-gate-vl { color: var(--up); }
+#sentinela-root .sn-gate.blocked .sn-gate-vl { color: var(--down); }
+
 #sentinela-root .sn-grid {
     padding: 18px 22px 32px;
 }
