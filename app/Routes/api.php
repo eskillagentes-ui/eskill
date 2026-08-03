@@ -18,6 +18,9 @@ declare(strict_types=1);
 // Auth, Dashboard, User, Onboarding, Render, Settings
 require __DIR__ . '/api/auth.php';
 
+// Pregão (read-only realtime)
+require __DIR__ . '/api/pregao.php';
+
 // Integrations: Brevo, Clawdbot, Assistant Connector, OpenClaw
 require __DIR__ . '/api/integrations.php';
 

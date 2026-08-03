@@ -220,10 +220,11 @@ final class PregaoEmitService
             if ($redis === null) {
                 return;
             }
-            $redis->publish(
-                self::CHANNEL,
-                json_encode($event, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
-            );
+            $json = json_encode($event, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $redis->publish(self::CHANNEL, $json);
+            // Fan-out para o gateway WS (polling LPOP) — lista limitada
+            $redis->lPush('pregao:fanout', $json);
+            $redis->lTrim('pregao:fanout', 0, 999);
         } catch (Throwable $e) {
             log_warning('PregaoEmitService: falha ao publicar no Redis', [
                 'type' => $event['type'] ?? null,

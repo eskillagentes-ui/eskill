@@ -34,6 +34,11 @@ $router->get('api/account-health/pillar/{pillarName}', AccountHealthController::
 $router->get('api/account-health/history', AccountHealthController::class, 'getHistory');
 $router->post('api/account-health/refresh', AccountHealthController::class, 'refresh');
 
+// Pregão — painel read-only em tempo real (índice ESKL11)
+use App\Controllers\PregaoController;
+$router->get('dashboard/pregao', PregaoController::class, 'index');
+// APIs em app/Routes/api/pregao.php
+
 // 🆕 Advanced Account Health Diagnostics
 $router->get('api/account-health/advanced/status', AccountHealthController::class, 'getAdvancedStatus');
 $router->get('api/account-health/advanced/customer-service', AccountHealthController::class, 'getAdvancedCustomerService');
