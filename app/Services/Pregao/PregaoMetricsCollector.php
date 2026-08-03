@@ -76,13 +76,12 @@ final class PregaoMetricsCollector
         // Fp legado não alimenta o índice (substituído por Fe)
         unset($meta['available']['Fp']);
 
-        // Se ads não foi coletado neste ciclo, preserva meta Ft já persistida
-        if (!$want('ads') && !isset($meta['metrics']['tacos'])) {
-            $meta['available']['Ft'] = false;
-            $meta['metrics']['tacos'] = [
-                'available' => false,
-                'reason' => 'ads_pending',
-            ];
+        // Se ads não foi coletado neste ciclo, NÃO apaga Ft/TACOS já persistidos
+        if (!$want('ads')) {
+            $tacosMeta = is_array($meta['metrics']['tacos'] ?? null) ? $meta['metrics']['tacos'] : [];
+            if (($tacosMeta['available'] ?? false) === true) {
+                $meta['available']['Ft'] = true;
+            }
         }
         // posição média busca só se rank tracker ligado
         if (!($this->config['rank_tracker_enabled'] ?? false)) {

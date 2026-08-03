@@ -54,12 +54,10 @@ final class PregaoSnapshotService
             'available' => $available,
         ]);
 
+        // Índice live = cálculo com fatores ativos (não sobrescrever com candle stale do tick antigo)
         $indexValue = $calc['indice'];
         if ($indexValue === null && isset($metrics['indice_atual']) && (int) ($calc['factors_active']) > 0) {
             $indexValue = (float) $metrics['indice_atual'];
-        }
-        if ($candles !== [] && $indexValue !== null) {
-            $indexValue = (float) $candles[array_key_last($candles)]['c'];
         }
 
         $openRef = $candles !== [] ? (float) $candles[0]['o'] : $indexValue;
@@ -417,14 +415,20 @@ final class PregaoSnapshotService
             'receita_hoje' => $pick('receita_hoje', (float) ($metrics['receita_hoje'] ?? 0)),
             'ticket_medio' => $pick('ticket_medio', (float) ($metrics['ticket_medio'] ?? 0)),
             'tacos' => (($m['tacos']['available'] ?? false) === true)
-                ? (isset($m['tacos']['value']) ? (float) $m['tacos']['value'] : (float) ($metrics['tacos'] ?? 0))
+                ? (isset($m['tacos']['value'])
+                    ? (float) $m['tacos']['value']
+                    : ((float) ($metrics['tacos'] ?? 0) > 0 ? (float) $metrics['tacos'] : null))
                 : null,
             'acos' => (($m['acos']['available'] ?? false) === true)
                 ? (isset($m['acos']['value']) ? (float) $m['acos']['value'] : null)
-                : null,
+                : ((($m['tacos']['available'] ?? false) === true && isset($m['tacos']['acos']))
+                    ? (float) $m['tacos']['acos']
+                    : null),
             'gasto_ads_hoje' => (($m['gasto_ads_hoje']['available'] ?? false) === true)
                 ? (isset($m['gasto_ads_hoje']['value']) ? (float) $m['gasto_ads_hoje']['value'] : null)
-                : null,
+                : ((($m['tacos']['available'] ?? false) === true && isset($m['tacos']['gasto_hoje']))
+                    ? (float) $m['tacos']['gasto_hoje']
+                    : null),
             'posicao_media' => $pick('posicao_media', (float) ($metrics['posicao_media'] ?? 0)),
             'visitas_7d' => $pick('visitas_7d', (float) ($metrics['visitas_7d'] ?? 0)),
             'exposicao' => (($m['exposicao']['available'] ?? false) === true) ? [
@@ -507,7 +511,11 @@ final class PregaoSnapshotService
                 $available['Fe'] = true;
             }
         }
-        $available['Ft'] = false;
+
+        // Ft só com TACOS marcado available=true no meta do coletor Ads
+        $tacosMeta = is_array($meta['metrics']['tacos'] ?? null) ? $meta['metrics']['tacos'] : [];
+        $available['Ft'] = (($tacosMeta['available'] ?? false) === true);
+
         return $available;
     }
 

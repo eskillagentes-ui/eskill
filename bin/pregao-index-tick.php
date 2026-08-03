@@ -58,8 +58,8 @@ do {
         }
         try {
             if ($collector !== null) {
-                // Coleta leve a cada tick (visitas Fe; keywords só com RANK_TRACKER_ENABLED)
-                $collector->collect($accountId, ['reputation', 'health', 'questions', 'sales', 'visits', 'robots']);
+                // Coleta leve a cada tick; Ads (Ft/TACOS) incluso — read-only, sem fullHistory
+                $collector->collect($accountId, ['reputation', 'health', 'questions', 'sales', 'visits', 'ads', 'robots']);
                 try {
                     (new \App\Services\Sentinela\Sentinela())->collect($accountId);
                 } catch (Throwable $sentinelaErr) {

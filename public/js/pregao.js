@@ -600,6 +600,16 @@
         }));
         if (candles.length) {
             cur = { ...candles[candles.length - 1] };
+            // Índice live do snapshot prevalece sobre candle stale (ex.: tick antigo sem Ft)
+            if (d.index && d.index.value != null) {
+                const live = Number(d.index.value);
+                if (Number.isFinite(live)) {
+                    cur.c = live;
+                    cur.h = Math.max(cur.h, live);
+                    cur.l = Math.min(cur.l, live);
+                    candles[candles.length - 1] = { ...candles[candles.length - 1], c: live, h: cur.h, l: cur.l };
+                }
+            }
             open0 = candles[0].o;
         } else if (d.index && d.index.value != null) {
             const v = Number(d.index.value);
