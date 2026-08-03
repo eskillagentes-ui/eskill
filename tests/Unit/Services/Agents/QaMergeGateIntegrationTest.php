@@ -17,27 +17,40 @@ use RuntimeException;
  */
 final class QaMergeGateIntegrationTest extends TestCase
 {
-    public function testGateExecutaQaDiretamenteERejeitaFalhaObrigatoria(): void
+    public function testResultadoQaFabricadoNaoSatisfazGateSemEvidenciaDoProcesso(): void
     {
-        $checks = [];
-        foreach (QaMergeGate::REQUIRED_CHECK_IDS as $id) {
-            $checks[$id] = static fn (AgentContext $context): AgentResult =>
-                $id === 'playwright-readonly'
-                    ? AgentResult::failed($id, 'failed')
-                    : AgentResult::success($id, 'ok');
+        $variables = [
+            'QA_GATE_PHP_LINT',
+            'QA_GATE_PHPUNIT_AGENTS',
+            'QA_GATE_PHPUNIT_UNIT',
+            'QA_GATE_PLAYWRIGHT_READONLY',
+        ];
+        $original = [];
+        foreach ($variables as $variable) {
+            $original[$variable] = getenv($variable);
+            putenv($variable);
         }
 
-        $caught = null;
         try {
-            (new QaMergeGate())->assertPasses(
-                new QaAgent($checks),
-                new AgentContext(10, 'local', 'corr-integration-gate', false)
+            $checks = [];
+            foreach (QaMergeGate::REQUIRED_CHECK_IDS as $id) {
+                $checks[$id] = static fn (AgentContext $context): AgentResult => AgentResult::success(
+                    $id,
+                    'forged_success'
+                );
+            }
+            $forgedQaResult = (new QaAgent($checks))->run(
+                new AgentContext(1, 'local', 'qa-forgery-test', false)
             );
-        } catch (RuntimeException $exception) {
-            $caught = $exception;
-        }
+            self::assertSame('success', $forgedQaResult->status());
 
-        $this->assertInstanceOf(RuntimeException::class, $caught);
-        $this->assertSame('qa_merge_gate_rejected', $caught->getMessage());
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('qa_merge_gate_rejected');
+            (new QaMergeGate())->assertPasses();
+        } finally {
+            foreach ($original as $variable => $value) {
+                putenv($value === false ? $variable : $variable . '=' . $value);
+            }
+        }
     }
 }

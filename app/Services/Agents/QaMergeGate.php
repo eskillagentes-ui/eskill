@@ -18,45 +18,25 @@ final class QaMergeGate
         'playwright-readonly',
     ];
 
-    public function assertPasses(QaAgent $qa, AgentContext $context): void
+    /** @var array<string, string> */
+    private const EVIDENCE_VARIABLES = [
+        'php-lint' => 'QA_GATE_PHP_LINT',
+        'phpunit-agents' => 'QA_GATE_PHPUNIT_AGENTS',
+        'phpunit-unit' => 'QA_GATE_PHPUNIT_UNIT',
+        'playwright-readonly' => 'QA_GATE_PLAYWRIGHT_READONLY',
+    ];
+
+    /** Valida somente evidências fixas fornecidas pelo processo confiável de CI. */
+    public function assertPasses(): void
     {
-        if (!$this->passes($qa->run($context))) {
+        if (array_keys(self::EVIDENCE_VARIABLES) !== self::REQUIRED_CHECK_IDS) {
             throw new RuntimeException(self::REJECTION_REASON);
         }
-    }
 
-    private function passes(AgentResult $result): bool
-    {
-        if ($result->agent() !== QaAgent::NAME
-            || $result->status() !== 'success'
-            || $result->stateChanged()
-            || $result->emittedOps() !== []
-        ) {
-            return false;
-        }
-
-        $data = $result->data();
-        if (count($data) !== 2
-            || !isset($data['checks'], $data['order'])
-            || !is_array($data['checks'])
-            || !is_array($data['order'])
-            || $data['order'] !== self::REQUIRED_CHECK_IDS
-            || array_keys($data['checks']) !== self::REQUIRED_CHECK_IDS
-        ) {
-            return false;
-        }
-
-        foreach (self::REQUIRED_CHECK_IDS as $id) {
-            $report = $data['checks'][$id] ?? null;
-            if (!is_array($report)
-                || count($report) !== 2
-                || ($report['approved'] ?? null) !== true
-                || ($report['reason'] ?? null) !== 'approved'
-            ) {
-                return false;
+        foreach (self::EVIDENCE_VARIABLES as $variable) {
+            if (getenv($variable) !== 'passed') {
+                throw new RuntimeException(self::REJECTION_REASON);
             }
         }
-
-        return true;
     }
 }

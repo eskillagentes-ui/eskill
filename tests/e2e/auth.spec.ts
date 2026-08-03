@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './helpers/mutation-guard';
 
 /**
  * Testes E2E para fluxo de autenticação

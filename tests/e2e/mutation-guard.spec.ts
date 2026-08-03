@@ -1,7 +1,13 @@
-import { expect, test } from '@playwright/test';
 import fs from 'fs';
 import path from 'path';
-import { assertSafePlaywrightTarget, requireMutationAllowed } from './helpers/mutation-guard';
+import {
+  assertMutationRequestAllowed,
+  assertSafePlaywrightTarget,
+  assertSafeRequestTarget,
+  expect,
+  requireMutationAllowed,
+  test,
+} from './helpers/mutation-guard';
 
 const originalAllowMutation = process.env.E2E_ALLOW_MUTATION;
 const originalBaseUrl = process.env.PLAYWRIGHT_BASE_URL;
@@ -66,9 +72,59 @@ test.describe('Mutation guard contract @readonly', () => {
     expect(() => assertSafePlaywrightTarget('http://127.0.0.1:8080')).not.toThrow();
     expect(() => assertSafePlaywrightTarget('http://localhost:8080')).not.toThrow();
     expect(() => assertSafePlaywrightTarget('http://staging.eskill.com.br')).not.toThrow();
-    expect(() => assertSafePlaywrightTarget('https://eskill.com.br')).toThrow(/destino E2E/);
-    expect(() => assertSafePlaywrightTarget('https://www.eskill.com.br')).toThrow(/destino E2E/);
-    expect(() => assertSafePlaywrightTarget('https://example.com')).toThrow(/destino E2E/);
+    expect(() => assertSafePlaywrightTarget('https://eskill.com.br')).toThrow(/E2E não permitido/);
+    expect(() => assertSafePlaywrightTarget('https://www.eskill.com.br')).toThrow(/E2E não permitido/);
+    expect(() => assertSafePlaywrightTarget('https://example.com')).toThrow(/E2E não permitido/);
+  });
+
+  test('@readonly bloqueia host efetivo de request e redirect', () => {
+    expect(() => assertSafeRequestTarget('http://127.0.0.1:8080/login')).not.toThrow();
+    expect(() => assertSafeRequestTarget('http://staging.eskill.com.br/login')).not.toThrow();
+    expect(() => assertSafeRequestTarget('https://fonts.googleapis.com/css2')).not.toThrow();
+    expect(() => assertSafePlaywrightTarget('https://fonts.googleapis.com')).toThrow(/E2E não permitido/);
+    expect(() => assertSafeRequestTarget('https://eskill.com.br/login')).toThrow(/request E2E/);
+    expect(() => assertSafeRequestTarget('https://example.com/redirect')).toThrow(/request E2E/);
+  });
+
+  test('@readonly bloqueia qualquer método mutante sem flag e fora do staging', () => {
+    delete process.env.E2E_ALLOW_MUTATION;
+    process.env.PLAYWRIGHT_BASE_URL = 'http://staging.eskill.com.br';
+    expect(() => assertMutationRequestAllowed('POST', 'http://staging.eskill.com.br/login'))
+      .toThrow(/mutações bloqueadas/);
+
+    process.env.E2E_ALLOW_MUTATION = 'true';
+    process.env.PLAYWRIGHT_BASE_URL = 'http://127.0.0.1:8080';
+    expect(() => assertMutationRequestAllowed('POST', 'http://127.0.0.1:8080/login'))
+      .toThrow(/staging/);
+
+    process.env.PLAYWRIGHT_BASE_URL = 'http://staging.eskill.com.br';
+    expect(() => assertMutationRequestAllowed('POST', 'http://staging.eskill.com.br/login'))
+      .not.toThrow();
+    expect(() => assertMutationRequestAllowed('GET', 'http://staging.eskill.com.br/login'))
+      .not.toThrow();
+  });
+
+  test('@readonly fixture request bloqueia host absoluto e POST antes da rede', async ({ request }) => {
+    delete process.env.E2E_ALLOW_MUTATION;
+    process.env.PLAYWRIGHT_BASE_URL = 'http://127.0.0.1:8080';
+
+    await expect(request.get('https://eskill.com.br/login')).rejects.toThrow(/request E2E/);
+    await expect(request.post('/login', { data: { email: 'blocked@example.invalid' } }))
+      .rejects.toThrow(/mutações bloqueadas/);
+  });
+
+  test('@readonly todos os specs usam a fixture central', () => {
+    const e2eDir = path.resolve(__dirname);
+    const specs = fs.readdirSync(e2eDir).filter((file) => /\.spec\.(?:ts|js)$/.test(file));
+    const directImport = 'from ' + "'@playwright/test'";
+    const directRequire = 'require(' + "'@playwright/test'" + ')';
+
+    for (const file of specs) {
+      const source = fs.readFileSync(path.join(e2eDir, file), 'utf8');
+      expect(source, file).toContain('./helpers/mutation-guard');
+      expect(source, file).not.toContain(directImport);
+      expect(source, file).not.toContain(directRequire);
+    }
   });
 
   test('@readonly script npm usa o projeto readonly, não chromium', () => {

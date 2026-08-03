@@ -19,38 +19,22 @@ assertSafePlaywrightTarget(BASE_URL);
  * read-only fora deste harness mutante.
  */
 
-/**
- * Subconjunto seguro (npm run test:e2e:readonly): exclui os 6 specs com
- * POST/DELETE (31 pontos mutantes) — seo, render, exports, ai-center,
- * functional_ai_mcp, production-validation. Uso permitido apenas em ambiente local
- * ou staging isolado; nunca apontar esta suíte para produção.
- */
+/** Sem autorização mutante, somente specs explicitamente auditados são coletados. */
 const e2eReadonly = process.env.E2E_READONLY === '1';
 const mutationAllowed = process.env.E2E_ALLOW_MUTATION === 'true';
-const mutatingSpecs = [
-  '**/seo.spec.ts',
-  '**/render.spec.ts',
-  '**/exports.spec.ts',
-  '**/ai-center.spec.ts',
-  '**/functional_ai_mcp.spec.ts',
-  '**/production-validation.spec.ts',
+const READONLY_SPEC_ALLOWLIST = [
+  '**/mutation-guard.spec.ts',
+  '**/pregao-overflow.spec.ts',
 ];
-
-const testIgnore: string[] = ['**/production-validation.spec.ts'];
-if (e2eReadonly || !mutationAllowed) {
-  for (const pattern of mutatingSpecs) {
-    if (!testIgnore.includes(pattern)) {
-      testIgnore.push(pattern);
-    }
-  }
-}
+const testMatch = e2eReadonly || !mutationAllowed ? READONLY_SPEC_ALLOWLIST : undefined;
 
 /**
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
   testDir: './tests/e2e',
-  testIgnore: testIgnore.length > 0 ? testIgnore : undefined,
+  testMatch,
+  testIgnore: ['**/production-validation.spec.ts'],
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
@@ -63,8 +47,10 @@ export default defineConfig({
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
-    /* Base URL to use in actions like `await page.goto('/login')`. */
+    /* Base URL to use in actions like await page.goto('/login'). */
     baseURL: BASE_URL,
+    /* Service workers poderiam escapar da interceptação context.route. */
+    serviceWorkers: 'block',
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',

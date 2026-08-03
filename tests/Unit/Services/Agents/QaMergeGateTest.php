@@ -4,61 +4,85 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Services\Agents;
 
-use App\Services\Agents\AgentContext;
-use App\Services\Agents\AgentResult;
-use App\Services\Agents\QaAgent;
 use App\Services\Agents\QaMergeGate;
 use PHPUnit\Framework\TestCase;
+use ReflectionMethod;
 use RuntimeException;
 
 /** @covers \App\Services\Agents\QaMergeGate */
 final class QaMergeGateTest extends TestCase
 {
-    public function testExecutaQaDiretamenteComPoliticaFixaECompleta(): void
+    /** @var array<string, string|false> */
+    private array $originalEnvironment = [];
+
+    /** @var list<string> */
+    private const VARIABLES = [
+        'QA_GATE_PHP_LINT',
+        'QA_GATE_PHPUNIT_AGENTS',
+        'QA_GATE_PHPUNIT_UNIT',
+        'QA_GATE_PLAYWRIGHT_READONLY',
+    ];
+
+    protected function setUp(): void
     {
-        $calls = [];
-        $checks = [];
-        foreach (QaMergeGate::REQUIRED_CHECK_IDS as $id) {
-            $checks[$id] = static function (AgentContext $context) use (&$calls, $id): AgentResult {
-                $calls[] = $id;
-                return AgentResult::success($id, 'ok');
-            };
+        foreach (self::VARIABLES as $variable) {
+            $this->originalEnvironment[$variable] = getenv($variable);
         }
-
-        (new QaMergeGate())->assertPasses(new QaAgent($checks), $this->context());
-
-        $this->assertSame(QaMergeGate::REQUIRED_CHECK_IDS, $calls);
     }
 
-    public function testRejeitaQaComPoliticaReduzida(): void
+    protected function tearDown(): void
     {
-        $qa = new QaAgent([
-            'php-lint' => static fn (AgentContext $context): AgentResult =>
-                AgentResult::success('php-lint', 'ok'),
-        ]);
+        foreach ($this->originalEnvironment as $variable => $value) {
+            putenv($value === false ? $variable : $variable . '=' . $value);
+        }
+    }
+
+    public function testAprovaSomenteComAsQuatroEvidenciasFixasDoProcesso(): void
+    {
+        $this->setAllPassed();
+
+        (new QaMergeGate())->assertPasses();
+
+        self::assertTrue(true);
+    }
+
+    /** @dataProvider invalidEvidenceProvider */
+    public function testRejeitaEvidenciaAusenteOuInvalida(string $variable, ?string $value): void
+    {
+        $this->setAllPassed();
+        putenv($value === null ? $variable : $variable . '=' . $value);
 
         $this->expectException(RuntimeException::class);
         $this->expectExceptionMessage('qa_merge_gate_rejected');
-        (new QaMergeGate())->assertPasses($qa, $this->context());
+
+        (new QaMergeGate())->assertPasses();
     }
 
-    public function testRejeitaCheckObrigatorioReprovado(): void
+    /** @return iterable<string, array{string, ?string}> */
+    public function invalidEvidenceProvider(): iterable
     {
-        $checks = [];
-        foreach (QaMergeGate::REQUIRED_CHECK_IDS as $id) {
-            $checks[$id] = static fn (AgentContext $context): AgentResult =>
-                $id === 'phpunit-agents'
-                    ? AgentResult::failed($id, 'failed')
-                    : AgentResult::success($id, 'ok');
+        foreach (self::VARIABLES as $variable) {
+            yield $variable . '-missing' => [$variable, null];
+            yield $variable . '-invalid' => [$variable, 'success'];
         }
-
-        $this->expectException(RuntimeException::class);
-        $this->expectExceptionMessage('qa_merge_gate_rejected');
-        (new QaMergeGate())->assertPasses(new QaAgent($checks), $this->context());
     }
 
-    private function context(): AgentContext
+    public function testApiNaoAceitaQaAgentResultadoCallbacksOuContexto(): void
     {
-        return new AgentContext(10, 'local', 'corr-gate', false);
+        $method = new ReflectionMethod(QaMergeGate::class, 'assertPasses');
+        self::assertSame(0, $method->getNumberOfParameters());
+
+        $source = file_get_contents(__DIR__ . '/../../../../app/Services/Agents/QaMergeGate.php');
+        self::assertIsString($source);
+        self::assertStringNotContainsString('QaAgent', $source);
+        self::assertStringNotContainsString('AgentResult', $source);
+        self::assertStringNotContainsString('callable', $source);
+    }
+
+    private function setAllPassed(): void
+    {
+        foreach (self::VARIABLES as $variable) {
+            putenv($variable . '=passed');
+        }
     }
 }

@@ -1,4 +1,4 @@
-import { test } from '@playwright/test';
+import { test } from './helpers/mutation-guard';
 
 /**
  * Produção não pode ser alvo do harness E2E mutante.

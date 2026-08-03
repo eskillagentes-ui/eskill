@@ -1,4 +1,4 @@
-import { test, expect, Page } from '@playwright/test';
+import { test, expect, type Page } from './helpers/mutation-guard';
 
 const email = process.env.E2E_TEST_USER_EMAIL;
 const password = process.env.E2E_TEST_USER_PASSWORD;
