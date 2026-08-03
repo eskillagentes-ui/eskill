@@ -11,6 +11,12 @@
 - **Shell:** bash/zsh
 - **Git:** Conventional commits (feat:, fix:, refactor:, etc.)
 
+### Staging vs Produção (P7)
+- **Produção:** `/home/eskill/htdocs/eskill.com.br` — somente leitura para mutações de teste; E2E: `npm run test:e2e:readonly`.
+- **Staging:** `/home/eskill/htdocs/staging.eskill.com.br` — smoke seed, E2E mutante (POST/DELETE), `PREGAO_SEED=true`. Doc: `docs/ops/STAGING.md`.
+- **Nunca** apontar workers/tick staging para a conta ML **1335** (FACILYTY prod).
+- Deploy staging: `bash scripts/deploy_staging.sh` (não usa `bin/deploy.sh` de prod).
+
 ## Filosofia
 
 ### Long-Running Agent Harness

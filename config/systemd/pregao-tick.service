@@ -1,5 +1,5 @@
 [Unit]
-Description=eskill Pregao ESKL11 index tick
+Description=eskill Pregao ESKL11 index tick (+ collect leve)
 After=network.target
 
 [Service]
@@ -7,7 +7,9 @@ Type=simple
 User=eskill
 Group=eskill
 WorkingDirectory=/home/eskill/htdocs/eskill.com.br
-ExecStart=/usr/bin/php /home/eskill/htdocs/eskill.com.br/bin/pregao-index-tick.php --account-id=1335 --loop --interval=45
+Environment=PREGAO_SEED=false
+Environment=RANK_TRACKER_ENABLED=false
+ExecStart=/usr/bin/php /home/eskill/htdocs/eskill.com.br/bin/pregao-index-tick.php --account-id=1335 --collect --loop --interval=45
 Restart=always
 RestartSec=5
 StandardOutput=append:/home/eskill/htdocs/eskill.com.br/storage/logs/pregao-tick.log

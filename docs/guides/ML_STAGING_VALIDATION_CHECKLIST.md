@@ -6,12 +6,17 @@ Garantir que a integração Mercado Livre esteja apta para promoção à produç
 
 ## Pré-requisitos
 
+- ambiente isolado provisionado (`docs/ops/STAGING.md`): path, MySQL `eskill_staging`, Redis DB `1`, WS `:8092`
+- `bash scripts/deploy_staging.sh --check` exit 0
 - credenciais reais ou controladas de staging
-- `ML_APP_ID`, `ML_CLIENT_SECRET`, `ML_REDIRECT_URI` e `APP_KEY` válidos
+- `ML_APP_ID`, `ML_CLIENT_SECRET`, `ML_REDIRECT_URI` e `APP_KEY` válidos (**APP_KEY distinta da prod**)
+- `ML_REDIRECT_URI=https://staging.eskill.com.br/auth/callback` cadastrado na app ML
 - `ML_WEBHOOK_SECRET` configurado (HMAC de webhooks)
 - webhook de staging apontado para o ambiente correto
-- banco e logs segregados, migrations aplicadas (`php bin/apply-migrations.php`)
+- banco e logs segregados, migrations aplicadas
 - feature flags de mutação habilitadas conforme o escopo do teste
+- **nunca** `PREGAO_ACCOUNT_ID=1335` no `.env` staging
+- DNS/TLS públicos de `staging.eskill.com.br` ativos (ou `/etc/hosts` só para smoke local)
 
 ## Verificação automatizada (pré-condição de todos os gates)
 
@@ -107,6 +112,15 @@ echo "Exit code: $?"
 ## Gate 11 — Smoke Tests
 
 ```bash
+# Isolamento do stack staging
+bash scripts/deploy_staging.sh --check
+
+# E2E completo no staging (inclui 31 POST/DELETE — gate de promoção)
+npm run test:e2e:staging
+
+# Em produção / host compartilhado: NÃO rodar a suíte mutante
+npm run test:e2e:readonly
+
 # Testes unitários do namespace ML
 php vendor/bin/phpunit --testsuite=Unit --filter=MercadoLivre
 
@@ -114,6 +128,8 @@ php vendor/bin/phpunit --testsuite=Unit --filter=MercadoLivre
 php vendor/bin/phpunit --testsuite=Unit
 ```
 
+- [ ] `deploy_staging.sh --check` exit 0 (Redis DB1 sem leak no DB0; health staging 200)
+- [ ] `npm run test:e2e:staging` verde
 - [ ] todos os testes `MercadoLivre*Test` passando (0 failures)
 - [ ] `MercadoLivreWebhookReplayServiceTest` — todos passing
 - [ ] `WebhookInboxServiceTest` — todos passing
@@ -123,11 +139,14 @@ php vendor/bin/phpunit --testsuite=Unit
 
 Promover para produção apenas quando:
 
-- `php bin/ml-health-check.php --json` retornar exit code `0`
+- `bash scripts/deploy_staging.sh --check` exit code `0`
+- `npm run test:e2e:staging` verde
+- `php bin/ml-health-check.php --json --app-url=https://staging.eskill.com.br` retornar exit code `0`
 - todos os gates P0 (Gate 1, 2, 7 e 11) estiverem aprovados
 - não houver erro crítico aberto
 - reconexão OAuth, webhook inbox e sync core estiverem validados
-- documentação operacional estiver atualizada
+- documentação operacional estiver atualizada (`docs/ops/STAGING.md`)
+- em produção, apenas `npm run test:e2e:readonly` + health (proibido smoke seed / E2E mutante)
 
 ## Assinatura de Release
 
