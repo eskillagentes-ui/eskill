@@ -58,7 +58,8 @@ do {
         }
         try {
             if ($collector !== null) {
-                // Coleta leve a cada tick; Ads (Ft/TACOS) incluso — read-only, sem fullHistory
+                // Coleta leve a cada tick; Ads entra na lista mas o coletor tem freshness 5min
+                // (0 GET PADS dentro da janela; fullHistory nunca aqui).
                 $collector->collect($accountId, ['reputation', 'health', 'questions', 'sales', 'visits', 'ads', 'robots']);
                 try {
                     (new \App\Services\Sentinela\Sentinela())->collect($accountId);

@@ -14,13 +14,21 @@ use Throwable;
  * Coletor read-only de Product Ads.
  *
  * Persiste histórico diário, calcula ACOS/TACOS/ROAS/CPC.
- * Sem campanha ativa → n/d sem erro.
+ * Freshness padrão: 5 min — dentro da janela reutiliza last-known (positivo ou negativo, 0 GETs).
+ * Full history só sob flag explícita (nunca no tick de 45s).
+ * Falha transitória/429: preserva Ft se houver snapshot válido (stale), até ads_max_stale_age.
  * Nunca escreve na API do ML.
  */
 final class AdsMetricsCollector
 {
     /** Baseline inicial de TACOS (%) — documentado; recalculado semanalmente quando houver dados. */
     public const TACOS_BASELINE_INITIAL = 10.0;
+
+    /** Janela de freshness do coletor no tick frequente (segundos). */
+    public const FRESHNESS_TTL_SECONDS = 300;
+
+    /** Idade máxima do snapshot para preservar Ft em falha transitória (segundos). */
+    public const MAX_STALE_AGE_SECONDS = 3600;
 
     private const BATCH_SLEEP_US = 250000;
     private const MAX_RETRIES_429 = 4;
@@ -29,237 +37,617 @@ final class AdsMetricsCollector
     private PregaoEmitService $emitter;
     private SkuCustoService $skuCustos;
 
+    /** @var array<string, mixed> fonte única (config/pregao.php); injetável em testes */
+    private array $config;
+
+    /** @var callable(int): object|null factory injetável (testes) */
+    private $adsFactory = null;
+
+    private int $apiCallCount = 0;
+
+    /** @var array<int, array{at: int, payload: array<string, mixed>}> cache em memória (testes / processo) */
+    private array $memoryFreshness = [];
+
+    private ?int $clockOverride = null;
+
+    /**
+     * @param array<string, mixed>|null $config config/pregao.php (ads_collect_freshness_ttl, ads_max_stale_age)
+     */
     public function __construct(
         ?PDO $db = null,
         ?PregaoEmitService $emitter = null,
-        ?SkuCustoService $skuCustos = null
+        ?SkuCustoService $skuCustos = null,
+        ?array $config = null
     ) {
         $this->db = $db ?? Database::getInstance();
         $this->emitter = $emitter ?? new PregaoEmitService($this->db);
         $this->skuCustos = $skuCustos ?? new SkuCustoService($this->db);
+        $this->config = $config ?? (require dirname(__DIR__, 3) . '/config/pregao.php');
+    }
+
+    /**
+     * @param callable(int): object $factory deve expor getCampaigns/getCampaignReport/getAdsItems
+     */
+    public function setAdsFactory(callable $factory): void
+    {
+        $this->adsFactory = $factory;
+    }
+
+    public function setClockOverride(?int $unixTs): void
+    {
+        $this->clockOverride = $unixTs;
+    }
+
+    public function getApiCallCount(): int
+    {
+        return $this->apiCallCount;
+    }
+
+    public function resetApiCallCount(): void
+    {
+        $this->apiCallCount = 0;
+    }
+
+    /**
+     * Semeia last-known (positivo ou negativo; útil em testes sem DB/API).
+     *
+     * @param array<string, mixed> $payload
+     */
+    public function seedLastKnownGood(int $accountId, array $payload, ?int $collectedAt = null): void
+    {
+        $this->memoryFreshness[$accountId] = [
+            'at' => $collectedAt ?? $this->now(),
+            'payload' => $payload,
+        ];
+    }
+
+    public function freshnessTtlSeconds(): int
+    {
+        return max(60, (int) ($this->config['ads_collect_freshness_ttl'] ?? self::FRESHNESS_TTL_SECONDS));
+    }
+
+    public function maxStaleAgeSeconds(): int
+    {
+        return max(60, (int) ($this->config['ads_max_stale_age'] ?? self::MAX_STALE_AGE_SECONDS));
+    }
+
+    public function isFresh(int $collectedAt, ?int $now = null, ?int $ttl = null): bool
+    {
+        $now ??= $this->now();
+        $ttl ??= $this->freshnessTtlSeconds();
+        return ($now - $collectedAt) < $ttl;
+    }
+
+    public function isWithinMaxStaleAge(int $collectedAt, ?int $now = null, ?int $maxAge = null): bool
+    {
+        $now ??= $this->now();
+        $maxAge ??= $this->maxStaleAgeSeconds();
+        return ($now - $collectedAt) <= $maxAge;
     }
 
     /**
      * @return array<string, mixed>
      */
-    public function collect(int $accountId, bool $fullHistory = false): array
+    public function collect(int $accountId, bool $fullHistory = false, bool $forceRefresh = false): array
     {
-        if (!$this->tablesReady()) {
+        $this->apiCallCount = 0;
+
+        if (!$this->tablesReady() && $this->adsFactory === null) {
             return [
                 'ok' => false,
                 'available' => false,
+                'cached' => false,
+                'stale' => false,
                 'reason' => 'tables_missing',
                 'tacos' => null,
                 'acos' => null,
+                'api_calls' => 0,
                 'message' => 'rode php bin/ads-migrate-bloco5.php',
             ];
         }
 
-        try {
-            $ads = new AdsService($accountId);
-            $campaignsPayload = $this->withBackoff(static fn () => $ads->getCampaigns('all'));
-            $campaigns = $campaignsPayload['campaigns'] ?? [];
-            if (!is_array($campaigns)) {
-                $campaigns = [];
-            }
-
-            $active = array_values(array_filter(
-                $campaigns,
-                static fn ($c): bool => is_array($c) && strtolower((string) ($c['status'] ?? '')) === 'active'
-            ));
-
-            if ($active === [] && $campaigns === []) {
-                return $this->persistEmpty($accountId, 'nenhuma campanha');
-            }
-            if ($active === []) {
-                return $this->persistEmpty($accountId, 'nenhuma campanha ativa');
-            }
-
-            $tz = new \DateTimeZone('America/Sao_Paulo');
-            $today = new \DateTimeImmutable('today', $tz);
-            $dates = [$today->format('Y-m-d')];
-            if ($fullHistory) {
-                for ($i = 1; $i <= 35; $i++) {
-                    $dates[] = $today->modify("-{$i} days")->format('Y-m-d');
-                }
-            }
-
-            $dayMetrics = [];
-            foreach ($active as $campaign) {
-                $campaignId = (string) ($campaign['id'] ?? '');
-                if ($campaignId === '') {
-                    continue;
-                }
-                $budget = $this->extractBudget($campaign);
-                $roasObj = $this->extractRoasObjetivo($campaign);
-                $status = (string) ($campaign['status'] ?? 'active');
-
-                foreach ($dates as $date) {
-                    $report = $this->withBackoff(
-                        static fn () => $ads->getCampaignReport($campaignId, $date, $date)
-                    );
-                    $metrics = is_array($report['metrics'] ?? null) ? $report['metrics'] : [];
-                    $gasto = (float) ($metrics['investment'] ?? 0);
-                    $receita = (float) ($metrics['revenue'] ?? 0);
-                    $clicks = (int) ($metrics['clicks'] ?? 0);
-                    $impressions = (int) ($metrics['impressions'] ?? 0);
-                    $sold = (int) ($metrics['sold_quantity'] ?? $metrics['conversions'] ?? 0);
-                    $cpc = $clicks > 0 ? round($gasto / $clicks, 4) : null;
-                    $acos = null;
-                    if ($receita > 0) {
-                        $acos = round(($gasto / $receita) * 100, 4);
-                    }
-                    $roasReal = $gasto > 0 ? round($receita / $gasto, 4) : null;
-                    if (isset($report['roas_objetivo']) && is_numeric($report['roas_objetivo'])) {
-                        $roasObj = (float) $report['roas_objetivo'];
-                    }
-                    if (isset($report['daily_budget']) && is_numeric($report['daily_budget'])) {
-                        $budget = (float) $report['daily_budget'];
-                    }
-
-                    $this->upsertCampaignDay([
-                        'account_id' => $accountId,
-                        'campaign_id' => $campaignId,
-                        'date' => $date,
-                        'status' => $status,
-                        'orcamento_diario' => $budget,
-                        'roas_objetivo' => $roasObj,
-                        'gasto' => $gasto,
-                        'impressoes' => $impressions,
-                        'cliques' => $clicks,
-                        'cpc_medio' => $cpc,
-                        'vendas_atribuidas' => $sold,
-                        'receita_atribuida' => $receita,
-                        'acos' => $acos,
-                        'roas_real' => $roasReal,
-                        'data' => $campaign,
-                    ]);
-
-                    if (!isset($dayMetrics[$date])) {
-                        $dayMetrics[$date] = ['gasto' => 0.0, 'receita_atribuida' => 0.0];
-                    }
-                    $dayMetrics[$date]['gasto'] += $gasto;
-                    $dayMetrics[$date]['receita_atribuida'] += $receita;
-                }
-
-                usleep(self::BATCH_SLEEP_US);
-            }
-
-            // SKU-level via ads/search (read-only)
-            $skuFrom = $fullHistory
-                ? $today->modify('-34 days')->format('Y-m-d')
-                : $today->format('Y-m-d');
-            $skuTo = $today->format('Y-m-d');
-            $adsItems = $this->withBackoff(
-                static fn () => $ads->getAdsItems($skuFrom, $skuTo, 50)
-            );
-            if (is_array($adsItems)) {
-                foreach ($adsItems as $item) {
-                    if (!is_array($item)) {
-                        continue;
-                    }
-                    $mlbId = strtoupper((string) ($item['item_id'] ?? ''));
-                    $campaignId = (string) ($item['campaign_id'] ?? '');
-                    if ($mlbId === '' || $campaignId === '') {
-                        continue;
-                    }
-                    $m = is_array($item['metrics'] ?? null) ? $item['metrics'] : [];
-                    $gasto = (float) ($m['cost'] ?? 0);
-                    $receita = (float) ($m['total_amount'] ?? $m['direct_amount'] ?? 0);
-                    $clicks = (int) ($m['clicks'] ?? 0);
-                    $impressions = (int) ($m['prints'] ?? 0);
-                    $sold = (int) ($m['units_quantity'] ?? 0);
-                    $cpc = isset($m['cpc']) ? (float) $m['cpc'] : ($clicks > 0 ? round($gasto / $clicks, 4) : null);
-                    $acos = isset($m['acos']) ? (float) $m['acos'] : ($receita > 0 ? round(($gasto / $receita) * 100, 4) : null);
-                    $roasReal = isset($m['roas']) ? (float) $m['roas'] : ($gasto > 0 ? round($receita / $gasto, 4) : null);
-                    $trio = $this->skuCustos->roasTrio($accountId, $mlbId);
-                    $health = $this->lookupItemHealth($accountId, $mlbId);
-
-                    // Persiste no dia "to" da janela (métricas da API já agregadas no range)
-                    // e também no dia atual quando janela = hoje
-                    $this->upsertSkuDay([
-                        'account_id' => $accountId,
-                        'campaign_id' => $campaignId,
-                        'mlb_id' => $mlbId,
-                        'date' => $skuTo,
-                        'gasto' => $gasto,
-                        'impressoes' => $impressions,
-                        'cliques' => $clicks,
-                        'cpc_medio' => $cpc,
-                        'vendas_atribuidas' => $sold,
-                        'receita_atribuida' => $receita,
-                        'acos' => $acos,
-                        'roas_real' => $roasReal,
-                        'roas_objetivo' => $trio['roas_objetivo'],
-                        'health' => $health,
-                    ]);
-                }
-            }
-
-            foreach ($dayMetrics as $date => $agg) {
-                $receitaTotal = $this->receitaTotalConta($accountId, $date);
-                $gasto = (float) $agg['gasto'];
-                $recAttr = (float) $agg['receita_atribuida'];
-                $acos = $recAttr > 0 ? round(($gasto / $recAttr) * 100, 4) : null;
-                $tacos = $receitaTotal > 0 ? round(($gasto / $receitaTotal) * 100, 4) : null;
-
-                $this->db->prepare(
-                    'INSERT INTO ads_account_metrics_daily
-                       (account_id, `date`, gasto, receita_atribuida, receita_total, acos, tacos, campanhas_ativas)
-                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                     ON DUPLICATE KEY UPDATE
-                       gasto = VALUES(gasto),
-                       receita_atribuida = VALUES(receita_atribuida),
-                       receita_total = VALUES(receita_total),
-                       acos = VALUES(acos),
-                       tacos = VALUES(tacos),
-                       campanhas_ativas = VALUES(campanhas_ativas)'
-                )->execute([
-                    $accountId,
-                    $date,
-                    $gasto,
-                    $recAttr,
-                    $receitaTotal,
-                    $acos,
-                    $tacos,
-                    count($active),
+        // Full history nunca no caminho de freshness — só sob flag explícita
+        if (!$forceRefresh && !$fullHistory) {
+            $known = $this->readLastKnown($accountId);
+            if ($known !== null && $this->isFresh((int) $known['collected_at'])) {
+                $payload = $known['payload'];
+                return array_merge($payload, [
+                    'ok' => (bool) ($payload['ok'] ?? true),
+                    'cached' => true,
+                    'stale' => false,
+                    'api_calls' => 0,
+                    'collected_at' => $known['collected_at'],
+                    'reason' => $payload['reason'] ?? 'cache_hit',
                 ]);
             }
+        }
 
-            $windows = $this->computeWindows($accountId, $today);
-            $this->persistIndexMetrics($accountId, $windows, count($active));
-
-            $this->emitter->emit('metric.update', [
-                'key' => 'tacos',
-                'value' => $windows['tacos_atual'],
-                'acos' => $windows['acos_atual'],
-                'gasto_hoje' => $windows['gasto_hoje'],
-                'flash' => 'green',
-            ], $accountId, 'live');
-
-            return [
-                'ok' => true,
-                'available' => $windows['tacos_atual'] !== null,
-                'active_campaigns' => count($active),
-                'tacos' => $windows['tacos_atual'],
-                'acos' => $windows['acos_atual'],
-                'gasto_hoje' => $windows['gasto_hoje'],
-                'tacos_baseline' => $windows['tacos_baseline'],
-                'message' => null,
-            ];
+        try {
+            $result = $this->collectFromApi($accountId, $fullHistory);
+            $result['cached'] = false;
+            $result['stale'] = false;
+            $result['api_calls'] = $this->apiCallCount;
+            $result['collected_at'] = $this->now();
+            $this->rememberLastKnown($accountId, $result);
+            return $result;
         } catch (Throwable $e) {
             log_warning('AdsMetricsCollector: falha', [
                 'account_id' => $accountId,
                 'error' => $e->getMessage(),
             ]);
+
+            return $this->preserveOrFail($accountId, $e);
+        }
+    }
+
+    /**
+     * Preserva Ft com snapshot válido dentro de max_stale_age; senão Ft indisponível.
+     *
+     * @return array<string, mixed>
+     */
+    private function preserveOrFail(int $accountId, Throwable $e): array
+    {
+        $known = $this->readLastKnown($accountId);
+        $originalAt = $known !== null ? (int) $known['collected_at'] : 0;
+        $staleAt = $this->now();
+
+        if (
+            $known !== null
+            && !empty($known['payload']['available'])
+            && $originalAt > 0
+            && $this->isWithinMaxStaleAge($originalAt)
+        ) {
+            $preserved = $known['payload'];
+            $this->markMetaStale($accountId, $e->getMessage(), $originalAt);
+            return array_merge($preserved, [
+                'ok' => false,
+                'cached' => true,
+                'stale' => true,
+                'available' => true,
+                'api_calls' => $this->apiCallCount,
+                'collected_at' => $originalAt,
+                'original_collected_at' => $originalAt,
+                'stale_at' => $staleAt,
+                'error' => $e->getMessage(),
+                'reason' => 'transient_error_preserved',
+                'message' => 'falha transitória — Ft preservada (stale)',
+            ]);
+        }
+
+        if ($known !== null && !empty($known['payload']['available']) && $originalAt > 0) {
+            $this->markFtUnavailable($accountId, 'max_stale_expired', $originalAt, $e->getMessage());
             return [
                 'ok' => false,
                 'available' => false,
-                'reason' => 'collector_error',
+                'cached' => false,
+                'stale' => true,
+                'reason' => 'max_stale_expired',
                 'tacos' => null,
                 'acos' => null,
+                'api_calls' => $this->apiCallCount,
+                'collected_at' => $originalAt,
+                'original_collected_at' => $originalAt,
+                'stale_at' => $staleAt,
                 'error' => $e->getMessage(),
+                'message' => 'snapshot stale além do máximo — Ft indisponível',
             ];
+        }
+
+        return [
+            'ok' => false,
+            'available' => false,
+            'cached' => false,
+            'stale' => false,
+            'reason' => 'collector_error',
+            'tacos' => null,
+            'acos' => null,
+            'api_calls' => $this->apiCallCount,
+            'error' => $e->getMessage(),
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function collectFromApi(int $accountId, bool $fullHistory): array
+    {
+        $ads = $this->makeAdsClient($accountId);
+        $campaignsPayload = $this->withBackoff(function () use ($ads) {
+            $this->apiCallCount++;
+            return $ads->getCampaigns('all');
+        });
+        $campaigns = $campaignsPayload['campaigns'] ?? [];
+        if (!is_array($campaigns)) {
+            $campaigns = [];
+        }
+
+        // Erros HTTP transitórios no payload
+        $status = (int) ($campaignsPayload['_meta']['api_status'] ?? $campaignsPayload['status'] ?? 0);
+        if ($status === 429 || $status >= 500) {
+            throw new \RuntimeException('pads_http_' . $status);
+        }
+        if (($campaignsPayload['_meta']['data_source'] ?? '') === 'local_cache'
+            && in_array(($campaignsPayload['_meta']['reason'] ?? ''), ['api_error', 'exception'], true)
+            && $campaigns === []
+        ) {
+            throw new \RuntimeException('pads_api_error:' . (string) ($campaignsPayload['_meta']['api_error'] ?? 'unknown'));
+        }
+
+        $active = array_values(array_filter(
+            $campaigns,
+            static fn ($c): bool => is_array($c) && strtolower((string) ($c['status'] ?? '')) === 'active'
+        ));
+
+        if ($active === [] && $campaigns === []) {
+            return $this->persistEmpty($accountId, 'nenhuma campanha');
+        }
+        if ($active === []) {
+            return $this->persistEmpty($accountId, 'nenhuma campanha ativa');
+        }
+
+        $tz = new \DateTimeZone('America/Sao_Paulo');
+        $today = new \DateTimeImmutable('today', $tz);
+        $dates = [$today->format('Y-m-d')];
+        if ($fullHistory) {
+            for ($i = 1; $i <= 35; $i++) {
+                $dates[] = $today->modify("-{$i} days")->format('Y-m-d');
+            }
+        }
+
+        $dayMetrics = [];
+        foreach ($active as $campaign) {
+            $campaignId = (string) ($campaign['id'] ?? '');
+            if ($campaignId === '') {
+                continue;
+            }
+            $budget = $this->extractBudget($campaign);
+            $roasObj = $this->extractRoasObjetivo($campaign);
+            $statusCamp = (string) ($campaign['status'] ?? 'active');
+
+            foreach ($dates as $date) {
+                $report = $this->withBackoff(function () use ($ads, $campaignId, $date) {
+                    $this->apiCallCount++;
+                    return $ads->getCampaignReport($campaignId, $date, $date);
+                });
+                $metrics = is_array($report['metrics'] ?? null) ? $report['metrics'] : [];
+                $gasto = (float) ($metrics['investment'] ?? 0);
+                $receita = (float) ($metrics['revenue'] ?? 0);
+                $clicks = (int) ($metrics['clicks'] ?? 0);
+                $impressions = (int) ($metrics['impressions'] ?? 0);
+                $sold = (int) ($metrics['sold_quantity'] ?? $metrics['conversions'] ?? 0);
+                $cpc = $clicks > 0 ? round($gasto / $clicks, 4) : null;
+                $acos = null;
+                if ($receita > 0) {
+                    $acos = round(($gasto / $receita) * 100, 4);
+                }
+                $roasReal = $gasto > 0 ? round($receita / $gasto, 4) : null;
+                if (isset($report['roas_objetivo']) && is_numeric($report['roas_objetivo'])) {
+                    $roasObj = (float) $report['roas_objetivo'];
+                }
+                if (isset($report['daily_budget']) && is_numeric($report['daily_budget'])) {
+                    $budget = (float) $report['daily_budget'];
+                }
+
+                $this->upsertCampaignDay([
+                    'account_id' => $accountId,
+                    'campaign_id' => $campaignId,
+                    'date' => $date,
+                    'status' => $statusCamp,
+                    'orcamento_diario' => $budget,
+                    'roas_objetivo' => $roasObj,
+                    'gasto' => $gasto,
+                    'impressoes' => $impressions,
+                    'cliques' => $clicks,
+                    'cpc_medio' => $cpc,
+                    'vendas_atribuidas' => $sold,
+                    'receita_atribuida' => $receita,
+                    'acos' => $acos,
+                    'roas_real' => $roasReal,
+                    'data' => $campaign,
+                ]);
+
+                if (!isset($dayMetrics[$date])) {
+                    $dayMetrics[$date] = ['gasto' => 0.0, 'receita_atribuida' => 0.0];
+                }
+                $dayMetrics[$date]['gasto'] += $gasto;
+                $dayMetrics[$date]['receita_atribuida'] += $receita;
+            }
+
+            if ($this->adsFactory === null) {
+                usleep(self::BATCH_SLEEP_US);
+            }
+        }
+
+        // SKU-level via ads/search (read-only) — janela do dia no tick; range amplo só com fullHistory
+        $skuFrom = $fullHistory
+            ? $today->modify('-34 days')->format('Y-m-d')
+            : $today->format('Y-m-d');
+        $skuTo = $today->format('Y-m-d');
+        $adsItems = $this->withBackoff(function () use ($ads, $skuFrom, $skuTo) {
+            $this->apiCallCount++;
+            return $ads->getAdsItems($skuFrom, $skuTo, 50);
+        });
+        if (is_array($adsItems)) {
+            foreach ($adsItems as $item) {
+                if (!is_array($item)) {
+                    continue;
+                }
+                $mlbId = strtoupper((string) ($item['item_id'] ?? ''));
+                $campaignId = (string) ($item['campaign_id'] ?? '');
+                if ($mlbId === '' || $campaignId === '') {
+                    continue;
+                }
+                $m = is_array($item['metrics'] ?? null) ? $item['metrics'] : [];
+                $gasto = (float) ($m['cost'] ?? 0);
+                $receita = (float) ($m['total_amount'] ?? $m['direct_amount'] ?? 0);
+                $clicks = (int) ($m['clicks'] ?? 0);
+                $impressions = (int) ($m['prints'] ?? 0);
+                $sold = (int) ($m['units_quantity'] ?? 0);
+                $cpc = isset($m['cpc']) ? (float) $m['cpc'] : ($clicks > 0 ? round($gasto / $clicks, 4) : null);
+                $acos = isset($m['acos']) ? (float) $m['acos'] : ($receita > 0 ? round(($gasto / $receita) * 100, 4) : null);
+                $roasReal = isset($m['roas']) ? (float) $m['roas'] : ($gasto > 0 ? round($receita / $gasto, 4) : null);
+                $trio = $this->skuCustos->roasTrio($accountId, $mlbId);
+                $health = $this->lookupItemHealth($accountId, $mlbId);
+
+                $this->upsertSkuDay([
+                    'account_id' => $accountId,
+                    'campaign_id' => $campaignId,
+                    'mlb_id' => $mlbId,
+                    'date' => $skuTo,
+                    'gasto' => $gasto,
+                    'impressoes' => $impressions,
+                    'cliques' => $clicks,
+                    'cpc_medio' => $cpc,
+                    'vendas_atribuidas' => $sold,
+                    'receita_atribuida' => $receita,
+                    'acos' => $acos,
+                    'roas_real' => $roasReal,
+                    'roas_objetivo' => $trio['roas_objetivo'],
+                    'health' => $health,
+                ]);
+            }
+        }
+
+        foreach ($dayMetrics as $date => $agg) {
+            $receitaTotal = $this->receitaTotalConta($accountId, $date);
+            $gasto = (float) $agg['gasto'];
+            $recAttr = (float) $agg['receita_atribuida'];
+            $acos = $recAttr > 0 ? round(($gasto / $recAttr) * 100, 4) : null;
+            $tacos = $receitaTotal > 0 ? round(($gasto / $receitaTotal) * 100, 4) : null;
+
+            $this->db->prepare(
+                'INSERT INTO ads_account_metrics_daily
+                   (account_id, `date`, gasto, receita_atribuida, receita_total, acos, tacos, campanhas_ativas)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE
+                   gasto = VALUES(gasto),
+                   receita_atribuida = VALUES(receita_atribuida),
+                   receita_total = VALUES(receita_total),
+                   acos = VALUES(acos),
+                   tacos = VALUES(tacos),
+                   campanhas_ativas = VALUES(campanhas_ativas)'
+            )->execute([
+                $accountId,
+                $date,
+                $gasto,
+                $recAttr,
+                $receitaTotal,
+                $acos,
+                $tacos,
+                count($active),
+            ]);
+        }
+
+        $windows = $this->computeWindows($accountId, $today);
+        $this->persistIndexMetrics($accountId, $windows, count($active), false, null);
+
+        $this->emitter->emit('metric.update', [
+            'key' => 'tacos',
+            'value' => $windows['tacos_atual'],
+            'acos' => $windows['acos_atual'],
+            'gasto_hoje' => $windows['gasto_hoje'],
+            'flash' => 'green',
+        ], $accountId, 'live');
+
+        return [
+            'ok' => true,
+            'available' => $windows['tacos_atual'] !== null,
+            'active_campaigns' => count($active),
+            'tacos' => $windows['tacos_atual'],
+            'acos' => $windows['acos_atual'],
+            'gasto_hoje' => $windows['gasto_hoje'],
+            'tacos_baseline' => $windows['tacos_baseline'],
+            'message' => null,
+        ];
+    }
+
+    private function makeAdsClient(int $accountId): object
+    {
+        if ($this->adsFactory !== null) {
+            return ($this->adsFactory)($accountId);
+        }
+        return new AdsService($accountId);
+    }
+
+    private function now(): int
+    {
+        return $this->clockOverride ?? time();
+    }
+
+    /**
+     * Last-known positivo (TACOS) ou negativo (sem campanhas) — ambos cacheáveis por TTL.
+     *
+     * @return array{at: int, payload: array<string, mixed>, collected_at: int}|null
+     */
+    private function readLastKnown(int $accountId): ?array
+    {
+        if (isset($this->memoryFreshness[$accountId])) {
+            $row = $this->memoryFreshness[$accountId];
+            return [
+                'at' => $row['at'],
+                'collected_at' => $row['at'],
+                'payload' => $row['payload'],
+            ];
+        }
+
+        if (!$this->columnExists('account_index_metrics', 'metrics_meta')) {
+            return null;
+        }
+        try {
+            $stmt = $this->db->prepare('SELECT metrics_meta FROM account_index_metrics WHERE account_id = ?');
+            $stmt->execute([$accountId]);
+            $raw = $stmt->fetchColumn();
+            $meta = is_string($raw) && $raw !== '' ? (json_decode($raw, true) ?: []) : [];
+            if (!is_array($meta)) {
+                return null;
+            }
+            $tacos = is_array($meta['metrics']['tacos'] ?? null) ? $meta['metrics']['tacos'] : [];
+            $collectedAt = isset($tacos['collected_at']) ? (int) $tacos['collected_at'] : 0;
+            if ($collectedAt <= 0) {
+                return null;
+            }
+            // Aceita positivo e negativo (ex.: no_active_campaign) — ambos evitam martelar PADS
+            $available = ($tacos['available'] ?? false) === true;
+            $payload = [
+                'ok' => $available || (($tacos['reason'] ?? '') !== 'collector_error'),
+                'available' => $available,
+                'active_campaigns' => (int) ($tacos['active_campaigns'] ?? 0),
+                'tacos' => isset($tacos['value']) ? (float) $tacos['value'] : null,
+                'acos' => isset($tacos['acos']) ? (float) $tacos['acos'] : null,
+                'gasto_hoje' => isset($tacos['gasto_hoje']) ? (float) $tacos['gasto_hoje'] : null,
+                'tacos_baseline' => isset($tacos['baseline']) ? (float) $tacos['baseline'] : self::TACOS_BASELINE_INITIAL,
+                'message' => $tacos['message'] ?? null,
+                'reason' => $tacos['reason'] ?? null,
+            ];
+            return [
+                'at' => $collectedAt,
+                'collected_at' => $collectedAt,
+                'payload' => $payload,
+            ];
+        } catch (Throwable $e) {
+            log_warning('AdsMetricsCollector: readLastKnown falhou', [
+                'account_id' => $accountId,
+                'error' => $e->getMessage(),
+            ]);
+            return null;
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $result
+     */
+    private function rememberLastKnown(int $accountId, array $result): void
+    {
+        $at = isset($result['collected_at']) ? (int) $result['collected_at'] : $this->now();
+        $payload = [
+            'ok' => (bool) ($result['ok'] ?? false),
+            'available' => (bool) ($result['available'] ?? false),
+            'active_campaigns' => (int) ($result['active_campaigns'] ?? 0),
+            'tacos' => $result['tacos'] ?? null,
+            'acos' => $result['acos'] ?? null,
+            'gasto_hoje' => $result['gasto_hoje'] ?? null,
+            'tacos_baseline' => $result['tacos_baseline'] ?? self::TACOS_BASELINE_INITIAL,
+            'message' => $result['message'] ?? null,
+            'reason' => $result['reason'] ?? null,
+        ];
+        $this->memoryFreshness[$accountId] = ['at' => $at, 'payload' => $payload];
+
+        // Positivo e negativo: grava collected_at para freshness no tick
+        $this->touchCollectedAt($accountId, $at, false, null, (bool) $payload['available'], $payload);
+    }
+
+    private function markMetaStale(int $accountId, string $error, int $originalCollectedAt): void
+    {
+        $this->touchCollectedAt(
+            $accountId,
+            $originalCollectedAt,
+            true,
+            $error,
+            true,
+            null
+        );
+    }
+
+    private function markFtUnavailable(
+        int $accountId,
+        string $reason,
+        int $originalCollectedAt,
+        ?string $error
+    ): void {
+        unset($this->memoryFreshness[$accountId]);
+        $this->touchCollectedAt(
+            $accountId,
+            $originalCollectedAt,
+            true,
+            $error ?? $reason,
+            false,
+            ['reason' => $reason, 'message' => 'max stale age excedido']
+        );
+    }
+
+    /**
+     * Atualiza metrics_meta.tacos freshness.
+     * Em stale: NÃO altera collected_at para "agora"; grava stale_at e original_collected_at.
+     *
+     * @param array<string, mixed>|null $payloadPatch reason/message/active_campaigns etc.
+     */
+    private function touchCollectedAt(
+        int $accountId,
+        int $collectedAt,
+        bool $stale,
+        ?string $error,
+        bool $available,
+        ?array $payloadPatch = null
+    ): void {
+        if (!$this->columnExists('account_index_metrics', 'metrics_meta')) {
+            return;
+        }
+        try {
+            $stmt = $this->db->prepare('SELECT metrics_meta FROM account_index_metrics WHERE account_id = ?');
+            $stmt->execute([$accountId]);
+            $raw = $stmt->fetchColumn();
+            $meta = is_string($raw) && $raw !== '' ? (json_decode($raw, true) ?: []) : [];
+            if (!is_array($meta)) {
+                $meta = [];
+            }
+            $tacos = is_array($meta['metrics']['tacos'] ?? null) ? $meta['metrics']['tacos'] : [];
+
+            $meta['available']['Ft'] = $available;
+            $tacos['available'] = $available;
+            // Idade original imutável — caller passa collected_at original em stale
+            $tacos['collected_at'] = $collectedAt;
+            $tacos['stale'] = $stale;
+            if ($stale) {
+                $tacos['original_collected_at'] = $collectedAt;
+                $tacos['stale_at'] = $this->now();
+                if ($error !== null) {
+                    $tacos['stale_error'] = $error;
+                }
+            } else {
+                unset($tacos['stale_error'], $tacos['stale_at'], $tacos['original_collected_at']);
+                $tacos['stale'] = false;
+            }
+            if (is_array($payloadPatch)) {
+                if (array_key_exists('reason', $payloadPatch)) {
+                    $tacos['reason'] = $payloadPatch['reason'];
+                }
+                if (array_key_exists('message', $payloadPatch)) {
+                    $tacos['message'] = $payloadPatch['message'];
+                }
+                if (array_key_exists('active_campaigns', $payloadPatch)) {
+                    $tacos['active_campaigns'] = (int) $payloadPatch['active_campaigns'];
+                }
+            }
+            $meta['metrics']['tacos'] = $tacos;
+            $json = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $this->db->prepare(
+                'UPDATE account_index_metrics SET metrics_meta = ? WHERE account_id = ?'
+            )->execute([$json, $accountId]);
+        } catch (Throwable $e) {
+            log_warning('AdsMetricsCollector: touchCollectedAt falhou', [
+                'account_id' => $accountId,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 
@@ -346,8 +734,13 @@ final class AdsMetricsCollector
     /**
      * @param array<string, mixed> $windows
      */
-    private function persistIndexMetrics(int $accountId, array $windows, int $activeCount): void
-    {
+    private function persistIndexMetrics(
+        int $accountId,
+        array $windows,
+        int $activeCount,
+        bool $stale = false,
+        ?string $staleError = null
+    ): void {
         $tacos = $windows['tacos_atual'];
         $available = $tacos !== null;
 
@@ -365,7 +758,6 @@ final class AdsMetricsCollector
                recalculated_at = CURRENT_TIMESTAMP'
         )->execute([$accountId, (float) $windows['tacos_baseline']]);
 
-        // Atualiza metrics_meta.available.Ft
         if ($this->columnExists('account_index_metrics', 'metrics_meta')) {
             $stmt = $this->db->prepare('SELECT metrics_meta FROM account_index_metrics WHERE account_id = ?');
             $stmt->execute([$accountId]);
@@ -384,7 +776,13 @@ final class AdsMetricsCollector
                 'baseline' => $windows['tacos_baseline'],
                 'source' => 'ads_account_metrics_daily',
                 'reason' => $available ? null : 'sem_dado_tacos',
+                'collected_at' => $this->now(),
+                'stale' => $stale,
             ];
+            if ($stale && $staleError !== null) {
+                $meta['metrics']['tacos']['stale_error'] = $staleError;
+                $meta['metrics']['tacos']['stale_at'] = $this->now();
+            }
             $json = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $this->db->prepare(
                 'UPDATE account_index_metrics SET metrics_meta = ? WHERE account_id = ?'
@@ -397,6 +795,7 @@ final class AdsMetricsCollector
      */
     private function persistEmpty(int $accountId, string $message): array
     {
+        $collectedAt = $this->now();
         if ($this->columnExists('account_index_metrics', 'metrics_meta')) {
             $stmt = $this->db->prepare('SELECT metrics_meta FROM account_index_metrics WHERE account_id = ?');
             $stmt->execute([$accountId]);
@@ -408,8 +807,11 @@ final class AdsMetricsCollector
             $meta['available']['Ft'] = false;
             $meta['metrics']['tacos'] = [
                 'available' => false,
+                'active_campaigns' => 0,
                 'reason' => 'no_active_campaign',
                 'message' => $message,
+                'collected_at' => $collectedAt,
+                'stale' => false,
             ];
             $json = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $this->db->prepare(
@@ -436,6 +838,8 @@ final class AdsMetricsCollector
             'acos' => null,
             'gasto_hoje' => null,
             'message' => $message,
+            'reason' => 'no_active_campaign',
+            'collected_at' => $collectedAt,
         ];
     }
 

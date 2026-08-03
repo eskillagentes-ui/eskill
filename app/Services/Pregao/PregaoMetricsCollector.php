@@ -100,17 +100,21 @@ final class PregaoMetricsCollector
     /**
      * Ads / TACOS (Ft) — read-only.
      *
+     * Preservação de Ft em falha transitória (max_stale_age) fica só em AdsMetricsCollector.
+     * Catch externo: fail-closed — nunca preserva Ft sem passar pelo coletor.
+     *
      * @param array<string, mixed> $meta
      * @return array<string, mixed>
      */
     private function collectAds(int $accountId, array &$meta): array
     {
         try {
-            $collector = new \App\Services\Ads\AdsMetricsCollector($this->db, $this->emitter);
-            $fullHistory = $this->shouldRunFullAdsHistory($accountId);
-            $result = $collector->collect($accountId, $fullHistory);
+            $collector = new \App\Services\Ads\AdsMetricsCollector($this->db, $this->emitter, null, $this->config);
+            // Nunca fullHistory no caminho do tick — histórico só via bin/ads-collect.php --history
+            $result = $collector->collect($accountId, false, false);
 
-            $available = !empty($result['available']) && $result['tacos'] !== null;
+            $available = !empty($result['available']) && ($result['tacos'] ?? null) !== null;
+
             $meta['available']['Ft'] = $available;
             $meta['metrics']['tacos'] = [
                 'available' => $available,
@@ -120,8 +124,23 @@ final class PregaoMetricsCollector
                 'active_campaigns' => $result['active_campaigns'] ?? 0,
                 'message' => $result['message'] ?? null,
                 'source' => 'AdsMetricsCollector',
-                'reason' => $available ? null : ($result['reason'] ?? $result['message'] ?? 'no_tacos'),
+                'reason' => $available
+                    ? ($result['reason'] ?? null)
+                    : ($result['reason'] ?? $result['message'] ?? 'no_tacos'),
+                'cached' => !empty($result['cached']),
+                'stale' => !empty($result['stale']),
+                'api_calls' => (int) ($result['api_calls'] ?? 0),
+                'collected_at' => $result['collected_at'] ?? ($meta['metrics']['tacos']['collected_at'] ?? null),
             ];
+            if (!empty($result['stale']) && isset($result['error'])) {
+                $meta['metrics']['tacos']['stale_error'] = (string) $result['error'];
+            }
+            if (isset($result['stale_at'])) {
+                $meta['metrics']['tacos']['stale_at'] = $result['stale_at'];
+            }
+            if (isset($result['original_collected_at'])) {
+                $meta['metrics']['tacos']['original_collected_at'] = $result['original_collected_at'];
+            }
             $meta['metrics']['acos'] = [
                 'available' => ($result['acos'] ?? null) !== null,
                 'value' => $result['acos'] ?? null,
@@ -131,8 +150,22 @@ final class PregaoMetricsCollector
                 'value' => $result['gasto_hoje'] ?? null,
             ];
 
-            $alerts = (new \App\Services\Ads\AdsAlertService($this->db, $this->emitter))->evaluate($accountId);
-            $result['alerts'] = $alerts;
+            // Alertas isolados — falha aqui não deve derrubar Ft já coletado
+            try {
+                if (empty($result['cached'])) {
+                    $result['alerts'] = (new \App\Services\Ads\AdsAlertService($this->db, $this->emitter))
+                        ->evaluate($accountId);
+                } else {
+                    $result['alerts'] = [];
+                }
+            } catch (Throwable $alertError) {
+                log_warning('PregaoMetricsCollector: ads alerts falhou', [
+                    'account_id' => $accountId,
+                    'error' => $alertError->getMessage(),
+                ]);
+                $result['alerts'] = [];
+                $result['alerts_error'] = $alertError->getMessage();
+            }
 
             return array_merge(['ok' => (bool) ($result['ok'] ?? false)], $result);
         } catch (Throwable $e) {
@@ -140,23 +173,42 @@ final class PregaoMetricsCollector
                 'account_id' => $accountId,
                 'error' => $e->getMessage(),
             ]);
-            $meta['available']['Ft'] = false;
-            $meta['metrics']['tacos'] = ['available' => false, 'error' => $e->getMessage()];
-            return ['ok' => false, 'error' => $e->getMessage()];
+            return $this->failClosedAdsException($meta, $e);
         }
     }
 
-    private function shouldRunFullAdsHistory(int $accountId): bool
+    /**
+     * Catch externo de collectAds: fail-closed.
+     * Nunca preserva Ft aqui — mesmo com prev.available=true / collected_at recente.
+     * Preservação com ads_max_stale_age é exclusiva do AdsMetricsCollector.
+     *
+     * @param array<string, mixed> $meta
+     * @return array<string, mixed>
+     */
+    public function failClosedAdsException(array &$meta, Throwable $e): array
     {
-        try {
-            $stmt = $this->db->prepare(
-                'SELECT COUNT(*) FROM ads_account_metrics_daily WHERE account_id = ?'
-            );
-            $stmt->execute([$accountId]);
-            return ((int) $stmt->fetchColumn()) < 7;
-        } catch (Throwable $e) {
-            return true;
-        }
+        $prev = is_array($meta['metrics']['tacos'] ?? null) ? $meta['metrics']['tacos'] : [];
+        $meta['available']['Ft'] = false;
+        $meta['metrics']['tacos'] = [
+            'available' => false,
+            'value' => null,
+            'error' => $e->getMessage(),
+            'reason' => 'outer_catch_fail_closed',
+            'previous_collected_at' => isset($prev['collected_at']) ? (int) $prev['collected_at'] : null,
+            'previous_available' => ($prev['available'] ?? false) === true,
+            'stale' => true,
+            'stale_at' => time(),
+            'stale_error' => $e->getMessage(),
+        ];
+        return [
+            'ok' => false,
+            'available' => false,
+            'cached' => false,
+            'stale' => true,
+            'tacos' => null,
+            'error' => $e->getMessage(),
+            'reason' => 'outer_catch_fail_closed',
+        ];
     }
 
     /**

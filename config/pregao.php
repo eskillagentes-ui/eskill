@@ -27,4 +27,12 @@ return [
         'atrasos_pct' => 15.0,
         'cancelamentos_pct' => 2.5,
     ],
+    /** Freshness do coletor Ads no tick (segundos). Override: ADS_COLLECT_FRESHNESS_TTL */
+    'ads_collect_freshness_ttl' => (int) ($_ENV['ADS_COLLECT_FRESHNESS_TTL']
+        ?? getenv('ADS_COLLECT_FRESHNESS_TTL')
+        ?: 300),
+    /** Idade máxima para preservar Ft em stale (segundos). Override: ADS_MAX_STALE_AGE */
+    'ads_max_stale_age' => (int) ($_ENV['ADS_MAX_STALE_AGE']
+        ?? getenv('ADS_MAX_STALE_AGE')
+        ?: 3600),
 ];
