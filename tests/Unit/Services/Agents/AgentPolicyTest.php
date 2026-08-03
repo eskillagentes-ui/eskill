@@ -7,6 +7,7 @@ namespace Tests\Unit\Services\Agents;
 use App\Services\Agents\AgentContext;
 use App\Services\Agents\AgentPolicy;
 use App\Services\Agents\AgentResult;
+use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -103,6 +104,26 @@ class AgentPolicyTest extends TestCase
             new AgentContext(10, 'staging', 'corr-unknown-op', true),
             $result
         ));
+    }
+
+    /** @dataProvider emittedOpsInvalidasProvider */
+    public function testAgentResultRejeitaEmittedOpsQueNaoSejamListaDeStringsNaoVazias(
+        array $emittedOps
+    ): void {
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('emittedOps');
+
+        AgentResult::success('agente', 'invalid_ops', [], true, $emittedOps);
+    }
+
+    /** @return iterable<string, array{array<int|string, int|string>}> */
+    public function emittedOpsInvalidasProvider(): iterable
+    {
+        yield 'inteiro' => [[123]];
+        yield 'string vazia' => [['']];
+        yield 'somente espacos' => [['   ']];
+        yield 'array associativo' => [['op' => 'ml.price.patch']];
+        yield 'indices nao sequenciais' => [[0 => 'ml.price.patch', 2 => 'ml.ads.update']];
     }
 
     public function testLeituraMlNaoEhCapabilityDeEscrita(): void

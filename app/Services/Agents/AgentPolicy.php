@@ -61,7 +61,10 @@ final class AgentPolicy
         }
 
         foreach ($ops as $op) {
-            if (!$this->allowsMlWrite($context, $op)) {
+            if (!is_string($op)
+                || trim($op) === ''
+                || !$this->allowsMlWrite($context, $op)
+            ) {
                 return false;
             }
         }

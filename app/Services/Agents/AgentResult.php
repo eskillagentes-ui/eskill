@@ -50,12 +50,32 @@ final class AgentResult
             throw new InvalidArgumentException('agent must be a non-empty string');
         }
 
+        self::assertValidEmittedOps($emittedOps);
+
         $this->status = $status;
         $this->agent = $agent;
         $this->reason = $reason;
         $this->data = $data;
         $this->stateChanged = $stateChanged;
         $this->emittedOps = array_values($emittedOps);
+    }
+
+    /** @param array<int|string, int|string> $emittedOps */
+    private static function assertValidEmittedOps(array $emittedOps): void
+    {
+        if ($emittedOps !== []
+            && array_keys($emittedOps) !== range(0, count($emittedOps) - 1)
+        ) {
+            throw new InvalidArgumentException('emittedOps must be a sequential list');
+        }
+
+        foreach ($emittedOps as $operation) {
+            if (!is_string($operation) || trim($operation) === '') {
+                throw new InvalidArgumentException(
+                    'emittedOps must contain only non-empty strings'
+                );
+            }
+        }
     }
 
     /**
