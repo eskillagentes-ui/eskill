@@ -60,7 +60,16 @@ php bin/pregao-index-tick.php --account-id=1335 --loop --interval=45
 - Streaming noVNC real (só contrato `stream_url`)  
 - Multi-conta no mesmo painel (envelope já carrega `account_id`)
 
-## Observações
+## Codacy MCP / análise local (2026-08-02)
 
-- Codacy MCP **não disponível** neste ambiente (sem tools `codacy_*`). Sugerir reset do MCP na extensão / enable MCP no Copilot settings.
-- Protótipo visual mantido em `eskill-pregao-prototipo.html` na raiz (referência).
+- MCP configurado em `.cursor/mcp.json` + `bin/codacy-mcp-start.sh` (smoke: `Codacy MCP Server running on stdio`).
+- CLI local: opengrep **0 findings** nos PHP do Pregão; eslint `public/js/pregao.js` **0 issues** após fix.
+- Lizard reportou complexidade (métrica) — não tratado como blocker nesta entrega.
+- **Ação do usuário:** reload do Cursor (Settings → Tools & MCP) para o Agent passar a ver `codacy_cli_analyze`.
+- Token no `.env` (`CODACY_API_TOKEN`, len=20) parece curto; se a API remota falhar, regenere em https://app.codacy.com/account/access-tokens
+
+## Smoke runtime desta sessão
+
+- Gateway WS escutando `127.0.0.1:8091`
+- `pregao_emit` OK
+- `/api/pregao/snapshot` sem sessão → **401** (esperado)
