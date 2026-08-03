@@ -64,6 +64,7 @@ final class CriadorAgent implements AgentInterface
             'sha256',
             $context->accountId() . ':' . $request['source_mlb_id']
         );
+        $request['idempotency_key'] = $idempotencyKey;
         if (isset($this->successfulResults[$idempotencyKey])) {
             return $this->successfulResults[$idempotencyKey];
         }
@@ -133,6 +134,7 @@ final class CriadorAgent implements AgentInterface
             'draft_ready',
             [
                 'draft' => $draft,
+                'idempotency_key' => $idempotencyKey,
                 'read_only' => true,
                 'human_gate' => [
                     'required' => true,
@@ -154,6 +156,6 @@ final class CriadorAgent implements AgentInterface
             $status = (int) $status;
         }
 
-        return is_int($status) && ($status === 429 || $status >= 500);
+        return is_int($status) && $status >= 400 && $status <= 599;
     }
 }

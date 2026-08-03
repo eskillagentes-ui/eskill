@@ -59,7 +59,7 @@ class OrchestratorAgentTest extends TestCase
         $orch = new OrchestratorAgent([$a, $b], new AgentPolicy());
         $result = $orch->run(new AgentContext(10, 'local', 'corr-iso-1', false));
 
-        $this->assertSame('success', $result->status());
+        $this->assertSame('failed', $result->status());
         /** @var list<AgentResult> $results */
         $results = $result->data()['results'];
         $this->assertSame('failed', $results[0]->status());
@@ -109,23 +109,59 @@ class OrchestratorAgentTest extends TestCase
         /** @var list<AgentResult> $results */
         $results = $result->data()['results'];
         $this->assertSame('blocked', $results[0]->status());
+        $this->assertSame('blocked', $result->status());
         $this->assertSame([], $result->emittedOps());
     }
 
     public function testAgregaOpsSomenteQuandoStateChangedP0(): void
     {
         $a = $this->agent('muda', static function (AgentContext $ctx): AgentResult {
-            return AgentResult::success('muda', 'mudou', [], true, ['op:a']);
+            return AgentResult::success('muda', 'mudou', [], true, ['ml.price.patch']);
         });
         $b = $this->agent('igual', static function (AgentContext $ctx): AgentResult {
-            return AgentResult::success('igual', 'igual', [], false, ['op:b']);
+            return AgentResult::success('igual', 'igual', [], false, ['ml.ads.update']);
         });
 
         $orch = new OrchestratorAgent([$a, $b], new AgentPolicy());
-        $result = $orch->run(new AgentContext(10, 'local', 'corr-ops', false));
+        $result = $orch->run(new AgentContext(10, 'staging', 'corr-ops', true));
 
         $this->assertTrue($result->stateChanged());
-        $this->assertSame(['op:a'], $result->emittedOps());
+        $this->assertSame(['ml.price.patch'], $result->emittedOps());
+    }
+
+    public function testSuprimeOpsMlEmProductionMesmoComFlagTrue(): void
+    {
+        $agent = $this->agent('malicioso', static function (AgentContext $ctx): AgentResult {
+            return AgentResult::success(
+                'malicioso',
+                'tentou',
+                [],
+                true,
+                ['ml.item.publish', 'ml.price.patch']
+            );
+        });
+
+        $result = (new OrchestratorAgent([$agent], new AgentPolicy()))->run(
+            new AgentContext(10, 'production', 'corr-prod-ops', true)
+        );
+
+        $this->assertFalse($result->stateChanged());
+        $this->assertSame([], $result->emittedOps());
+    }
+
+    public function testFalhaFilhaNaoPropagaEstadoOuOpsNoAgregado(): void
+    {
+        $agent = $this->agent('falho', static function (AgentContext $ctx): AgentResult {
+            return AgentResult::failed('falho', 'erro', [], true, ['ml.item.publish']);
+        });
+
+        $result = (new OrchestratorAgent([$agent], new AgentPolicy()))->run(
+            new AgentContext(10, 'staging', 'corr-failed-ops', true)
+        );
+
+        $this->assertSame('failed', $result->status());
+        $this->assertFalse($result->stateChanged());
+        $this->assertSame([], $result->emittedOps());
     }
 
     public function testListaVaziaRetornaSuccessSemResultados(): void

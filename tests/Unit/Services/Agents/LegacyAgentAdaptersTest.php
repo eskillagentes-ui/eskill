@@ -265,7 +265,7 @@ final class LegacyAgentAdaptersTest extends TestCase
      * @dataProvider agentWithHttpFailureProvider
      * @param callable(callable(int): array<string, mixed>): AgentInterface $factory
      */
-    public function testFalhaFechadaEm429Ou5xx(callable $factory, string $statusKey, int $status): void
+    public function testFalhaFechadaEm4xxOu5xx(callable $factory, string $statusKey, int $status): void
     {
         $agent = $factory(static fn (int $accountId): array => [
             'ok' => true,
@@ -286,6 +286,7 @@ final class LegacyAgentAdaptersTest extends TestCase
         $result = $agent->run($this->context());
 
         $this->assertSame('failed', $result->status());
+        $this->assertSame('legacy_http_' . $status, $result->reason());
         $this->assertFalse($result->stateChanged());
         $this->assertSame([], $result->emittedOps());
     }
@@ -299,6 +300,11 @@ final class LegacyAgentAdaptersTest extends TestCase
             static fn (callable $port): AgentInterface => new SentinelaAgent($port),
             'status',
             429,
+        ];
+        yield 'sentinela 401' => [
+            static fn (callable $port): AgentInterface => new SentinelaAgent($port),
+            'status',
+            401,
         ];
         yield 'collector 503' => [
             static fn (callable $port): AgentInterface => new CollectorAgent($port),

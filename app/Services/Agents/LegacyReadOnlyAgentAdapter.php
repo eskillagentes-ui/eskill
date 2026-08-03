@@ -107,7 +107,7 @@ abstract class LegacyReadOnlyAgentAdapter implements AgentInterface
             }
 
             $status = (int) $candidate;
-            if ($status === 429 || ($status >= 500 && $status <= 599)) {
+            if ($status >= 400 && $status <= 599) {
                 return $status;
             }
         }

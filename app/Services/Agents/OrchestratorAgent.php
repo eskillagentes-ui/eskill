@@ -39,6 +39,8 @@ final class OrchestratorAgent implements AgentInterface
         $order = [];
         $emittedOps = [];
         $stateChanged = false;
+        $hasBlocked = false;
+        $hasFailed = false;
 
         foreach ($this->agents as $agent) {
             $order[] = $agent->name();
@@ -54,28 +56,43 @@ final class OrchestratorAgent implements AgentInterface
 
             $results[] = $agentResult;
 
-            if ($agentResult->stateChanged()) {
-                $stateChanged = true;
+            if ($agentResult->status() === 'blocked') {
+                $hasBlocked = true;
             }
 
-            if ($this->policy->allowsOpEmission($agentResult)) {
+            if ($agentResult->status() === 'failed') {
+                $hasFailed = true;
+            }
+
+            if ($this->policy->allowsOpEmission($context, $agentResult)) {
+                $stateChanged = true;
                 foreach ($agentResult->emittedOps() as $op) {
                     $emittedOps[] = $op;
                 }
             }
         }
 
+        $data = [
+            'correlationId' => $context->correlationId(),
+            'results' => $results,
+            'order' => $order,
+            'mlWriteAutomation' => $context->mlWriteAutomation(),
+        ];
+
+        if ($hasFailed) {
+            return AgentResult::failed(self::NAME, 'agent_failed', $data);
+        }
+
+        if ($hasBlocked) {
+            return AgentResult::blocked(self::NAME, 'agent_blocked', $data);
+        }
+
         return AgentResult::success(
             self::NAME,
             'aggregated',
-            [
-                'correlationId' => $context->correlationId(),
-                'results' => $results,
-                'order' => $order,
-                'mlWriteAutomation' => $context->mlWriteAutomation(),
-            ],
+            $data,
             $stateChanged,
-            $emittedOps
+            array_values(array_unique($emittedOps))
         );
     }
 }

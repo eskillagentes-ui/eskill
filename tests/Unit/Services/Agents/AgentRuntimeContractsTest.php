@@ -64,9 +64,10 @@ class AgentRuntimeContractsTest extends TestCase
     public function testOpSemMudancaESuprimida(): void
     {
         $policy = new AgentPolicy();
+        $context = new AgentContext(10, 'local', 'corr-op0', false);
         $semMudanca = AgentResult::success('coletor', 'noop', [], false, ['op:tick']);
 
-        $this->assertFalse($policy->allowsOpEmission($semMudanca));
+        $this->assertFalse($policy->allowsOpEmission($context, $semMudanca));
 
         $orch = new OrchestratorAgent([
             $this->agent('coletor', static function (AgentContext $ctx): AgentResult {
@@ -74,7 +75,7 @@ class AgentRuntimeContractsTest extends TestCase
             }),
         ], $policy);
 
-        $aggregated = $orch->run(new AgentContext(10, 'local', 'corr-op0', false));
+        $aggregated = $orch->run($context);
         $this->assertSame([], $aggregated->emittedOps());
         $this->assertFalse($aggregated->stateChanged());
     }
@@ -97,6 +98,7 @@ class AgentRuntimeContractsTest extends TestCase
         $this->assertSame('failed', $results[0]->status());
         $this->assertSame('success', $results[1]->status());
         $this->assertSame('seguinte', $results[1]->agent());
+        $this->assertSame('failed', $result->status());
     }
 
     public function testOrdemPreservada(): void

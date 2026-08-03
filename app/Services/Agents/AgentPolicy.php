@@ -9,7 +9,7 @@ namespace App\Services\Agents;
  *
  * - Escrita ML bloqueada quando mlWriteAutomation=false
  * - production sempre fail-closed (nunca libera escrita ML)
- * - emissão de op somente com stateChanged=true (P0)
+ * - emissão de op somente para sucesso P0, capability allowlisted e contexto autorizado
  */
 final class AgentPolicy
 {
@@ -49,8 +49,23 @@ final class AgentPolicy
         return $capability !== '' && $context->accountId() > 0;
     }
 
-    public function allowsOpEmission(AgentResult $result): bool
+    public function allowsOpEmission(AgentContext $context, AgentResult $result): bool
     {
-        return $result->stateChanged() === true;
+        if ($result->status() !== 'success' || !$result->stateChanged()) {
+            return false;
+        }
+
+        $ops = $result->emittedOps();
+        if ($ops === []) {
+            return false;
+        }
+
+        foreach ($ops as $op) {
+            if (!$this->allowsMlWrite($context, $op)) {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

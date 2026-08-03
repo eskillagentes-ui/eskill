@@ -237,6 +237,7 @@ final class CriadorAgentTest extends TestCase
     public function unavailableSourcePayloads(): array
     {
         return [
+            'nao autorizado' => [['http_status' => 401]],
             'rate limit inteiro' => [['http_status' => 429]],
             'erro remoto inteiro' => [['http_status' => 503]],
             'rate limit string' => [['http_status' => '429']],
@@ -278,6 +279,38 @@ final class CriadorAgentTest extends TestCase
         $this->assertSame($first, $second);
         $this->assertFalse($second->stateChanged());
         $this->assertSame([], $second->emittedOps());
+    }
+
+    public function testChaveDeIdempotenciaEhDeterministicaEntreInstanciasEEnviadaAsPortas(): void
+    {
+        $seenKeys = [];
+        $source = static function (int $accountId, array $request) use (&$seenKeys): array {
+            $seenKeys[] = $request['idempotency_key'] ?? null;
+            return [
+                'valid' => true,
+                'duplicate' => false,
+                'item' => ['id' => $request['source_mlb_id']],
+            ];
+        };
+        $draft = static function (int $accountId, array $request) use (&$seenKeys): array {
+            $seenKeys[] = $request['idempotency_key'] ?? null;
+            return ['draft' => ['id' => 'draft-shared-key']];
+        };
+        $context = new AgentContext(
+            99,
+            'local',
+            'corr-cross-instance',
+            false,
+            ['creator_request' => ['source_mlb_id' => 'MLB990']]
+        );
+
+        $first = (new CriadorAgent($source, $draft))->run($context);
+        $second = (new CriadorAgent($source, $draft))->run($context);
+
+        $expected = hash('sha256', '99:MLB990');
+        $this->assertSame([$expected, $expected, $expected, $expected], $seenKeys);
+        $this->assertSame($expected, $first->data()['idempotency_key']);
+        $this->assertSame($expected, $second->data()['idempotency_key']);
     }
 
     public function testExcecoesDasPortasFalhamFechadoSemVazarDetalhes(): void
@@ -405,6 +438,10 @@ final class CriadorAgentTest extends TestCase
             'draft sem id' => [['draft' => ['title' => 'incompleto']]],
             'draft id vazio' => [['draft' => ['id' => '']]],
             'draft com id publicado' => [['draft' => ['id' => 'MLB1020']]],
+            'nao autorizado' => [[
+                'http_status' => 403,
+                'draft' => ['id' => 'draft-nao-autorizado'],
+            ]],
             'rate limit' => [['http_status' => 429]],
             'erro remoto' => [['http_status' => 503]],
             'rate limit string' => [['http_status' => '429']],

@@ -58,19 +58,21 @@ final class OtimizadorAgent implements AgentInterface
             return AgentResult::failed(self::NAME, 'optimizer_unavailable');
         }
 
-        $recommendations = $observed['recommendations'];
+        $recommendations = [];
         $mlbIds = [];
 
-        foreach ($recommendations as $recommendation) {
-            if (!is_array($recommendation)
-                || !isset($recommendation['mlb_id'])
-                || !is_string($recommendation['mlb_id'])
-                || trim($recommendation['mlb_id']) === ''
-            ) {
+        foreach ($observed['recommendations'] as $recommendation) {
+            if (!is_array($recommendation)) {
                 return AgentResult::failed(self::NAME, 'optimizer_unavailable');
             }
 
-            $mlbIds[] = $recommendation['mlb_id'];
+            $normalized = $this->normalizeRecommendation($recommendation);
+            if ($normalized === null) {
+                return AgentResult::failed(self::NAME, 'optimizer_unavailable');
+            }
+
+            $recommendations[] = $normalized;
+            $mlbIds[] = $normalized['mlb_id'];
         }
 
         try {
@@ -130,6 +132,44 @@ final class OtimizadorAgent implements AgentInterface
         return AgentResult::success(self::NAME, 'recommendations_ready', $data);
     }
 
+    /**
+     * @param array<string, mixed> $recommendation
+     * @return array{mlb_id: string, kind: string, recommended_roas: float}|null
+     */
+    private function normalizeRecommendation(array $recommendation): ?array
+    {
+        $keys = array_keys($recommendation);
+        sort($keys);
+        if ($keys !== ['kind', 'mlb_id', 'recommended_roas']) {
+            return null;
+        }
+
+        $mlbId = $recommendation['mlb_id'];
+        $kind = $recommendation['kind'];
+        $recommendedRoas = $recommendation['recommended_roas'];
+        if (!is_string($mlbId)
+            || preg_match('/^MLB[0-9]+$/', $mlbId) !== 1
+            || $kind !== 'ads_roas'
+            || (!is_int($recommendedRoas) && !is_float($recommendedRoas))
+        ) {
+            return null;
+        }
+
+        $recommendedRoas = (float) $recommendedRoas;
+        if (!is_finite($recommendedRoas)
+            || $recommendedRoas <= 0.0
+            || $recommendedRoas > 100.0
+        ) {
+            return null;
+        }
+
+        return [
+            'mlb_id' => $mlbId,
+            'kind' => $kind,
+            'recommended_roas' => $recommendedRoas,
+        ];
+    }
+
     /** @param array<int|string, mixed> $value */
     private function isSequentialList(array $value): bool
     {
@@ -152,6 +192,6 @@ final class OtimizadorAgent implements AgentInterface
             $status = (int) $status;
         }
 
-        return is_int($status) && ($status === 429 || $status >= 500);
+        return is_int($status) && $status >= 400 && $status <= 599;
     }
 }

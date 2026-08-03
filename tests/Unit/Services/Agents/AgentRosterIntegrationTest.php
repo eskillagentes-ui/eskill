@@ -58,7 +58,7 @@ final class AgentRosterIntegrationTest extends TestCase
             static function (int $accountId): array {
                 return [
                     'recommendations' => [
-                        ['mlb_id' => 'MLB1', 'recommended_roas' => 2.5],
+                        ['mlb_id' => 'MLB1', 'kind' => 'ads_roas', 'recommended_roas' => 2.5],
                     ],
                 ];
             },

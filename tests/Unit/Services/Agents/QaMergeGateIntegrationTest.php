@@ -31,7 +31,7 @@ class QaMergeGateIntegrationTest extends TestCase
         $aggregate = (new OrchestratorAgent([$qa], new AgentPolicy()))->run($context);
         $gate = new QaMergeGate(['php-lint']);
 
-        $this->assertSame('success', $aggregate->status());
+        $this->assertSame('failed', $aggregate->status());
         $this->assertSame('orquestrador', $aggregate->agent());
         $this->assertSame('failed', $aggregate->data()['results'][0]->status());
         $this->assertSame('qa', $aggregate->data()['results'][0]->agent());

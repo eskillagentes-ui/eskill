@@ -58,18 +58,51 @@ class AgentPolicyTest extends TestCase
 
     public function testOpSomenteQuandoStateChangedTrueP0(): void
     {
-        $changed = AgentResult::success('orquestrador', 'ok', [], true, ['op:tick']);
-        $unchanged = AgentResult::success('orquestrador', 'noop', [], false, ['op:tick']);
+        $context = new AgentContext(10, 'staging', 'corr-op', true);
+        $changed = AgentResult::success('orquestrador', 'ok', [], true, ['ml.price.patch']);
+        $unchanged = AgentResult::success('orquestrador', 'noop', [], false, ['ml.price.patch']);
 
-        $this->assertTrue($this->policy->allowsOpEmission($changed));
-        $this->assertFalse($this->policy->allowsOpEmission($unchanged));
+        $this->assertTrue($this->policy->allowsOpEmission($context, $changed));
+        $this->assertFalse($this->policy->allowsOpEmission($context, $unchanged));
     }
 
     public function testOpBloqueadoQuandoStateChangedFalseMesmoComEmittedOps(): void
     {
         $result = AgentResult::skipped('coletor', 'sem mudanca', [], false, ['op:heartbeat']);
 
-        $this->assertFalse($this->policy->allowsOpEmission($result));
+        $this->assertFalse($this->policy->allowsOpEmission(
+            new AgentContext(10, 'staging', 'corr-skipped', true),
+            $result
+        ));
+    }
+
+    public function testOpMlEhBloqueadaSemFlagOuEmProductionOuQuandoResultadoFalha(): void
+    {
+        $success = AgentResult::success('agente', 'ok', [], true, ['ml.item.publish']);
+        $failed = AgentResult::failed('agente', 'erro', [], true, ['ml.item.publish']);
+
+        $this->assertFalse($this->policy->allowsOpEmission(
+            new AgentContext(10, 'staging', 'corr-off', false),
+            $success
+        ));
+        $this->assertFalse($this->policy->allowsOpEmission(
+            new AgentContext(10, 'production', 'corr-prod-op', true),
+            $success
+        ));
+        $this->assertFalse($this->policy->allowsOpEmission(
+            new AgentContext(10, 'staging', 'corr-failed-op', true),
+            $failed
+        ));
+    }
+
+    public function testOpForaDaAllowlistEhBloqueada(): void
+    {
+        $result = AgentResult::success('agente', 'ok', [], true, ['ml.unknown.write']);
+
+        $this->assertFalse($this->policy->allowsOpEmission(
+            new AgentContext(10, 'staging', 'corr-unknown-op', true),
+            $result
+        ));
     }
 
     public function testLeituraMlNaoEhCapabilityDeEscrita(): void

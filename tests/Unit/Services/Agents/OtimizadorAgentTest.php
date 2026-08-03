@@ -121,6 +121,16 @@ final class OtimizadorAgentTest extends TestCase
                 return ['http_status' => 429];
             },
             static function (int $accountId): array {
+                return [
+                    'http_status' => 401,
+                    'recommendations' => [[
+                        'mlb_id' => 'MLB401',
+                        'kind' => 'ads_roas',
+                        'recommended_roas' => 3.0,
+                    ]],
+                ];
+            },
+            static function (int $accountId): array {
                 return ['http_status' => 503];
             },
             static function (int $accountId): array {
@@ -162,6 +172,14 @@ final class OtimizadorAgentTest extends TestCase
                 return ['http_status' => 429];
             },
             static function (int $accountId, array $mlbIds): array {
+                return [
+                    'http_status' => 403,
+                    'items' => [
+                        'MLB456' => ['validated' => true, 'suspicious' => false, 'cost' => 100.0],
+                    ],
+                ];
+            },
+            static function (int $accountId, array $mlbIds): array {
                 return ['http_status' => 500];
             },
             static function (int $accountId, array $mlbIds): array {
@@ -172,7 +190,11 @@ final class OtimizadorAgentTest extends TestCase
         foreach ($costCases as $index => $costPort) {
             $agent = new OtimizadorAgent(
                 static function (int $accountId): array {
-                    return ['recommendations' => [['mlb_id' => 'MLB456']]];
+                    return ['recommendations' => [[
+                        'mlb_id' => 'MLB456',
+                        'kind' => 'ads_roas',
+                        'recommended_roas' => 3.0,
+                    ]]];
                 },
                 $costPort
             );
@@ -185,5 +207,48 @@ final class OtimizadorAgentTest extends TestCase
             $this->assertFalse($result->stateChanged());
             $this->assertSame([], $result->emittedOps());
         }
+    }
+
+    /**
+     * @dataProvider unsafeRecommendationPayloads
+     * @param array<string, mixed> $recommendation
+     */
+    public function testRejeitaRecomendacaoMalformadaOuComCampoOperacional(array $recommendation): void
+    {
+        $costCalls = 0;
+        $agent = new OtimizadorAgent(
+            static fn (int $accountId): array => ['recommendations' => [$recommendation]],
+            static function (int $accountId, array $mlbIds) use (&$costCalls): array {
+                $costCalls++;
+                return ['items' => []];
+            }
+        );
+
+        $result = $agent->run(new AgentContext(45, 'local', 'corr-unsafe-recommendation', false));
+
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('optimizer_unavailable', $result->reason());
+        $this->assertSame(0, $costCalls);
+        $this->assertSame([], $result->data());
+    }
+
+    /** @return array<string, array{array<string, mixed>}> */
+    public function unsafeRecommendationPayloads(): array
+    {
+        $valid = [
+            'mlb_id' => 'MLB123',
+            'kind' => 'ads_roas',
+            'recommended_roas' => 3.0,
+        ];
+
+        return [
+            'id invalido' => [array_merge($valid, ['mlb_id' => 'not-an-mlb;DROP'])],
+            'kind operacional' => [array_merge($valid, ['kind' => 'publish'])],
+            'roas zero' => [array_merge($valid, ['recommended_roas' => 0])],
+            'acao extra' => [array_merge($valid, ['action' => 'publish'])],
+            'preco extra' => [array_merge($valid, ['price' => 0])],
+            'estoque extra' => [array_merge($valid, ['stock' => 999])],
+            'orcamento extra' => [array_merge($valid, ['budget' => 999999])],
+        ];
     }
 }
