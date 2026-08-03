@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/css/pregao.css?v=3">
+<link rel="stylesheet" href="/css/pregao.css?v=4">
 
 <div id="pregao-root" data-account-id="<?= (int)($pregaoAccountId ?? 0) ?>" data-read-only="1">
     <header class="pg-header">
@@ -74,10 +74,10 @@
                     <div class="vl" id="vRep">—</div>
                     <div class="sb" id="sRep">—</div>
                 </div>
-                <div class="card" id="cPerg" data-metric="perguntas_hoje">
-                    <div class="lb">PERGUNTAS HOJE</div>
+                <div class="card" id="cPerg" data-metric="perguntas_7d">
+                    <div class="lb">PERGUNTAS (7 DIAS)</div>
                     <div class="vl" id="vPerg">—</div>
-                    <div class="sb">tempo médio <b id="vTmed">—</b></div>
+                    <div class="sb" id="sPerg">taxa — · mediana — · — em aberto</div>
                 </div>
                 <div class="card" id="cAcoes" data-metric="acoes_hora">
                     <div class="lb">AÇÕES DOS ROBÔS / H</div>
@@ -92,6 +92,13 @@
                 <div class="p-head">🎞️ FITA DE OPERAÇÕES <span class="live">AO VIVO</span></div>
                 <div class="pl-line"><span>P&amp;L DO DIA</span><b id="pnl">—</b></div>
                 <ul id="feed"></ul>
+            </div>
+
+            <div class="panel" id="openQuestionsPanel">
+                <div class="p-head">❓ PERGUNTAS EM ABERTO <span class="live" id="openQCount">0</span></div>
+                <ul class="open-q-list" id="openQuestions">
+                    <li class="open-q-empty">Nenhuma pergunta em aberto</li>
+                </ul>
             </div>
 
             <div class="panel">
@@ -121,4 +128,4 @@
     };
 </script>
 <script src="/js/pregao-chart-layout.js?v=1"></script>
-<script src="/js/pregao.js?v=5" defer></script>
+<script src="/js/pregao.js?v=6" defer></script>

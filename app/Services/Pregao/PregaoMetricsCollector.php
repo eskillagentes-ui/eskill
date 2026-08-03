@@ -271,33 +271,36 @@ final class PregaoMetricsCollector
     }
 
     /**
+     * Perguntas 7d: recebidas × respondidas × mediana × abertas (API ML read-only).
+     *
      * @param array<string, mixed> $meta
      * @return array<string, mixed>
      */
     private function collectQuestions(int $accountId, array &$meta): array
     {
         try {
+            $svc = new PregaoQuestionsService($this->db);
+            $q = $svc->collect($accountId);
+
+            $recebidas = (int) $q['perguntas_recebidas_7d'];
+            $respondidas = (int) $q['perguntas_respondidas_7d'];
+            $taxa = $q['taxa_resposta_7d'];
+            $mediana = $q['mediana_resposta_s'];
+            $media = $q['media_resposta_s'];
+            $abertasN = (int) $q['perguntas_abertas'];
+            $cardStatus = (string) $q['card_status'];
+            /** @var list<array<string, mixed>> $abertas */
+            $abertas = $q['abertas'];
+            /** @var list<array<string, mixed>> $newlyAnswered */
+            $newlyAnswered = $q['newly_answered'];
+
+            // Compat: perguntas_hoje / tempo_medio (média) para colunas legadas
             $todayStmt = $this->db->prepare(
-                'SELECT COUNT(*) AS c
-                 FROM ml_questions
-                 WHERE account_id = ?
-                   AND DATE(date_created) = CURDATE()'
+                'SELECT COUNT(*) FROM ml_questions
+                 WHERE account_id = ? AND DATE(date_created) = CURDATE()'
             );
             $todayStmt->execute([$accountId]);
             $perguntasHoje = (int) $todayStmt->fetchColumn();
-
-            $avgStmt = $this->db->prepare(
-                'SELECT AVG(TIMESTAMPDIFF(SECOND, date_created, answer_date)) AS avg_s
-                 FROM ml_questions
-                 WHERE account_id = ?
-                   AND answer_date IS NOT NULL
-                   AND date_created >= DATE_SUB(NOW(), INTERVAL 30 DAY)'
-            );
-            $avgStmt->execute([$accountId]);
-            $avgRaw = $avgStmt->fetchColumn();
-            $tempoMedio = $avgRaw !== null && $avgRaw !== false
-                ? (int) round((float) $avgRaw)
-                : null;
 
             $this->db->prepare(
                 'INSERT INTO account_index_metrics (account_id, perguntas_hoje, tempo_medio_resposta_s)
@@ -305,65 +308,164 @@ final class PregaoMetricsCollector
                  ON DUPLICATE KEY UPDATE
                    perguntas_hoje = VALUES(perguntas_hoje),
                    tempo_medio_resposta_s = VALUES(tempo_medio_resposta_s)'
-            )->execute([$accountId, $perguntasHoje, $tempoMedio ?? 0]);
+            )->execute([$accountId, $perguntasHoje, $media ?? ($mediana ?? 0)]);
+
+            $flash = match ($cardStatus) {
+                'vermelho' => 'yellow',
+                'amarelo' => 'yellow',
+                default => 'green',
+            };
 
             $meta['metrics']['perguntas_hoje'] = [
                 'available' => true,
-                'source' => 'ml_questions',
+                'source' => (string) $q['source'],
             ];
+            $meta['metrics']['perguntas_7d'] = [
+                'available' => true,
+                'source' => (string) $q['source'],
+                'window' => '7d',
+                'recebidas' => $recebidas,
+                'respondidas' => $respondidas,
+                'taxa_resposta_7d' => $taxa,
+                'mediana_resposta_s' => $mediana,
+                'media_resposta_s' => $media,
+                'perguntas_abertas' => $abertasN,
+                'card_status' => $cardStatus,
+                'abertas' => $abertas,
+            ];
+            $meta['metrics']['perguntas_recebidas_7d'] = ['available' => true, 'source' => (string) $q['source']];
+            $meta['metrics']['perguntas_respondidas_7d'] = ['available' => true, 'source' => (string) $q['source']];
+            $meta['metrics']['taxa_resposta_7d'] = ['available' => $taxa !== null, 'source' => (string) $q['source']];
+            $meta['metrics']['mediana_resposta_s'] = ['available' => $mediana !== null, 'source' => (string) $q['source']];
+            $meta['metrics']['perguntas_abertas'] = ['available' => true, 'source' => (string) $q['source']];
             $meta['metrics']['tempo_medio_resposta_s'] = [
-                'available' => $tempoMedio !== null,
-                'source' => 'ml_questions',
-                'window' => '30d',
+                'available' => $media !== null,
+                'source' => (string) $q['source'],
+                'window' => '7d',
+                'note' => 'média secundária; UI usa mediana_resposta_s',
             ];
 
+            foreach (
+                [
+                    ['perguntas_recebidas_7d', $recebidas],
+                    ['perguntas_respondidas_7d', $respondidas],
+                    ['perguntas_abertas', $abertasN],
+                ] as [$key, $value]
+            ) {
+                $this->emitter->emit('metric.update', [
+                    'key' => $key,
+                    'value' => $value,
+                    'flash' => $flash,
+                ], $accountId, 'live');
+            }
+
+            if ($taxa !== null) {
+                $this->emitter->emit('metric.update', [
+                    'key' => 'taxa_resposta_7d',
+                    'value' => $taxa,
+                    'flash' => $flash,
+                ], $accountId, 'live');
+            }
+            if ($mediana !== null) {
+                $this->emitter->emit('metric.update', [
+                    'key' => 'mediana_resposta_s',
+                    'value' => $mediana,
+                    'display' => PregaoQuestionsService::formatDurationHuman($mediana),
+                    'flash' => $flash,
+                ], $accountId, 'live');
+            }
+
+            // Bundle para o card
             $this->emitter->emit('metric.update', [
-                'key' => 'perguntas_hoje',
-                'value' => $perguntasHoje,
-                'flash' => 'green',
+                'key' => 'perguntas_7d',
+                'value' => [
+                    'recebidas' => $recebidas,
+                    'respondidas' => $respondidas,
+                    'taxa' => $taxa,
+                    'mediana_s' => $mediana,
+                    'abertas' => $abertasN,
+                    'card_status' => $cardStatus,
+                    'abertas_list' => $abertas,
+                ],
+                'flash' => $flash,
             ], $accountId, 'live');
 
-            if ($tempoMedio !== null) {
-                $slow = $tempoMedio > 3600;
-                $human = $this->formatDurationHuman($tempoMedio);
-                $this->emitter->emit('metric.update', [
-                    'key' => 'tempo_medio_resposta_s',
-                    'value' => $tempoMedio,
-                    'display' => $human,
-                    'flash' => $slow ? 'yellow' : 'green',
-                ], $accountId, 'live');
-
-                if ($slow && $this->shouldEmitSlowReplyAlert($accountId)) {
-                    $this->emitter->emitOpOnTransition(
-                        'PERGUNTAS_TMED',
-                        [
-                            'robot' => 'PERGUNTAS',
-                            'level' => 'alert',
-                            'icon' => '⏱️',
-                            'msg' => sprintf(
-                                'tempo médio %s · acima de 1h (janela 30d · só respondidas)',
-                                $human
-                            ),
-                        ],
-                        ['tempo_medio_s' => $tempoMedio, 'bucket' => (int) floor($tempoMedio / 3600)],
-                        $accountId,
-                        'live'
-                    );
+            // Alerta 1× por pergunta aberta >2h
+            foreach ($abertas as $openQ) {
+                if (empty($openQ['alert_due'])) {
+                    continue;
                 }
+                $qid = (string) ($openQ['question_id'] ?? '');
+                if ($qid === '') {
+                    continue;
+                }
+                $hoursHuman = PregaoQuestionsService::formatDurationHuman((int) ($openQ['open_seconds'] ?? 0));
+                $preview = (string) ($openQ['text_preview'] ?? '');
+                $itemId = (string) ($openQ['item_id'] ?? '');
+                $this->emitter->emitOpOnTransition(
+                    'PERGUNTA_ABERTA:' . $qid,
+                    [
+                        'robot' => 'PERGUNTAS',
+                        'level' => 'alert',
+                        'icon' => '❓',
+                        'msg' => sprintf(
+                            'PERGUNTA ABERTA há %s — %s "%s"',
+                            $hoursHuman,
+                            $itemId !== '' ? $itemId : 'MLB?',
+                            $preview
+                        ),
+                        'meta' => [
+                            'question_id' => $qid,
+                            'item_id' => $itemId,
+                            'ml_url' => $openQ['ml_url'] ?? null,
+                        ],
+                    ],
+                    ['question_id' => $qid, 'alert' => 'open_gt_2h'],
+                    $accountId,
+                    'live'
+                );
+            }
+
+            // Success quando detecta resposta de pergunta que estava aberta
+            foreach ($newlyAnswered as $ans) {
+                $qid = (string) ($ans['question_id'] ?? '');
+                $took = isset($ans['response_seconds']) ? (int) $ans['response_seconds'] : null;
+                $this->emitter->emitOpOnTransition(
+                    'PERGUNTA_RESPONDIDA:' . $qid,
+                    [
+                        'robot' => 'PERGUNTAS',
+                        'level' => 'success',
+                        'icon' => '✅',
+                        'msg' => sprintf(
+                            'PERGUNTA respondida%s — %s "%s"',
+                            $took !== null ? (' em ' . PregaoQuestionsService::formatDurationHuman($took)) : '',
+                            (string) ($ans['item_id'] ?? ''),
+                            (string) ($ans['text_preview'] ?? '')
+                        ),
+                    ],
+                    ['question_id' => $qid, 'answered' => true],
+                    $accountId,
+                    'live'
+                );
             }
 
             return [
                 'ok' => true,
-                'perguntas_hoje' => $perguntasHoje,
-                'tempo_medio_resposta_s' => $tempoMedio,
+                'perguntas_recebidas_7d' => $recebidas,
+                'perguntas_respondidas_7d' => $respondidas,
+                'taxa_resposta_7d' => $taxa,
+                'mediana_resposta_s' => $mediana,
+                'perguntas_abertas' => $abertasN,
+                'card_status' => $cardStatus,
+                'source' => $q['source'],
             ];
         } catch (Throwable $e) {
             log_warning('PregaoMetricsCollector: perguntas falhou', [
                 'account_id' => $accountId,
                 'error' => $e->getMessage(),
             ]);
-            $meta['metrics']['perguntas_hoje'] = ['available' => false, 'error' => $e->getMessage()];
-            $meta['metrics']['tempo_medio_resposta_s'] = ['available' => false];
+            $meta['metrics']['perguntas_7d'] = ['available' => false, 'error' => $e->getMessage()];
+            $meta['metrics']['perguntas_hoje'] = ['available' => false];
             return ['ok' => false, 'error' => $e->getMessage()];
         }
     }
@@ -858,50 +960,6 @@ final class PregaoMetricsCollector
                factors_active = VALUES(factors_active),
                factors_total = 5'
         )->execute([$accountId, $json, $active]);
-    }
-
-    /**
-     * Formata segundos como duração humana (alinha com public/js/pregao.js fmtDuration).
-     */
-    private function formatDurationHuman(int $seconds): string
-    {
-        $s = max(0, $seconds);
-        if ($s < 60) {
-            return $s . 's';
-        }
-        if ($s < 3600) {
-            return ((int) floor($s / 60)) . 'm';
-        }
-        $days = (int) floor($s / 86400);
-        $s -= $days * 86400;
-        $hours = (int) floor($s / 3600);
-        $mins = (int) floor(($s % 3600) / 60);
-        if ($days > 0) {
-            return $days . 'd' . ($hours > 0 ? $hours . 'h' : '');
-        }
-        return $hours . 'h' . str_pad((string) $mins, 2, '0', STR_PAD_LEFT);
-    }
-
-    /**
-     * Evita flood na fita: no máx. 1 alerta de tempo médio por hora/conta.
-     */
-    private function shouldEmitSlowReplyAlert(int $accountId): bool
-    {
-        try {
-            $hasSource = $this->columnExists('pregao_events', 'source');
-            $sql = "SELECT COUNT(*) FROM pregao_events
-                    WHERE account_id = ?
-                      AND type = 'op'
-                      AND ts >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
-                      AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.robot')) = 'PERGUNTAS'
-                      AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.msg')) LIKE 'tempo médio%'"
-                . ($hasSource ? " AND source = 'live'" : '');
-            $stmt = $this->db->prepare($sql);
-            $stmt->execute([$accountId]);
-            return ((int) $stmt->fetchColumn()) === 0;
-        } catch (Throwable $e) {
-            return true;
-        }
     }
 
     private function columnExists(string $table, string $column): bool

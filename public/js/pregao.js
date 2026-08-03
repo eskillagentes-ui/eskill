@@ -217,8 +217,7 @@
             }
         }
         $('vHealth').textContent = nd(m.health_medio, (v) => fmtNum(v, 2));
-        $('vPerg').textContent = nd(m.perguntas_hoje);
-        $('vTmed').textContent = m.tempo_medio_resposta_s == null ? 'n/d' : fmtDuration(m.tempo_medio_resposta_s);
+        applyPerguntasCard(m);
         $('vAcoes').textContent = nd(m.acoes_hora);
 
         const rep = m.reputacao;
@@ -232,6 +231,58 @@
         $('vRep').textContent = (cor.indexOf('verde') >= 0 ? '🟢 ' : cor.indexOf('amarelo') >= 0 ? '🟡 ' : '🔴 ') + cor.toUpperCase();
         $('vRep').style.color = cor.indexOf('vermelho') >= 0 ? 'var(--down)' : cor.indexOf('amarelo') >= 0 ? 'var(--ml)' : 'var(--up)';
         $('sRep').textContent = 'reclamações ' + fmtNum(rep.reclamacoes_pct ?? 0, 1) + '% · atrasos ' + fmtNum(rep.atrasos_pct ?? 0, 1) + '%';
+    }
+
+    function applyPerguntasCard(m) {
+        const card = $('cPerg');
+        const p7 = m && m.perguntas_7d;
+        if (!p7) {
+            if ($('vPerg')) $('vPerg').textContent = 'n/d';
+            if ($('sPerg')) $('sPerg').textContent = 'aguardando coletor';
+            if (card) card.classList.remove('status-verde', 'status-amarelo', 'status-vermelho');
+            renderOpenQuestions([]);
+            return;
+        }
+        const resp = p7.respondidas != null ? p7.respondidas : '—';
+        const rec = p7.recebidas != null ? p7.recebidas : '—';
+        if ($('vPerg')) $('vPerg').textContent = resp + ' / ' + rec;
+        const taxa = p7.taxa != null ? (fmtNum(p7.taxa, 0) + '%') : '—';
+        const med = p7.mediana_s != null ? fmtDuration(p7.mediana_s) : '—';
+        const ab = p7.abertas != null ? p7.abertas : 0;
+        if ($('sPerg')) {
+            $('sPerg').textContent = 'taxa ' + taxa + ' · mediana ' + med + ' · ' + ab + ' em aberto';
+        }
+        if (card) {
+            card.classList.remove('status-verde', 'status-amarelo', 'status-vermelho');
+            const st = p7.card_status || 'verde';
+            card.classList.add('status-' + st);
+        }
+        renderOpenQuestions(Array.isArray(p7.lista_abertas) ? p7.lista_abertas : []);
+    }
+
+    function renderOpenQuestions(list) {
+        const ul = $('openQuestions');
+        const badge = $('openQCount');
+        if (badge) badge.textContent = String(list.length);
+        if (!ul) return;
+        if (!list.length) {
+            ul.innerHTML = '<li class="open-q-empty">Nenhuma pergunta em aberto</li>';
+            return;
+        }
+        let html = '';
+        list.forEach((q) => {
+            const age = q.open_human || fmtDuration(q.open_seconds || 0);
+            const preview = escapeHtml(q.text_preview || q.text || '');
+            const item = escapeHtml(q.item_id || '');
+            const href = q.ml_url || 'https://www.mercadolivre.com.br/perguntas';
+            const alertCls = (q.open_seconds || 0) >= 7200 ? ' hot' : '';
+            html += '<li class="open-q' + alertCls + '">'
+                + '<div class="oq-age">' + escapeHtml(age) + '</div>'
+                + '<div class="oq-body"><b>' + item + '</b> — ' + preview + '</div>'
+                + '<a class="oq-link" href="' + escapeHtml(href) + '" target="_blank" rel="noopener noreferrer">Responder no ML</a>'
+                + '</li>';
+        });
+        ul.innerHTML = html;
     }
 
     function applySemaforo(s) {
@@ -384,6 +435,21 @@
         if (p.key === 'reputacao') {
             applyMetrics({ reputacao: p });
             flash('cRep', p.flash === 'yellow' ? 'flash-y' : 'flash-g');
+            return;
+        }
+        if (p.key === 'perguntas_7d' && p.value && typeof p.value === 'object') {
+            applyPerguntasCard({
+                perguntas_7d: {
+                    recebidas: p.value.recebidas,
+                    respondidas: p.value.respondidas,
+                    taxa: p.value.taxa,
+                    mediana_s: p.value.mediana_s,
+                    abertas: p.value.abertas,
+                    card_status: p.value.card_status,
+                    lista_abertas: p.value.abertas_list || []
+                }
+            });
+            flash('cPerg', p.flash === 'yellow' ? 'flash-y' : 'flash-g');
             return;
         }
         const ids = map[p.key];

@@ -411,6 +411,27 @@ final class PregaoSnapshotService
             ] : null,
             'perguntas_hoje' => $pick('perguntas_hoje', (int) ($metrics['perguntas_hoje'] ?? 0)),
             'tempo_medio_resposta_s' => $pick('tempo_medio_resposta_s', (int) ($metrics['tempo_medio_resposta_s'] ?? 0)),
+            'perguntas_recebidas_7d' => $pick('perguntas_recebidas_7d', (int) ($m['perguntas_7d']['recebidas'] ?? 0)),
+            'perguntas_respondidas_7d' => $pick('perguntas_respondidas_7d', (int) ($m['perguntas_7d']['respondidas'] ?? 0)),
+            'taxa_resposta_7d' => $pick('taxa_resposta_7d', isset($m['perguntas_7d']['taxa_resposta_7d'])
+                ? (float) $m['perguntas_7d']['taxa_resposta_7d'] : null),
+            'mediana_resposta_s' => $pick('mediana_resposta_s', isset($m['perguntas_7d']['mediana_resposta_s'])
+                ? (int) $m['perguntas_7d']['mediana_resposta_s'] : null),
+            'perguntas_abertas' => $pick('perguntas_abertas', (int) ($m['perguntas_7d']['perguntas_abertas'] ?? 0)),
+            'perguntas_7d' => (($m['perguntas_7d']['available'] ?? false) === true) ? [
+                'recebidas' => (int) ($m['perguntas_7d']['recebidas'] ?? 0),
+                'respondidas' => (int) ($m['perguntas_7d']['respondidas'] ?? 0),
+                'taxa' => isset($m['perguntas_7d']['taxa_resposta_7d'])
+                    ? (float) $m['perguntas_7d']['taxa_resposta_7d'] : null,
+                'mediana_s' => isset($m['perguntas_7d']['mediana_resposta_s'])
+                    ? (int) $m['perguntas_7d']['mediana_resposta_s'] : null,
+                'media_s' => isset($m['perguntas_7d']['media_resposta_s'])
+                    ? (int) $m['perguntas_7d']['media_resposta_s'] : null,
+                'abertas' => (int) ($m['perguntas_7d']['perguntas_abertas'] ?? 0),
+                'card_status' => (string) ($m['perguntas_7d']['card_status'] ?? 'verde'),
+                'lista_abertas' => is_array($m['perguntas_7d']['abertas'] ?? null)
+                    ? $m['perguntas_7d']['abertas'] : [],
+            ] : null,
             'acoes_hora' => $pick('acoes_hora', (int) ($metrics['acoes_hora'] ?? 0)),
             'meta' => $m,
         ];
