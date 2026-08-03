@@ -17,6 +17,30 @@
 - **Nunca** apontar workers/tick staging para a conta ML **1335** (FACILYTY prod).
 - Deploy staging: `bash scripts/deploy_staging.sh` (não usa `bin/deploy.sh` de prod).
 
+### Política de Capacidades Novas (Escritor Único) — 2026-08-03
+
+Nenhuma capability nova (serviço, controller, binário CLI, migration, rota nova, módulo Magento, coletor ML, endpoint público, integração externa, sub-sistema, feature) entra no repo **sem um prompt escrito e escopado antes**, aprovado pelo dono (Jesse). Vale para TODO coding agent (Copilot, Claude Code, Cline, Cursor, Hermes, Aider) e humano.
+
+**Pode** entrar sem prompt novo (housekeeping reversível):
+- Limpeza de git (stash, rebase, drop de branch/stash/bak orfao).
+- Correção de bug já conhecido e documentado em `project-status.json` ou `claude-progress.txt`.
+- Atualização de testes para código que já existe.
+- Mudança de configuração de infraestrutura documentada em `docs/ops/`.
+- Documentação de features existentes.
+- `git commit` de trabalho já escopado antes.
+
+**NAO PODE** entrar sem prompt novo:
+- Subsistemas novos (coletor ML, módulo Magento, fila, scraper, proxy).
+- Integrações externas (Slack, Telegram, WhatsApp, Cloudflare Workers, novos endpoints ML).
+- Mudanças que afetem a conta de produção 1335 (FACILYTY) sem aprovação explícita item por item.
+- Qualquer coisa que toque awamotos.com ou srv1113343.hstgr.cloud (Magento AWA) — exige janela de manutenção aprovada.
+- Qualquer coisa relacionada a **scraping do site do Mercado Livre** — proibido pela regra "somente leitura via API oficial".
+- Deploy em produção (eskill.com.br) sem aprovação + smoke test em staging.
+
+"Liberdade total" só se aplica ao escopo de housekeeping reversível. Criar capability nova **sempre exige prompt escrito** mesmo com "liberdade total" — interprete "liberdade" como "não me pergunte a cada movimento pequeno", não como "cria o que quiser".
+
+Violação = trabalho revertido na próxima sessão + registro em `claude-progress.txt` como auditoria forense.
+
 ## Filosofia
 
 ### Long-Running Agent Harness
