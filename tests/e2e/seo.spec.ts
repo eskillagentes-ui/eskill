@@ -1,8 +1,12 @@
 import { test, expect } from '@playwright/test';
+import { requireMutationAllowed } from './helpers/mutation-guard';
+
+requireMutationAllowed('seo.spec');
 
 /**
  * Testes E2E para SEO Intelligence
  * Verifica funcionalidades de análise SEO, keywords e otimização
+ * @mutante — exige E2E_ALLOW_MUTATION=true
  */
 test.describe('SEO Intelligence API', () => {
     test.describe('Análise SEO', () => {

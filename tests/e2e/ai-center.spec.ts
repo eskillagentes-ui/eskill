@@ -1,8 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { requireMutationAllowed } from './helpers/mutation-guard';
+
+requireMutationAllowed('ai-center.spec');
 
 /**
  * Testes E2E para AI Center e Otimização
- * Verifica funcionalidades de IA, predições e histórico
+ * @mutante — exige E2E_ALLOW_MUTATION=true
  */
 test.describe('AI Center API', () => {
     test.describe('Predictive Analytics', () => {

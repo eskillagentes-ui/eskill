@@ -1,8 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { requireMutationAllowed } from './helpers/mutation-guard';
+
+requireMutationAllowed('exports.spec');
 
 /**
  * Testes E2E para Exportação e Relatórios
- * Verifica funcionalidades de export PDF, Excel e CSV
+ * @mutante — exige E2E_ALLOW_MUTATION=true
  */
 test.describe('Export & Reports API', () => {
     test.describe('PDF Export', () => {

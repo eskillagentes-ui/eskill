@@ -19,11 +19,38 @@ const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${PORT}`;
 const runProdValidation = process.env.RUN_PROD_VALIDATION === '1';
 
 /**
+ * Subconjunto seguro (npm run test:e2e:readonly): exclui os 6 specs com
+ * POST/DELETE (31 pontos mutantes) — seo, render, exports, ai-center,
+ * functional_ai_mcp, production-validation. Use em produção / fora de staging.
+ */
+const e2eReadonly = process.env.E2E_READONLY === '1';
+const mutatingSpecs = [
+  '**/seo.spec.ts',
+  '**/render.spec.ts',
+  '**/exports.spec.ts',
+  '**/ai-center.spec.ts',
+  '**/functional_ai_mcp.spec.ts',
+  '**/production-validation.spec.ts',
+];
+
+const testIgnore: string[] = [];
+if (!runProdValidation) {
+  testIgnore.push('**/production-validation.spec.ts');
+}
+if (e2eReadonly) {
+  for (const pattern of mutatingSpecs) {
+    if (!testIgnore.includes(pattern)) {
+      testIgnore.push(pattern);
+    }
+  }
+}
+
+/**
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
   testDir: './tests/e2e',
-  testIgnore: runProdValidation ? undefined : ['**/production-validation.spec.ts'],
+  testIgnore: testIgnore.length > 0 ? testIgnore : undefined,
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
@@ -52,36 +79,20 @@ export default defineConfig({
       name: 'chromium',
       use: { ...devices['Desktop Chrome'] },
     },
-
     {
       name: 'firefox',
       use: { ...devices['Desktop Firefox'] },
     },
-
     {
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
     },
-
-    /* Test against mobile viewports. */
-    // {
-    //   name: 'Mobile Chrome',
-    //   use: { ...devices['Pixel 5'] },
-    // },
-    // {
-    //   name: 'Mobile Safari',
-    //   use: { ...devices['iPhone 12'] },
-    // },
-
-    /* Test against branded browsers. */
-    // {
-    //   name: 'Microsoft Edge',
-    //   use: { ...devices['Desktop Edge'], channel: 'msedge' },
-    // },
-    // {
-    //   name: 'Google Chrome',
-    //   use: { ...devices['Desktop Chrome'], channel: 'chrome' },
-    // },
+    /** Tag @readonly — npm run test:e2e:readonly (E2E_READONLY=1 já ignora mutantes) */
+    {
+      name: 'readonly',
+      use: { ...devices['Desktop Chrome'] },
+      grep: /@readonly/,
+    },
   ],
 
   /* Sobe a aplicação PHP (router.php) antes dos testes, local e no CI. */

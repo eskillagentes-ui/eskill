@@ -1,5 +1,9 @@
 import { test, expect } from '@playwright/test';
+import { requireMutationAllowed } from './helpers/mutation-guard';
 
+requireMutationAllowed('render.spec');
+
+/** @mutante — exige E2E_ALLOW_MUTATION=true */
 test.describe('Render API (Harness Mode)', () => {
     const testToken = 'test-token';
 

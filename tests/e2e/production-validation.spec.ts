@@ -1,7 +1,11 @@
 import { test, expect, Page } from '@playwright/test';
+import { requireMutationAllowed } from './helpers/mutation-guard';
+
+requireMutationAllowed('production-validation.spec');
 
 /**
  * Testes E2E para validação em PRODUÇÃO (https://eskill.com.br)
+ * @mutante — exige E2E_ALLOW_MUTATION=true (mesmo em smoke prod com POST login)
  *
  * IMPORTANTE:
  * - Este teste roda contra o servidor REAL de produção

@@ -1,12 +1,11 @@
 import { test, expect } from '@playwright/test';
+import { requireMutationAllowed } from './helpers/mutation-guard';
+
+requireMutationAllowed('functional_ai_mcp.spec');
 
 /**
  * Functional Tests with MCP Simulation
- *
- * This test suite demonstrates:
- * 1. Configuration of a local MCP server (Mock) to simulate model context.
- * 2. Integration of the MCP simulation with the application environment.
- * 3. Validation of system behavior using controlled model outputs.
+ * @mutante — exige E2E_ALLOW_MUTATION=true
  */
 test.describe('MCP Functional Tests (AI Simulation)', () => {
 
