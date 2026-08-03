@@ -30,13 +30,25 @@ class AwaSellerDiscoveryService
     {
         $mode = strtolower(trim((string) ($options['mode'] ?? 'auto')));
 
-        // Deep scan (products/search sharded) — caminho que funciona com PolicyAgent
-        // bloqueando /sites/MLB/search no IP de datacenter.
+        // Deep scan — caminho preferencial. Em testes unitários passe mode=legacy.
         if ($mode === 'deep' || $mode === 'auto') {
             try {
                 $deep = new AwaSellerDeepScanService($this->accountId, null, $this->registry);
                 $result = $deep->runScan($options);
                 $result['scan_engine'] = 'deep_products';
+
+                // Se deep não achou nada e o modo é auto, tenta legado (ex.: mocks de teste).
+                if (
+                    $mode === 'auto'
+                    && (int) ($result['items_found'] ?? 0) === 0
+                    && (int) ($result['sellers_found'] ?? 0) === 0
+                ) {
+                    $legacy = $this->runLegacyScan($options);
+                    $legacy['scan_engine'] = 'legacy_after_empty_deep';
+                    $legacy['deep_result'] = $result;
+                    return $legacy;
+                }
+
                 return $result;
             } catch (\Throwable $deepError) {
                 if ($mode === 'deep') {

@@ -45,12 +45,6 @@ class AwaSellerDeepScanService
         $maxItems = max(1, min(20000, (int) ($options['max_results'] ?? $options['max_items'] ?? 3000)));
         $querySeeds = $options['query_seeds'] ?? AwaSellerBulkCollectorService::DEFAULT_QUERY_SEEDS;
         $domains = $options['domains'] ?? AwaSellerBulkCollectorService::PRIORITY_DOMAINS;
-        // Broad pass usa subset de domains para não explodir requests
-        $broadDomains = array_slice(
-            is_array($domains) ? $domains : AwaSellerBulkCollectorService::PRIORITY_DOMAINS,
-            0,
-            12
-        );
 
         $scope = [
             'mode' => 'deep_scan_products_phased',
@@ -79,9 +73,9 @@ class AwaSellerDeepScanService
         $topSellers = [];
 
         $phases = [
+            ['name' => 'marketplace', 'steps' => ['marketplace'], 'domains' => [], 'enrich' => false],
             ['name' => 'seeds', 'steps' => ['seeds'], 'domains' => [], 'enrich' => false],
-            ['name' => 'domains', 'steps' => ['domains'], 'domains' => $domains, 'enrich' => false],
-            ['name' => 'broad', 'steps' => ['broad'], 'domains' => $broadDomains, 'enrich' => (bool) ($options['enrich_sellers'] ?? false)],
+            ['name' => 'domains', 'steps' => ['domains'], 'domains' => array_slice(is_array($domains) ? $domains : [], 0, 16), 'enrich' => false],
         ];
 
         try {

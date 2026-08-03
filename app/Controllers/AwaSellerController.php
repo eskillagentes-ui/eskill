@@ -219,6 +219,7 @@ class AwaSellerController extends BaseController
 
             $sellers = $registry->listSellers($filters, $page, $perPage);
             $total   = $registry->countSellers($filters);
+            $sellers = array_map([$this, 'normalizeSellerIdentificationForDisplay'], $sellers);
 
             $this->jsonSuccess([
                 'data'       => $sellers,
@@ -257,6 +258,8 @@ class AwaSellerController extends BaseController
                 $this->jsonError('Seller não encontrado.', 404);
                 return;
             }
+
+            $seller = $this->normalizeSellerIdentificationForDisplay($seller);
 
             $this->jsonSuccess(['data' => $seller]);
         }, 'AwaSellerController::getSellerDetail');
@@ -508,6 +511,24 @@ class AwaSellerController extends BaseController
     /**
      * @return array<string, mixed>
      */
+    /**
+     * Sellers sem linha em awa_seller_identification chegam com id_status=null.
+     * A UI faz `value || 'pending'`, então null virava badge "pending" falso.
+     * Normaliza para "Sem ID" (truthy) antes de responder à API.
+     *
+     * @param  array<string, mixed> $seller
+     * @return array<string, mixed>
+     */
+    private function normalizeSellerIdentificationForDisplay(array $seller): array
+    {
+        $status = $seller['id_status'] ?? null;
+        if ($status === null || $status === '') {
+            $seller['id_status'] = 'Sem ID';
+        }
+
+        return $seller;
+    }
+
     private function buildRegistryFilters(): array
     {
         $filters = [

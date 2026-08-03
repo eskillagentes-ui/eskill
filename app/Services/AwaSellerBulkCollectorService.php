@@ -9,52 +9,44 @@ use RuntimeException;
 /**
  * Coletor em massa de anúncios/vendedores da marca AWA.
  *
- * Contexto de rede (produção eskill.com.br):
- * - GET /sites/MLB/search → 403 PolicyAgent (IP datacenter)
- * - GET /items?ids= (itens de terceiros) → 403 access_denied
- * - GET /users/{other}/items/search → 403
- * - GET /products/search + GET /products/{id}/items → disponíveis
- * - GET /users/{id} (perfil público) → disponível
+ * Busca correta (igual ao site):
+ *   GET /sites/MLB/search?q=awa+motos&category=MLB243551&BRAND=7297804
+ *   → ~3.9k anúncios em Peças de Motos (print FACILYTY).
  *
- * Estratégia para >2000 anúncios:
- * 1. Várias seeds de query (AWA + termos de peça)
- * 2. Paginação offset/limit (máx. ~1000 por query — API rejeita offset>=2000)
- * 3. Domínios moto / veículo (filtra ruído: cozinha, livros, etc.)
- * 4. Retry com backoff exponencial + jitter em 429/5xx/rede
- * 5. Deduplicação por item_id e consolidação por seller_id
+ * No datacenter atual esse endpoint retorna 403 (PolicyAgent), mesmo via CF Worker.
+ * Fallback: /products/search + /products/{id}/items (só catálogo/buy-box).
  */
 class AwaSellerBulkCollectorService
 {
     public const SITE_ID = 'MLB';
     public const AWA_BRAND_VALUE_ID = '7297804';
+    /** Peças de Motos e Quadriciclos (breadcrumb do site). */
+    public const MOTORCYCLE_PARTS_CATEGORY = 'MLB243551';
+    /** Query alinhada ao print do marketplace. */
+    public const MARKETPLACE_QUERY = 'awa motos';
     public const PAGE_SIZE = 50;
     /** Offset máximo seguro para /products/search (offset 1000 ok; 2000 → bad_request). */
     public const MAX_OFFSET = 1000;
+    /** Site search costuma paginar até ~1000–1050; além disso usa scroll/outros filtros. */
+    public const MARKETPLACE_MAX_OFFSET = 1000;
     public const DEFAULT_MAX_RETRIES = 5;
 
     /** @var list<string> */
     public const DEFAULT_QUERY_SEEDS = [
-        // Seeds com melhor yield moto (validados 2026-08-03)
+        'awa motos',
         'AWA moto',
         'AWA Motos',
-        'AWA COMPONENTES',
         'AWA baulet',
         'AWA bauleto',
         'AWA farol',
         'AWA pisca',
         'AWA guidão',
-        'AWA guidon',
         'AWA manete',
         'AWA manopla',
         'AWA escapamento',
-        'AWA ponteira',
-        'AWA capacete',
-        'AWA carenagem',
         'AWA pedaleira',
         'AWA estribo',
         'AWA protetor',
-        'AWA rabeta',
-        'AWA painel',
         'AWA retrovisor',
         'bauleto AWA',
         'retrovisor AWA moto',
@@ -67,10 +59,9 @@ class AwaSellerBulkCollectorService
      * @var list<string>
      */
     public const BROAD_QUERY_SEEDS = [
+        'awa motos',
         'AWA peças',
         'AWA pecas',
-        'marca AWA',
-        'AWA retrovisor',
     ];
 
     /** @var list<string> Domínios prioritários (filtro domain_id). */
@@ -110,7 +101,7 @@ class AwaSellerBulkCollectorService
     private int $maxRetries;
     private int $requestDelayMs;
 
-    /** @var array{requests:int,retries:int,errors:int,products:int,items:int,sellers:int} */
+    /** @var array<string, mixed> */
     private array $stats;
 
     public function __construct(
@@ -132,6 +123,42 @@ class AwaSellerBulkCollectorService
     }
 
     /**
+     * Probe rápido: marketplace liberado?
+     *
+     * @return array{available:bool,http_status:?int,total:?int,message:string}
+     */
+    public function probeMarketplaceSearch(): array
+    {
+        $response = $this->requestGet('/sites/' . self::SITE_ID . '/search', [
+            'q' => self::MARKETPLACE_QUERY,
+            'category' => self::MOTORCYCLE_PARTS_CATEGORY,
+            'BRAND' => self::AWA_BRAND_VALUE_ID,
+            'limit' => 1,
+            'offset' => 0,
+        ]);
+
+        $status = (int) ($response['status'] ?? $response['http_status'] ?? 0);
+        $error = $response['error'] ?? null;
+        $total = isset($response['paging']['total']) ? (int) $response['paging']['total'] : null;
+
+        if ($error === null && isset($response['results']) && is_array($response['results'])) {
+            return [
+                'available' => true,
+                'http_status' => $status > 0 ? $status : 200,
+                'total' => $total,
+                'message' => 'Marketplace search disponível (/sites/MLB/search).',
+            ];
+        }
+
+        return [
+            'available' => false,
+            'http_status' => $status > 0 ? $status : null,
+            'total' => null,
+            'message' => 'Marketplace search bloqueado: ' . (string) ($response['message'] ?? $error ?? 'forbidden'),
+        ];
+    }
+
+    /**
      * Coleta anúncios AWA e consolida por vendedor.
      *
      * @param array{
@@ -139,7 +166,8 @@ class AwaSellerBulkCollectorService
      *   query_seeds?:list<string>,
      *   domains?:list<string>,
      *   include_noise_domains?:bool,
-     *   enrich_sellers?:bool
+     *   enrich_sellers?:bool,
+     *   steps?:list<string>
      * } $options
      * @return array{
      *   items: list<array<string,mixed>>,
@@ -166,13 +194,32 @@ class AwaSellerBulkCollectorService
         $seenProducts = [];
 
         $maxProductsPerSeed = max(100, min(1500, (int) ($options['max_products_per_seed'] ?? 800)));
-        $steps = $options['steps'] ?? ['seeds', 'domains', 'broad'];
+        $steps = $options['steps'] ?? ['marketplace', 'seeds', 'domains', 'broad'];
         if (!is_array($steps) || $steps === []) {
-            $steps = ['seeds', 'domains', 'broad'];
+            $steps = ['marketplace', 'seeds', 'domains', 'broad'];
         }
 
-        // Passo 1: seeds focadas (paginação até MAX_OFFSET)
-        if (in_array('seeds', $steps, true)) {
+        $modesUsed = [];
+
+        // Passo 0: busca do marketplace (igual ao site) — preferencial
+        if (in_array('marketplace', $steps, true)) {
+            $probe = $this->probeMarketplaceSearch();
+            $this->stats['marketplace_probe'] = $probe;
+            if ($probe['available']) {
+                $this->logger->info('AWA_BULK_MARKETPLACE', 'Usando /sites/MLB/search', [
+                    'total' => $probe['total'],
+                ]);
+                $this->collectFromMarketplaceSearch($itemsById, $maxItems);
+                $modesUsed[] = 'sites_search';
+            } else {
+                $this->logger->warning('AWA_BULK_MARKETPLACE_BLOCKED', $probe['message'], $probe);
+                $this->stats['marketplace_blocked'] = true;
+            }
+        }
+
+        // Fallback catálogo
+        if (count($itemsById) < $maxItems && in_array('seeds', $steps, true)) {
+            $modesUsed[] = 'products_search_seeds';
             foreach ($querySeeds as $query) {
                 if (count($itemsById) >= $maxItems) {
                     break;
@@ -193,8 +240,8 @@ class AwaSellerBulkCollectorService
             }
         }
 
-        // Passo 2: sharding por domain_id (cobre fatias >1000)
-        if (in_array('domains', $steps, true)) {
+        if (count($itemsById) < $maxItems && in_array('domains', $steps, true)) {
+            $modesUsed[] = 'products_search_domains';
             foreach ($domains as $domainId) {
                 if (count($itemsById) >= $maxItems) {
                     break;
@@ -203,9 +250,8 @@ class AwaSellerBulkCollectorService
                     'domain_id' => $domainId,
                     'items_so_far' => count($itemsById),
                 ]);
-                // Com domain, exige AWA no nome (includeNoise=false) para não misturar ruído
                 $this->collectFromProductSearch(
-                    'AWA',
+                    'awa motos',
                     $domainId,
                     $itemsById,
                     $seenProducts,
@@ -216,8 +262,8 @@ class AwaSellerBulkCollectorService
             }
         }
 
-        // Passo 3: seeds amplas somente com domain (evita varrer 10k de ruído)
-        if (in_array('broad', $steps, true)) {
+        if (count($itemsById) < $maxItems && in_array('broad', $steps, true)) {
+            $modesUsed[] = 'products_search_broad';
             foreach (self::BROAD_QUERY_SEEDS as $broadQuery) {
                 foreach ($domains as $domainId) {
                     if (count($itemsById) >= $maxItems) {
@@ -242,16 +288,139 @@ class AwaSellerBulkCollectorService
         $sellers = $this->consolidateSellers($items, $enrichSellers);
         $this->stats['sellers'] = count($sellers);
 
-        $this->logger->info('AWA_BULK_COLLECT_DONE', 'Coleta AWA concluída', $this->stats);
+        $mode = $modesUsed === [] ? 'none' : implode('+', array_values(array_unique($modesUsed)));
+        $this->logger->info('AWA_BULK_COLLECT_DONE', 'Coleta AWA concluída', $this->stats + ['collection_mode' => $mode]);
 
         return [
             'items' => $items,
             'sellers' => $sellers,
             'stats' => $this->stats,
-            'collection_mode' => 'products_search_sharded',
+            'collection_mode' => $mode,
             'brand_value_id' => self::AWA_BRAND_VALUE_ID,
             'site_id' => self::SITE_ID,
+            'target_category' => self::MOTORCYCLE_PARTS_CATEGORY,
+            'marketplace_query' => self::MARKETPLACE_QUERY,
         ];
+    }
+
+    /**
+     * Coleta via GET /sites/MLB/search (anúncios do marketplace).
+     *
+     * @param array<string, array<string, mixed>> $itemsById
+     */
+    private function collectFromMarketplaceSearch(array &$itemsById, int $maxItems): void
+    {
+        $queries = [
+            ['q' => self::MARKETPLACE_QUERY, 'category' => self::MOTORCYCLE_PARTS_CATEGORY, 'BRAND' => self::AWA_BRAND_VALUE_ID],
+            ['q' => 'AWA', 'category' => self::MOTORCYCLE_PARTS_CATEGORY, 'BRAND' => self::AWA_BRAND_VALUE_ID],
+            ['q' => self::MARKETPLACE_QUERY, 'category' => self::MOTORCYCLE_PARTS_CATEGORY],
+        ];
+
+        foreach ($queries as $baseParams) {
+            if (count($itemsById) >= $maxItems) {
+                break;
+            }
+
+            $offset = 0;
+            $total = null;
+
+            do {
+                $params = array_merge($baseParams, [
+                    'limit' => self::PAGE_SIZE,
+                    'offset' => $offset,
+                ]);
+                $page = $this->requestGet('/sites/' . self::SITE_ID . '/search', $params);
+                if (isset($page['error'])) {
+                    $this->stats['errors']++;
+                    break;
+                }
+
+                $total = (int) ($page['paging']['total'] ?? 0);
+                $results = is_array($page['results'] ?? null) ? $page['results'] : [];
+                if ($results === []) {
+                    break;
+                }
+
+                foreach ($results as $row) {
+                    if (!is_array($row)) {
+                        continue;
+                    }
+                    $itemId = (string) ($row['id'] ?? '');
+                    if ($itemId === '' || isset($itemsById[$itemId])) {
+                        continue;
+                    }
+
+                    $title = (string) ($row['title'] ?? '');
+                    $sellerId = (int) ($row['seller']['id'] ?? $row['seller_id'] ?? 0);
+                    $attrs = is_array($row['attributes'] ?? null) ? $row['attributes'] : [];
+                    $brandOk = $this->resultHasAwaBrand($attrs, $title);
+                    if (!$brandOk && isset($baseParams['BRAND'])) {
+                        // Com filtro BRAND na query, confia no resultado da API
+                        $brandOk = true;
+                    }
+                    if (!$brandOk) {
+                        continue;
+                    }
+
+                    $itemsById[$itemId] = [
+                        'id' => $itemId,
+                        'title' => $title !== '' ? $title : $itemId,
+                        'seller_id' => $sellerId,
+                        'category_id' => (string) ($row['category_id'] ?? self::MOTORCYCLE_PARTS_CATEGORY),
+                        'price' => isset($row['price']) ? (float) $row['price'] : null,
+                        'status' => 'active',
+                        'condition' => $row['condition'] ?? null,
+                        'permalink' => $row['permalink'] ?? null,
+                        'thumbnail' => $row['thumbnail'] ?? null,
+                        'listing_type_id' => $row['listing_type_id'] ?? null,
+                        'catalog_product_id' => $row['catalog_product_id'] ?? null,
+                        'domain_id' => $row['domain_id'] ?? null,
+                        'official_store_id' => $row['official_store_id'] ?? null,
+                        'shipping' => is_array($row['shipping'] ?? null) ? $row['shipping'] : [],
+                        'seller_city' => $this->nestedName($row['seller']['address']['city'] ?? $row['address']['city_name'] ?? null),
+                        'seller_state' => $this->nestedName($row['seller']['address']['state'] ?? $row['address']['state_name'] ?? null),
+                        'brand_analysis' => [
+                            'has_brand' => true,
+                            'is_correct' => true,
+                            'source' => 'sites_search',
+                            'brand_value_id' => self::AWA_BRAND_VALUE_ID,
+                        ],
+                        'brand_match_type' => $this->containsAwaKeyword($title) ? 'attribute_match' : 'marketplace_brand_filter',
+                    ];
+
+                    if (count($itemsById) >= $maxItems) {
+                        return;
+                    }
+                }
+
+                $offset += self::PAGE_SIZE;
+                if ($offset > self::MARKETPLACE_MAX_OFFSET) {
+                    break;
+                }
+            } while ($total !== null && $offset < $total);
+        }
+    }
+
+    /**
+     * @param list<array<string,mixed>> $attributes
+     */
+    private function resultHasAwaBrand(array $attributes, string $title): bool
+    {
+        foreach ($attributes as $attr) {
+            if (!is_array($attr)) {
+                continue;
+            }
+            $id = strtoupper((string) ($attr['id'] ?? ''));
+            if ($id === 'BRAND') {
+                $valueId = (string) ($attr['value_id'] ?? '');
+                $valueName = (string) ($attr['value_name'] ?? '');
+                if ($valueId === self::AWA_BRAND_VALUE_ID || preg_match('/^awa$/i', trim($valueName)) === 1) {
+                    return true;
+                }
+            }
+        }
+
+        return $this->containsAwaKeyword($title);
     }
 
     /**
