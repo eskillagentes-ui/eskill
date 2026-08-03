@@ -65,10 +65,19 @@ class ReturnsController extends BaseController
     private function fetchClaims(MercadoLivreClient $client, string $status): array
     {
         try {
-            $response = $client->get('/post-purchase/v1/claims', [
-                'limit'  => 50,
-                'offset' => 0,
-                'status' => $status,
+            // Doc ML: /post-purchase/v1/claims/search exige players.user_id + players.role
+            $me = $client->get('/users/me');
+            $sellerId = isset($me['id']) ? (string) $me['id'] : '';
+            if ($sellerId === '') {
+                return [];
+            }
+
+            $response = $client->get('/post-purchase/v1/claims/search', [
+                'players.user_id' => $sellerId,
+                'players.role'    => 'respondent',
+                'status'          => $status,
+                'limit'           => 50,
+                'offset'          => 0,
             ]);
 
             if (isset($response['error'])) {
