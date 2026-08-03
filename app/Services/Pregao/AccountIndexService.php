@@ -43,7 +43,16 @@ final class AccountIndexService
         $metrics = $this->ensureMetricsRow($accountId);
         $baselines = $this->ensureBaselinesRow($accountId);
         $available = $this->resolveAvailable($metrics);
-        $beforeSnapshot = $this->snapshotForAudit($accountId, $metrics, $baselines, $available);
+        $prevFactorsActive = (int) ($metrics['factors_active'] ?? 0);
+        $prevIndice = isset($metrics['indice_atual']) ? (float) $metrics['indice_atual'] : null;
+        $beforeSnapshot = [
+            'account_id' => $accountId,
+            'ft_was_available' => (bool) ($available['Ft'] ?? false) && $prevFactorsActive >= 5,
+            'indice' => $prevIndice,
+            'factors_active' => $prevFactorsActive,
+            'label' => sprintf('%d de 5 fatores ativos', $prevFactorsActive),
+            'factors' => null,
+        ];
 
         $result = $this->calculator->calculate([
             'vendas_7d' => (float) ($metrics['vendas_7d'] ?? 0),

@@ -1404,6 +1404,26 @@ class MercadoLivreClient
     }
 
     /**
+     * GET com headers extras (ex.: api-version: 2 do Product Ads).
+     *
+     * @param array<string, scalar|null> $params
+     * @param array<string, string> $headers
+     * @return array<string, mixed>
+     */
+    public function getWithHeaders(string $endpoint, array $params = [], array $headers = []): array
+    {
+        $requiresAuth = $this->requiresAuthForEndpoint('GET', $endpoint, null);
+        $options = [];
+        if ($params !== []) {
+            $options['query'] = $params;
+        }
+        if ($headers !== []) {
+            $options['headers'] = $headers;
+        }
+        return $this->requestWithRetry('GET', $endpoint, $options, true, $requiresAuth);
+    }
+
+    /**
      * Generic POST request
      */
     public function post(string $endpoint, array $data = []): array

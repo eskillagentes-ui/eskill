@@ -93,7 +93,6 @@ final class AdsMetricsCollector
                 $budget = $this->extractBudget($campaign);
                 $roasObj = $this->extractRoasObjetivo($campaign);
                 $status = (string) ($campaign['status'] ?? 'active');
-                $items = $this->extractItemIds($campaign);
 
                 foreach ($dates as $date) {
                     $report = $this->withBackoff(
@@ -106,15 +105,17 @@ final class AdsMetricsCollector
                     $impressions = (int) ($metrics['impressions'] ?? 0);
                     $sold = (int) ($metrics['sold_quantity'] ?? $metrics['conversions'] ?? 0);
                     $cpc = $clicks > 0 ? round($gasto / $clicks, 4) : null;
-                    $acos = $receita > 0 ? round(($gasto / $receita) * 100, 4) : ($gasto > 0 ? null : null);
+                    $acos = null;
                     if ($receita > 0) {
                         $acos = round(($gasto / $receita) * 100, 4);
-                    } elseif ($gasto > 0) {
-                        $acos = null; // receita zero com gasto → n/d (não inventar)
-                    } else {
-                        $acos = null;
                     }
                     $roasReal = $gasto > 0 ? round($receita / $gasto, 4) : null;
+                    if (isset($report['roas_objetivo']) && is_numeric($report['roas_objetivo'])) {
+                        $roasObj = (float) $report['roas_objetivo'];
+                    }
+                    if (isset($report['daily_budget']) && is_numeric($report['daily_budget'])) {
+                        $budget = (float) $report['daily_budget'];
+                    }
 
                     $this->upsertCampaignDay([
                         'account_id' => $accountId,
@@ -134,40 +135,6 @@ final class AdsMetricsCollector
                         'data' => $campaign,
                     ]);
 
-                    // SKU-level: distribui proporcionalmente se não houver breakdown; marca n/d de ROAS trio via custo
-                    if ($items !== []) {
-                        $share = 1.0 / count($items);
-                        foreach ($items as $mlbId) {
-                            $skuGasto = round($gasto * $share, 4);
-                            $skuReceita = round($receita * $share, 4);
-                            $skuClicks = (int) round($clicks * $share);
-                            $skuImp = (int) round($impressions * $share);
-                            $skuSold = (int) round($sold * $share);
-                            $skuCpc = $skuClicks > 0 ? round($skuGasto / $skuClicks, 4) : null;
-                            $skuAcos = $skuReceita > 0 ? round(($skuGasto / $skuReceita) * 100, 4) : null;
-                            $skuRoas = $skuGasto > 0 ? round($skuReceita / $skuGasto, 4) : null;
-                            $trio = $this->skuCustos->roasTrio($accountId, $mlbId);
-                            $health = $this->lookupItemHealth($accountId, $mlbId);
-
-                            $this->upsertSkuDay([
-                                'account_id' => $accountId,
-                                'campaign_id' => $campaignId,
-                                'mlb_id' => $mlbId,
-                                'date' => $date,
-                                'gasto' => $skuGasto,
-                                'impressoes' => $skuImp,
-                                'cliques' => $skuClicks,
-                                'cpc_medio' => $skuCpc,
-                                'vendas_atribuidas' => $skuSold,
-                                'receita_atribuida' => $skuReceita,
-                                'acos' => $skuAcos,
-                                'roas_real' => $skuRoas,
-                                'roas_objetivo' => $trio['roas_objetivo'] ?? $roasObj,
-                                'health' => $health,
-                            ]);
-                        }
-                    }
-
                     if (!isset($dayMetrics[$date])) {
                         $dayMetrics[$date] = ['gasto' => 0.0, 'receita_atribuida' => 0.0];
                     }
@@ -176,6 +143,57 @@ final class AdsMetricsCollector
                 }
 
                 usleep(self::BATCH_SLEEP_US);
+            }
+
+            // SKU-level via ads/search (read-only)
+            $skuFrom = $fullHistory
+                ? $today->modify('-34 days')->format('Y-m-d')
+                : $today->format('Y-m-d');
+            $skuTo = $today->format('Y-m-d');
+            $adsItems = $this->withBackoff(
+                static fn () => $ads->getAdsItems($skuFrom, $skuTo, 50)
+            );
+            if (is_array($adsItems)) {
+                foreach ($adsItems as $item) {
+                    if (!is_array($item)) {
+                        continue;
+                    }
+                    $mlbId = strtoupper((string) ($item['item_id'] ?? ''));
+                    $campaignId = (string) ($item['campaign_id'] ?? '');
+                    if ($mlbId === '' || $campaignId === '') {
+                        continue;
+                    }
+                    $m = is_array($item['metrics'] ?? null) ? $item['metrics'] : [];
+                    $gasto = (float) ($m['cost'] ?? 0);
+                    $receita = (float) ($m['total_amount'] ?? $m['direct_amount'] ?? 0);
+                    $clicks = (int) ($m['clicks'] ?? 0);
+                    $impressions = (int) ($m['prints'] ?? 0);
+                    $sold = (int) ($m['units_quantity'] ?? 0);
+                    $cpc = isset($m['cpc']) ? (float) $m['cpc'] : ($clicks > 0 ? round($gasto / $clicks, 4) : null);
+                    $acos = isset($m['acos']) ? (float) $m['acos'] : ($receita > 0 ? round(($gasto / $receita) * 100, 4) : null);
+                    $roasReal = isset($m['roas']) ? (float) $m['roas'] : ($gasto > 0 ? round($receita / $gasto, 4) : null);
+                    $trio = $this->skuCustos->roasTrio($accountId, $mlbId);
+                    $health = $this->lookupItemHealth($accountId, $mlbId);
+
+                    // Persiste no dia "to" da janela (métricas da API já agregadas no range)
+                    // e também no dia atual quando janela = hoje
+                    $this->upsertSkuDay([
+                        'account_id' => $accountId,
+                        'campaign_id' => $campaignId,
+                        'mlb_id' => $mlbId,
+                        'date' => $skuTo,
+                        'gasto' => $gasto,
+                        'impressoes' => $impressions,
+                        'cliques' => $clicks,
+                        'cpc_medio' => $cpc,
+                        'vendas_atribuidas' => $sold,
+                        'receita_atribuida' => $receita,
+                        'acos' => $acos,
+                        'roas_real' => $roasReal,
+                        'roas_objetivo' => $trio['roas_objetivo'],
+                        'health' => $health,
+                    ]);
+                }
             }
 
             foreach ($dayMetrics as $date => $agg) {
@@ -311,7 +329,7 @@ final class AdsMetricsCollector
                COALESCE(SUM(gasto), 0) AS gasto,
                COALESCE(SUM(receita_atribuida), 0) AS receita_atribuida,
                COALESCE(SUM(receita_total), 0) AS receita_total,
-               COUNT(*) AS rows
+               COUNT(*) AS row_count
              FROM ads_account_metrics_daily
              WHERE account_id = ? AND `date` BETWEEN ? AND ?'
         );
@@ -321,7 +339,7 @@ final class AdsMetricsCollector
             'gasto' => (float) ($row['gasto'] ?? 0),
             'receita_atribuida' => (float) ($row['receita_atribuida'] ?? 0),
             'receita_total' => (float) ($row['receita_total'] ?? 0),
-            'rows' => (int) ($row['rows'] ?? 0),
+            'rows' => (int) ($row['row_count'] ?? 0),
         ];
     }
 

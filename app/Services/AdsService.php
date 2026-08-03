@@ -15,7 +15,12 @@ use PDO;
  */
 class AdsService extends MercadoLivreClient
 {
+    public const PADS_METRICS = 'clicks,prints,cost,cpc,acos,roas,direct_amount,indirect_amount,total_amount,units_quantity,direct_units_quantity,indirect_units_quantity';
+
     private PDO $db;
+
+    /** @var array{advertiser_id:int,site_id:string}|null */
+    private ?array $padsAdvertiser = null;
 
     private function isList(array $value): bool
     {
@@ -33,6 +38,37 @@ class AdsService extends MercadoLivreClient
     }
 
     /**
+     * Resolve advertiser_id PADS (não confundir com seller/user id).
+     *
+     * @return array{advertiser_id: int, site_id: string}|null
+     */
+    public function resolvePadsAdvertiser(): ?array
+    {
+        if ($this->padsAdvertiser !== null) {
+            return $this->padsAdvertiser;
+        }
+
+        $resp = $this->getWithHeaders(
+            '/advertising/advertisers',
+            ['product_id' => 'PADS'],
+            ['Api-Version' => '1', 'api-version' => '1']
+        );
+        $list = $resp['advertisers'] ?? ($resp['body']['advertisers'] ?? []);
+        if (!is_array($list) || $list === []) {
+            return null;
+        }
+        $first = $list[0];
+        if (!is_array($first) || empty($first['advertiser_id'])) {
+            return null;
+        }
+        $this->padsAdvertiser = [
+            'advertiser_id' => (int) $first['advertiser_id'],
+            'site_id' => (string) ($first['site_id'] ?? 'MLB'),
+        ];
+        return $this->padsAdvertiser;
+    }
+
+    /**
      * Obtém todas as campanhas de publicidade da conta via API
      * Retorna array com 'campaigns' e '_meta' indicando fonte dos dados
      */
@@ -45,7 +81,6 @@ class AdsService extends MercadoLivreClient
         ];
 
         try {
-            // Sem token válido - ir direto para cache
             if (!$this->ensureValidAccessToken()) {
                 $campaigns = $this->getCachedCampaigns($status);
                 $meta['data_source'] = 'local_cache';
@@ -53,62 +88,71 @@ class AdsService extends MercadoLivreClient
                 return ['campaigns' => $campaigns, '_meta' => $meta];
             }
 
-            $userId = $this->getSellerId();
-            if (!$userId) {
+            $adv = $this->resolvePadsAdvertiser();
+            if ($adv === null) {
                 $campaigns = $this->getCachedCampaigns($status);
                 $meta['data_source'] = 'local_cache';
-                $meta['reason'] = 'seller_id_not_found';
+                $meta['reason'] = 'pads_advertiser_not_found';
                 return ['campaigns' => $campaigns, '_meta' => $meta];
             }
 
-            // Primeiro tenta Product Ads (endpoint mais novo / específico)
-            $productAdsEndpoint = "/advertising/advertisers/{$userId}/product_ads/campaigns";
-            $productAdsResponse = $this->get($productAdsEndpoint, [
-                'status' => $status,
-            ]);
+            $meta['advertiser_id'] = $adv['advertiser_id'];
+            $meta['site_id'] = $adv['site_id'];
 
-            if ($this->isList($productAdsResponse)) {
-                $campaigns = $productAdsResponse;
-                $this->cacheCampaigns($campaigns);
-                $meta['data_source'] = 'mercadolivre_api_product_ads';
-                $meta['api_endpoint'] = $productAdsEndpoint;
-                return ['campaigns' => $campaigns, '_meta' => $meta];
-            }
+            $tz = new \DateTimeZone('America/Sao_Paulo');
+            $to = (new \DateTimeImmutable('today', $tz))->format('Y-m-d');
+            $from = (new \DateTimeImmutable('today', $tz))->modify('-34 days')->format('Y-m-d');
 
-            if (isset($productAdsResponse['error']) || isset($productAdsResponse['status'])) {
-                $meta['product_ads_error'] = $productAdsResponse['message'] ?? ($productAdsResponse['error'] ?? 'unknown');
-                if (isset($productAdsResponse['status'])) {
-                    $meta['product_ads_status'] = (int)$productAdsResponse['status'];
-                }
-            }
+            $endpoint = sprintf(
+                '/advertising/%s/advertisers/%d/product_ads/campaigns/search',
+                $adv['site_id'],
+                $adv['advertiser_id']
+            );
+            $response = $this->getWithHeaders($endpoint, [
+                'limit' => 50,
+                'offset' => 0,
+                'date_from' => $from,
+                'date_to' => $to,
+                'metrics' => self::PADS_METRICS,
+            ], ['api-version' => '2']);
 
-            $response = $this->get("/advertising/campaigns", [
-                'user_id' => $userId,
-                'status' => $status
-            ]);
-
-            if (isset($response['error'])) {
+            if (isset($response['error']) || (isset($response['status']) && (int) $response['status'] >= 400)) {
                 $campaigns = $this->getCachedCampaigns($status);
                 $meta['data_source'] = 'local_cache';
                 $meta['reason'] = 'api_error';
                 $meta['api_error'] = $response['message'] ?? ($response['error'] ?? 'unknown');
+                $meta['api_status'] = $response['status'] ?? null;
                 return ['campaigns' => $campaigns, '_meta' => $meta];
+            }
+
+            $results = $response['results'] ?? [];
+            if (!is_array($results)) {
+                $results = [];
             }
 
             $campaigns = [];
-            if (isset($response['results']) && is_array($response['results'])) {
-                $campaigns = $response['results'];
-            } elseif ($this->isList($response)) {
-                $campaigns = $response;
+            foreach ($results as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $campaigns[] = $this->normalizeCampaignRow($row);
             }
 
-            if (!empty($campaigns)) {
+            if ($status !== 'all') {
+                $want = strtolower($status);
+                $campaigns = array_values(array_filter(
+                    $campaigns,
+                    static fn (array $c): bool => strtolower((string) ($c['status'] ?? '')) === $want
+                ));
+            }
+
+            if ($campaigns !== []) {
                 $this->cacheCampaigns($campaigns);
-                $meta['data_source'] = 'mercadolivre_api';
+                $meta['data_source'] = 'mercadolivre_api_pads_v2';
+                $meta['api_endpoint'] = $endpoint;
                 return ['campaigns' => $campaigns, '_meta' => $meta];
             }
 
-            // API retornou erro - usar fallback
             $campaigns = $this->getCachedCampaigns($status);
             $meta['data_source'] = 'local_cache';
             $meta['reason'] = 'empty_api_response';
@@ -125,6 +169,152 @@ class AdsService extends MercadoLivreClient
             $meta['error'] = $e->getMessage();
             return ['campaigns' => $campaigns, '_meta' => $meta];
         }
+    }
+
+    /**
+     * Métricas de campanha em um dia (ou janela) via PADS v2.
+     *
+     * @return array<string, mixed>
+     */
+    public function getCampaignMetricsForDates(string $campaignId, string $dateFrom, string $dateTo): array
+    {
+        $adv = $this->resolvePadsAdvertiser();
+        if ($adv === null) {
+            return $this->getEmptyReport();
+        }
+
+        $endpoint = sprintf(
+            '/advertising/%s/advertisers/%d/product_ads/campaigns/search',
+            $adv['site_id'],
+            $adv['advertiser_id']
+        );
+        $response = $this->getWithHeaders($endpoint, [
+            'limit' => 50,
+            'offset' => 0,
+            'date_from' => $dateFrom,
+            'date_to' => $dateTo,
+            'metrics' => self::PADS_METRICS,
+        ], ['api-version' => '2']);
+
+        $found = null;
+        foreach ($response['results'] ?? [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            if ((string) ($row['id'] ?? '') === $campaignId) {
+                $found = $row;
+                break;
+            }
+        }
+        if ($found === null) {
+            return array_merge($this->getEmptyReport(), [
+                'campaign_id' => $campaignId,
+                'period' => ['from' => $dateFrom, 'to' => $dateTo],
+            ]);
+        }
+
+        $m = is_array($found['metrics'] ?? null) ? $found['metrics'] : [];
+        $cost = (float) ($m['cost'] ?? 0);
+        $revenue = (float) ($m['total_amount'] ?? $m['direct_amount'] ?? 0);
+        $clicks = (int) ($m['clicks'] ?? 0);
+        $impressions = (int) ($m['prints'] ?? $m['impressions'] ?? 0);
+        $sold = (int) ($m['units_quantity'] ?? 0);
+
+        return [
+            'campaign_id' => $campaignId,
+            'period' => ['from' => $dateFrom, 'to' => $dateTo],
+            'metrics' => [
+                'investment' => $cost,
+                'revenue' => $revenue,
+                'clicks' => $clicks,
+                'impressions' => $impressions,
+                'conversions' => $sold,
+                'sold_quantity' => $sold,
+            ],
+            'calculated_metrics' => [
+                'acos' => isset($m['acos']) ? (float) $m['acos'] : ($revenue > 0 ? round(($cost / $revenue) * 100, 2) : null),
+                'roas' => isset($m['roas']) ? (float) $m['roas'] : ($cost > 0 ? round($revenue / $cost, 2) : null),
+                'cpc' => isset($m['cpc']) ? (float) $m['cpc'] : ($clicks > 0 ? round($cost / $clicks, 2) : null),
+                'ctr' => $impressions > 0 ? round(($clicks / $impressions) * 100, 2) : null,
+            ],
+            'roas_objetivo' => isset($found['roas_target']) ? (float) $found['roas_target'] : null,
+            'acos_objetivo' => isset($found['acos_target']) ? (float) $found['acos_target'] : null,
+            'daily_budget' => isset($found['budget']) ? (float) $found['budget'] : null,
+            'status' => (string) ($found['status'] ?? ''),
+            'raw' => $found,
+            'daily_breakdown' => [],
+        ];
+    }
+
+    /**
+     * Anúncios (SKU) com métricas — PADS ads/search.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function getAdsItems(string $dateFrom, string $dateTo, int $limit = 50): array
+    {
+        $adv = $this->resolvePadsAdvertiser();
+        if ($adv === null) {
+            return [];
+        }
+
+        $endpoint = sprintf(
+            '/advertising/%s/advertisers/%d/product_ads/ads/search',
+            $adv['site_id'],
+            $adv['advertiser_id']
+        );
+        $all = [];
+        $offset = 0;
+        do {
+            $response = $this->getWithHeaders($endpoint, [
+                'limit' => $limit,
+                'offset' => $offset,
+                'date_from' => $dateFrom,
+                'date_to' => $dateTo,
+                'metrics' => self::PADS_METRICS,
+            ], ['api-version' => '2']);
+            $batch = $response['results'] ?? [];
+            if (!is_array($batch) || $batch === []) {
+                break;
+            }
+            foreach ($batch as $row) {
+                if (is_array($row)) {
+                    $all[] = $row;
+                }
+            }
+            $total = (int) ($response['paging']['total'] ?? count($all));
+            $offset += $limit;
+            usleep(200000);
+        } while ($offset < $total && $offset < 500);
+
+        return $all;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function normalizeCampaignRow(array $row): array
+    {
+        $metrics = is_array($row['metrics'] ?? null) ? $row['metrics'] : [];
+        return [
+            'id' => (string) ($row['id'] ?? ''),
+            'name' => (string) ($row['name'] ?? ''),
+            'status' => (string) ($row['status'] ?? 'unknown'),
+            'budget' => [
+                'daily_budget' => (float) ($row['budget'] ?? 0),
+            ],
+            'daily_budget' => (float) ($row['budget'] ?? 0),
+            'type' => 'product_ad',
+            'roas_target' => isset($row['roas_target']) ? (float) $row['roas_target'] : null,
+            'acos_target' => isset($row['acos_target']) ? (float) $row['acos_target'] : null,
+            'target_roas' => isset($row['roas_target']) ? (float) $row['roas_target'] : null,
+            'strategy' => $row['strategy'] ?? null,
+            'metrics' => $metrics,
+            'date_created' => $row['date_created'] ?? null,
+            'last_updated' => $row['last_updated'] ?? null,
+            'items' => [],
+        ];
     }
 
     /**
@@ -146,7 +336,7 @@ class AdsService extends MercadoLivreClient
         ];
 
         try {
-            $report = $this->getCampaignReport($campaignId, $dateFrom, $dateTo);
+            $report = $this->getCampaignMetricsForDates($campaignId, $dateFrom, $dateTo);
             return array_merge($report, ['_meta' => $meta]);
         } catch (\Exception $e) {
             log_warning('Erro ao obter métricas de campanha', [
@@ -162,6 +352,38 @@ class AdsService extends MercadoLivreClient
                 'period' => ['from' => $dateFrom, 'to' => $dateTo],
                 '_meta' => $meta,
             ]);
+        }
+    }
+
+    /**
+     * Obtém relatório detalhado de campanha
+     */
+    public function getCampaignReport(string $campaignId, string $dateFrom, string $dateTo): array
+    {
+        try {
+            $report = $this->getCampaignMetricsForDates($campaignId, $dateFrom, $dateTo);
+            if (((float) ($report['metrics']['investment'] ?? 0)) > 0
+                || ((float) ($report['metrics']['revenue'] ?? 0)) > 0
+                || ((int) ($report['metrics']['clicks'] ?? 0)) > 0
+            ) {
+                $this->cacheReportMetrics($campaignId, [
+                    'total' => [
+                        'cost' => $report['metrics']['investment'] ?? 0,
+                        'amount' => $report['metrics']['revenue'] ?? 0,
+                        'clicks' => $report['metrics']['clicks'] ?? 0,
+                        'impressions' => $report['metrics']['impressions'] ?? 0,
+                        'conversions' => $report['metrics']['conversions'] ?? 0,
+                    ],
+                ]);
+            }
+            return $report;
+        } catch (\Exception $e) {
+            log_warning('Erro ao obter relatório de campanha', [
+                'service' => 'AdsService',
+                'campaign_id' => $campaignId,
+                'error' => $e->getMessage(),
+            ]);
+            return $this->getCachedReport($campaignId, $dateFrom, $dateTo);
         }
     }
 
@@ -308,61 +530,6 @@ class AdsService extends MercadoLivreClient
             ];
         } catch (\Exception $e) {
             return ['success' => false, 'error' => $e->getMessage()];
-        }
-    }
-
-    /**
-     * Obtém relatório detalhado de campanha
-     */
-    public function getCampaignReport(string $campaignId, string $dateFrom, string $dateTo): array
-    {
-        try {
-            $params = [
-                'campaign_id' => $campaignId,
-                'date_from' => $dateFrom,
-                'date_to' => $dateTo,
-                'metrics' => 'cost,clicks,impressions,sold_quantity,amount,conversions',
-            ];
-
-            $response = $this->get("/advertising/reports/detailed", $params);
-
-            if (isset($response['error'])) {
-                // Tentar buscar métricas do cache
-                return $this->getCachedReport($campaignId, $dateFrom, $dateTo);
-            }
-
-            // Salvar métricas em cache para histórico
-            $this->cacheReportMetrics($campaignId, $response);
-
-            $total = $response['total'] ?? null;
-            if (!is_array($total) && isset($response['body']['total']) && is_array($response['body']['total'])) {
-                $total = $response['body']['total'];
-            }
-            if (!is_array($total)) {
-                $total = [];
-            }
-
-            return [
-                'campaign_id' => $campaignId,
-                'period' => ['from' => $dateFrom, 'to' => $dateTo],
-                'metrics' => [
-                    'investment' => $total['cost'] ?? 0,
-                    'revenue' => $total['amount'] ?? 0,
-                    'clicks' => $total['clicks'] ?? 0,
-                    'impressions' => $total['impressions'] ?? 0,
-                    'conversions' => $total['conversions'] ?? 0,
-                    'sold_quantity' => $total['sold_quantity'] ?? 0,
-                ],
-                'calculated_metrics' => $this->calculateAdMetrics($total),
-                'daily_breakdown' => $response['results'] ?? ($response['body']['results'] ?? []),
-            ];
-        } catch (\Exception $e) {
-            log_warning('Erro ao obter relatório de campanha', [
-                'service' => 'AdsService',
-                'campaign_id' => $campaignId,
-                'error' => $e->getMessage(),
-            ]);
-            return $this->getCachedReport($campaignId, $dateFrom, $dateTo);
         }
     }
 
