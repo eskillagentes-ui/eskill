@@ -1,0 +1,21 @@
+[Unit]
+Description=eskill Pregao WebSocket gateway (STAGING :8092)
+After=network.target
+
+[Service]
+Type=simple
+User=eskill
+Group=eskill
+WorkingDirectory=/home/eskill/htdocs/staging.eskill.com.br
+Environment=PREGAO_SEED=true
+Environment=PREGAO_WS_PORT=8092
+Environment=REDIS_DB=1
+# .env do staging é carregado pelo próprio bin via Dotenv (WorkingDirectory)
+ExecStart=/usr/bin/php /home/eskill/htdocs/staging.eskill.com.br/bin/pregao-ws-gateway.php
+Restart=always
+RestartSec=3
+StandardOutput=append:/home/eskill/htdocs/staging.eskill.com.br/storage/logs/pregao-ws.log
+StandardError=append:/home/eskill/htdocs/staging.eskill.com.br/storage/logs/pregao-ws.log
+
+[Install]
+WantedBy=multi-user.target

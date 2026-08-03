@@ -1,0 +1,21 @@
+[Unit]
+Description=eskill Pregao ESKL11 index tick (STAGING — NÃO usar conta 1335)
+After=network.target
+
+[Service]
+Type=simple
+User=eskill
+Group=eskill
+WorkingDirectory=/home/eskill/htdocs/staging.eskill.com.br
+Environment=PREGAO_SEED=true
+Environment=RANK_TRACKER_ENABLED=false
+Environment=REDIS_DB=1
+ExecStartPre=/usr/bin/bash /home/eskill/htdocs/eskill.com.br/bin/pregao-staging-tick-guard.sh
+ExecStart=/usr/bin/bash /home/eskill/htdocs/eskill.com.br/bin/pregao-staging-tick-start.sh
+Restart=on-failure
+RestartSec=10
+StandardOutput=append:/home/eskill/htdocs/staging.eskill.com.br/storage/logs/pregao-tick.log
+StandardError=append:/home/eskill/htdocs/staging.eskill.com.br/storage/logs/pregao-tick.log
+
+[Install]
+WantedBy=multi-user.target

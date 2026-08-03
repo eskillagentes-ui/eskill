@@ -1,0 +1,10 @@
+[Unit]
+Description=Timer: Pregao watchlist diário 07:30 America/Sao_Paulo
+
+[Timer]
+OnCalendar=*-*-* 07:30:00 America/Sao_Paulo
+Persistent=true
+Unit=pregao-watchlist.service
+
+[Install]
+WantedBy=timers.target
