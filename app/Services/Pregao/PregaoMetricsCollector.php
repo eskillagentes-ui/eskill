@@ -289,6 +289,10 @@ final class PregaoMetricsCollector
             $media = $q['media_resposta_s'];
             $abertasN = (int) $q['perguntas_abertas'];
             $cardStatus = (string) $q['card_status'];
+            $cardReason = (string) ($q['card_reason'] ?? '');
+            $baseline28 = (float) ($q['perguntas_recebidas_baseline_28d'] ?? 1);
+            $volumeDelta = $q['perguntas_volume_delta_pct'] ?? null;
+            $diasSem = (int) ($q['dias_sem_pergunta'] ?? 0);
             /** @var list<array<string, mixed>> $abertas */
             $abertas = $q['abertas'];
             /** @var list<array<string, mixed>> $newlyAnswered */
@@ -331,6 +335,10 @@ final class PregaoMetricsCollector
                 'media_resposta_s' => $media,
                 'perguntas_abertas' => $abertasN,
                 'card_status' => $cardStatus,
+                'card_reason' => $cardReason,
+                'baseline_28d' => $baseline28,
+                'volume_delta_pct' => $volumeDelta,
+                'dias_sem_pergunta' => $diasSem,
                 'abertas' => $abertas,
             ];
             $meta['metrics']['perguntas_recebidas_7d'] = ['available' => true, 'source' => (string) $q['source']];
@@ -338,6 +346,9 @@ final class PregaoMetricsCollector
             $meta['metrics']['taxa_resposta_7d'] = ['available' => $taxa !== null, 'source' => (string) $q['source']];
             $meta['metrics']['mediana_resposta_s'] = ['available' => $mediana !== null, 'source' => (string) $q['source']];
             $meta['metrics']['perguntas_abertas'] = ['available' => true, 'source' => (string) $q['source']];
+            $meta['metrics']['perguntas_recebidas_baseline_28d'] = ['available' => true, 'source' => 'ml_questions'];
+            $meta['metrics']['perguntas_volume_delta_pct'] = ['available' => $volumeDelta !== null, 'source' => 'computed'];
+            $meta['metrics']['dias_sem_pergunta'] = ['available' => true, 'source' => (string) $q['source']];
             $meta['metrics']['tempo_medio_resposta_s'] = [
                 'available' => $media !== null,
                 'source' => (string) $q['source'],
@@ -350,11 +361,21 @@ final class PregaoMetricsCollector
                     ['perguntas_recebidas_7d', $recebidas],
                     ['perguntas_respondidas_7d', $respondidas],
                     ['perguntas_abertas', $abertasN],
+                    ['perguntas_recebidas_baseline_28d', $baseline28],
+                    ['dias_sem_pergunta', $diasSem],
                 ] as [$key, $value]
             ) {
                 $this->emitter->emit('metric.update', [
                     'key' => $key,
                     'value' => $value,
+                    'flash' => $flash,
+                ], $accountId, 'live');
+            }
+
+            if ($volumeDelta !== null) {
+                $this->emitter->emit('metric.update', [
+                    'key' => 'perguntas_volume_delta_pct',
+                    'value' => $volumeDelta,
                     'flash' => $flash,
                 ], $accountId, 'live');
             }
@@ -385,11 +406,33 @@ final class PregaoMetricsCollector
                     'mediana_s' => $mediana,
                     'abertas' => $abertasN,
                     'card_status' => $cardStatus,
+                    'card_reason' => $cardReason,
+                    'baseline_28d' => $baseline28,
+                    'volume_delta_pct' => $volumeDelta,
+                    'dias_sem_pergunta' => $diasSem,
                     'abertas_list' => $abertas,
                 ],
                 'flash' => $flash,
             ], $accountId, 'live');
 
+            // Volume: alerta 1× quando cruza 7 dias sem pergunta
+            if ($diasSem >= PregaoQuestionsService::DAYS_WITHOUT_Q_RED) {
+                $this->emitter->emitOpOnTransition(
+                    'PERGUNTAS_VOLUME_ZERO',
+                    [
+                        'robot' => 'PERGUNTAS',
+                        'level' => 'alert',
+                        'icon' => '📉',
+                        'msg' => sprintf(
+                            'sem perguntas há %d dias — verificar exposição',
+                            $diasSem
+                        ),
+                    ],
+                    ['dias_sem_gte' => PregaoQuestionsService::DAYS_WITHOUT_Q_RED],
+                    $accountId,
+                    'live'
+                );
+            }
             // Alerta 1× por pergunta aberta >2h
             foreach ($abertas as $openQ) {
                 if (empty($openQ['alert_due'])) {

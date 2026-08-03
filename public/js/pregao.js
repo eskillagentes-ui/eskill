@@ -250,7 +250,11 @@
         const med = p7.mediana_s != null ? fmtDuration(p7.mediana_s) : '—';
         const ab = p7.abertas != null ? p7.abertas : 0;
         if ($('sPerg')) {
-            $('sPerg').textContent = 'taxa ' + taxa + ' · mediana ' + med + ' · ' + ab + ' em aberto';
+            if (p7.card_reason && (p7.card_status === 'vermelho' || p7.card_status === 'amarelo')) {
+                $('sPerg').textContent = p7.card_reason;
+            } else {
+                $('sPerg').textContent = 'taxa ' + taxa + ' · mediana ' + med + ' · ' + ab + ' em aberto';
+            }
         }
         if (card) {
             card.classList.remove('status-verde', 'status-amarelo', 'status-vermelho');
@@ -446,6 +450,7 @@
                     mediana_s: p.value.mediana_s,
                     abertas: p.value.abertas,
                     card_status: p.value.card_status,
+                    card_reason: p.value.card_reason || '',
                     lista_abertas: p.value.abertas_list || []
                 }
             });

@@ -429,6 +429,12 @@ final class PregaoSnapshotService
                     ? (int) $m['perguntas_7d']['media_resposta_s'] : null,
                 'abertas' => (int) ($m['perguntas_7d']['perguntas_abertas'] ?? 0),
                 'card_status' => (string) ($m['perguntas_7d']['card_status'] ?? 'verde'),
+                'card_reason' => (string) ($m['perguntas_7d']['card_reason'] ?? ''),
+                'baseline_28d' => isset($m['perguntas_7d']['baseline_28d'])
+                    ? (float) $m['perguntas_7d']['baseline_28d'] : null,
+                'volume_delta_pct' => isset($m['perguntas_7d']['volume_delta_pct'])
+                    ? (float) $m['perguntas_7d']['volume_delta_pct'] : null,
+                'dias_sem_pergunta' => (int) ($m['perguntas_7d']['dias_sem_pergunta'] ?? 0),
                 'lista_abertas' => is_array($m['perguntas_7d']['abertas'] ?? null)
                     ? $m['perguntas_7d']['abertas'] : [],
             ] : null,

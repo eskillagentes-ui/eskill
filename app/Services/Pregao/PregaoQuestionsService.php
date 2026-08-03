@@ -20,6 +20,8 @@ final class PregaoQuestionsService
     public const OPEN_ALERT_SECONDS = 7200;      // 2h
     public const OPEN_CRITICAL_SECONDS = 43200;  // 12h
     public const CACHE_TTL_SECONDS = 60;
+    public const VOLUME_DROP_PCT = 50.0;
+    public const DAYS_WITHOUT_Q_RED = 7;
 
     private PDO $db;
     private ?Redis $redis;
@@ -56,7 +58,8 @@ final class PregaoQuestionsService
 
         $fromApi = $this->fetchFromApi($accountId, $sellerId);
         if ($fromApi !== null) {
-            $result = $this->buildResult($fromApi['rows'], $fromApi['open'], $prevOpenIds);
+            $volume = $this->computeVolumeSignals($accountId, count($fromApi['rows']), $fromApi['last_created_ts'] ?? null);
+            $result = $this->buildResult($fromApi['rows'], $fromApi['open'], $prevOpenIds, $volume);
             $result['source'] = 'ml_api';
             $this->cacheSet($cacheKey, [
                 'rows' => $fromApi['rows'],
@@ -67,19 +70,54 @@ final class PregaoQuestionsService
         }
 
         $local = $this->fetchFromLocal($accountId);
-        $result = $this->buildResult($local['rows'], $local['open'], $prevOpenIds);
+        $volume = $this->computeVolumeSignals($accountId, count($local['rows']), $local['last_created_ts'] ?? null);
+        $result = $this->buildResult($local['rows'], $local['open'], $prevOpenIds, $volume);
         $result['source'] = 'ml_questions';
         $this->storePrevOpenIds($accountId, array_column($result['abertas'], 'question_id'));
         return $result;
     }
 
     /**
-     * Pure: status do card conforme regras de aceite.
+     * Pure: status do card. Volume é avaliado ANTES de taxa/tempo.
+     * Ausência de atividade nunca rende verde.
      *
      * @param list<array{hours_open?: float|null, open_seconds?: int|null}> $abertas
+     * @param array{dias_sem_pergunta?: int|null, volume_delta_pct?: float|null, baseline_28d?: float|null}|null $volume
+     * @return array{status: 'verde'|'amarelo'|'vermelho', reason: string}
      */
-    public static function resolveCardStatus(?float $taxaPct, array $abertas): string
-    {
+    public static function resolveCardStatusDetailed(
+        ?float $taxaPct,
+        array $abertas,
+        ?array $volume = null
+    ): array {
+        $diasSem = isset($volume['dias_sem_pergunta']) ? (int) $volume['dias_sem_pergunta'] : null;
+        $deltaPct = isset($volume['volume_delta_pct']) && $volume['volume_delta_pct'] !== null
+            ? (float) $volume['volume_delta_pct']
+            : null;
+        $recebidas7d = isset($volume['recebidas_7d']) ? (int) $volume['recebidas_7d'] : null;
+
+        if ($diasSem !== null && $diasSem >= self::DAYS_WITHOUT_Q_RED) {
+            return [
+                'status' => 'vermelho',
+                'reason' => sprintf('sem perguntas há %d dias — verificar exposição', $diasSem),
+            ];
+        }
+        if ($recebidas7d === 0 && ($diasSem === null || $diasSem >= self::DAYS_WITHOUT_Q_RED)) {
+            return [
+                'status' => 'vermelho',
+                'reason' => sprintf(
+                    'sem perguntas há %d dias — verificar exposição',
+                    $diasSem ?? self::DAYS_WITHOUT_Q_RED
+                ),
+            ];
+        }
+        if ($deltaPct !== null && $deltaPct <= -self::VOLUME_DROP_PCT) {
+            return [
+                'status' => 'amarelo',
+                'reason' => sprintf('volume de perguntas em queda (%s%%)', (string) (int) round($deltaPct)),
+            ];
+        }
+
         $maxOpen = 0;
         foreach ($abertas as $q) {
             $sec = isset($q['open_seconds'])
@@ -89,15 +127,34 @@ final class PregaoQuestionsService
         }
 
         if (($taxaPct !== null && $taxaPct < 70.0) || $maxOpen > self::OPEN_CRITICAL_SECONDS) {
-            return 'vermelho';
+            return ['status' => 'vermelho', 'reason' => 'taxa/tempo crítico'];
         }
         if (
             ($taxaPct !== null && $taxaPct < 90.0)
             || $maxOpen > self::OPEN_ALERT_SECONDS
         ) {
-            return 'amarelo';
+            return ['status' => 'amarelo', 'reason' => 'taxa/tempo em atenção'];
         }
-        return 'verde';
+        if ($recebidas7d === 0) {
+            // 0 recebidas mas <7 dias sem pergunta → ainda não vermelho; não pode ser verde
+            return [
+                'status' => 'amarelo',
+                'reason' => sprintf(
+                    'sem perguntas há %d dia(s) — monitorar exposição',
+                    max(0, (int) ($diasSem ?? 0))
+                ),
+            ];
+        }
+        return ['status' => 'verde', 'reason' => 'volume e taxa ok'];
+    }
+
+    /**
+     * @param list<array{hours_open?: float|null, open_seconds?: int|null}> $abertas
+     * @param array{dias_sem_pergunta?: int|null, volume_delta_pct?: float|null, recebidas_7d?: int}|null $volume
+     */
+    public static function resolveCardStatus(?float $taxaPct, array $abertas, ?array $volume = null): string
+    {
+        return self::resolveCardStatusDetailed($taxaPct, $abertas, $volume)['status'];
     }
 
     /**
@@ -153,9 +210,15 @@ final class PregaoQuestionsService
      * @param list<array<string, mixed>> $rows7d
      * @param list<array<string, mixed>> $openNow
      * @param list<string> $prevOpenIds
+     * @param array{
+     *   perguntas_recebidas_baseline_28d: float,
+     *   perguntas_volume_delta_pct: float|null,
+     *   dias_sem_pergunta: int,
+     *   recebidas_7d: int
+     * } $volume
      * @return array<string, mixed>
      */
-    private function buildResult(array $rows7d, array $openNow, array $prevOpenIds): array
+    private function buildResult(array $rows7d, array $openNow, array $prevOpenIds, array $volume): array
     {
         $recebidas = count($rows7d);
         $respondidas = 0;
@@ -215,6 +278,14 @@ final class PregaoQuestionsService
             }
         }
 
+        $volCtx = [
+            'dias_sem_pergunta' => $volume['dias_sem_pergunta'],
+            'volume_delta_pct' => $volume['perguntas_volume_delta_pct'],
+            'baseline_28d' => $volume['perguntas_recebidas_baseline_28d'],
+            'recebidas_7d' => $volume['recebidas_7d'],
+        ];
+        $card = self::resolveCardStatusDetailed($taxa, $abertas, $volCtx);
+
         return [
             'perguntas_recebidas_7d' => $recebidas,
             'perguntas_respondidas_7d' => $respondidas,
@@ -222,11 +293,78 @@ final class PregaoQuestionsService
             'mediana_resposta_s' => $mediana,
             'media_resposta_s' => $media,
             'perguntas_abertas' => count($abertas),
-            'card_status' => self::resolveCardStatus($taxa, $abertas),
+            'perguntas_recebidas_baseline_28d' => $volume['perguntas_recebidas_baseline_28d'],
+            'perguntas_volume_delta_pct' => $volume['perguntas_volume_delta_pct'],
+            'dias_sem_pergunta' => $volume['dias_sem_pergunta'],
+            'card_status' => $card['status'],
+            'card_reason' => $card['reason'],
             'abertas' => $abertas,
             'newly_answered' => $newlyAnswered,
             'source' => 'unknown',
             'window_days' => self::WINDOW_DAYS,
+        ];
+    }
+
+    /**
+     * Baseline = média semanal dos 28d anteriores à janela 7d (count[-35d,-7d]/4), min 1.
+     *
+     * @return array{
+     *   perguntas_recebidas_baseline_28d: float,
+     *   perguntas_volume_delta_pct: float|null,
+     *   dias_sem_pergunta: int,
+     *   recebidas_7d: int
+     * }
+     */
+    private function computeVolumeSignals(int $accountId, int $recebidas7d, ?int $lastCreatedTs): array
+    {
+        $baseline = 1.0;
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT COUNT(*) FROM ml_questions
+                 WHERE account_id = ?
+                   AND date_created >= DATE_SUB(NOW(), INTERVAL 35 DAY)
+                   AND date_created < DATE_SUB(NOW(), INTERVAL 7 DAY)'
+            );
+            $stmt->execute([$accountId]);
+            $prior28 = (float) ($stmt->fetchColumn() ?: 0);
+            $baseline = max(round($prior28 / 4.0, 2), 1.0);
+        } catch (Throwable $e) {
+            $baseline = 1.0;
+        }
+
+        $deltaPct = null;
+        if ($baseline > 0) {
+            $deltaPct = round((($recebidas7d / $baseline) - 1.0) * 100.0, 1);
+        }
+
+        $diasSem = 0;
+        if ($lastCreatedTs !== null && $lastCreatedTs > 0) {
+            $diasSem = (int) floor(max(0, time() - $lastCreatedTs) / 86400);
+        } else {
+            // Sem histórico conhecido: se 7d=0, assume pelo menos a janela
+            $diasSem = $recebidas7d === 0 ? self::DAYS_WITHOUT_Q_RED : 0;
+            try {
+                $stmt = $this->db->prepare(
+                    'SELECT MAX(date_created) FROM ml_questions WHERE account_id = ?'
+                );
+                $stmt->execute([$accountId]);
+                $max = $stmt->fetchColumn();
+                if (is_string($max) && $max !== '') {
+                    $ts = strtotime($max);
+                    if ($ts !== false) {
+                        $diasSem = (int) floor(max(0, time() - $ts) / 86400);
+                    }
+                }
+            } catch (Throwable $e) {
+                // keep
+            }
+        }
+
+        return [
+            'perguntas_recebidas_baseline_28d' => $baseline,
+            'perguntas_volume_delta_pct' => $deltaPct,
+            'dias_sem_pergunta' => $diasSem,
+            'recebidas_7d' => $recebidas7d,
         ];
     }
 
@@ -280,7 +418,28 @@ final class PregaoQuestionsService
                 }
             }
 
-            return ['rows' => $rows, 'open' => $open];
+            $lastTs = null;
+            foreach (array_merge($rows, $open) as $r) {
+                $ts = (int) ($r['created_ts'] ?? 0);
+                if ($ts > 0 && ($lastTs === null || $ts > $lastTs)) {
+                    $lastTs = $ts;
+                }
+            }
+            if ($lastTs === null) {
+                foreach ($this->paginateQuestions($client, [
+                    'seller_id' => $sellerId,
+                    'status' => 'ANSWERED',
+                    'sort' => 'date_created_desc',
+                ], null) as $q) {
+                    $mapped = $this->mapApiQuestion($q);
+                    if ($mapped !== null) {
+                        $lastTs = (int) ($mapped['created_ts'] ?? 0);
+                    }
+                    break;
+                }
+            }
+
+            return ['rows' => $rows, 'open' => $open, 'last_created_ts' => $lastTs];
         } catch (Throwable $e) {
             log_warning('PregaoQuestionsService: API falhou', [
                 'account_id' => $accountId,
@@ -291,7 +450,7 @@ final class PregaoQuestionsService
     }
 
     /**
-     * @return array{rows: list<array<string, mixed>>, open: list<array<string, mixed>>}
+     * @return array{rows: list<array<string, mixed>>, open: list<array<string, mixed>>, last_created_ts: int|null}
      */
     private function fetchFromLocal(int $accountId): array
     {
@@ -350,7 +509,20 @@ final class PregaoQuestionsService
             ];
         }
 
-        return ['rows' => $rows, 'open' => $open];
+        $lastTs = null;
+        try {
+            $maxStmt = $this->db->prepare('SELECT MAX(date_created) FROM ml_questions WHERE account_id = ?');
+            $maxStmt->execute([$accountId]);
+            $max = $maxStmt->fetchColumn();
+            if (is_string($max) && $max !== '') {
+                $ts = strtotime($max);
+                $lastTs = $ts !== false ? $ts : null;
+            }
+        } catch (Throwable $e) {
+            $lastTs = null;
+        }
+
+        return ['rows' => $rows, 'open' => $open, 'last_created_ts' => $lastTs];
     }
 
     /**

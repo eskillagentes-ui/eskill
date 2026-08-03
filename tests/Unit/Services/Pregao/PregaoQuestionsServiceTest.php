@@ -28,23 +28,67 @@ class PregaoQuestionsServiceTest extends TestCase
 
     public function testCardStatusRules(): void
     {
-        $this->assertSame('verde', PregaoQuestionsService::resolveCardStatus(95.0, []));
+        $this->assertSame('verde', PregaoQuestionsService::resolveCardStatus(95.0, [], [
+            'recebidas_7d' => 10,
+            'dias_sem_pergunta' => 0,
+            'volume_delta_pct' => 5.0,
+        ]));
         $this->assertSame(
             'amarelo',
-            PregaoQuestionsService::resolveCardStatus(80.0, [])
+            PregaoQuestionsService::resolveCardStatus(80.0, [], ['recebidas_7d' => 10, 'dias_sem_pergunta' => 0])
         );
         $this->assertSame(
             'amarelo',
-            PregaoQuestionsService::resolveCardStatus(95.0, [['open_seconds' => 7201]])
+            PregaoQuestionsService::resolveCardStatus(95.0, [['open_seconds' => 7201]], [
+                'recebidas_7d' => 5,
+                'dias_sem_pergunta' => 0,
+            ])
         );
         $this->assertSame(
             'vermelho',
-            PregaoQuestionsService::resolveCardStatus(60.0, [])
+            PregaoQuestionsService::resolveCardStatus(60.0, [], ['recebidas_7d' => 10, 'dias_sem_pergunta' => 0])
         );
         $this->assertSame(
             'vermelho',
-            PregaoQuestionsService::resolveCardStatus(95.0, [['open_seconds' => 43201]])
+            PregaoQuestionsService::resolveCardStatus(95.0, [['open_seconds' => 43201]], [
+                'recebidas_7d' => 5,
+                'dias_sem_pergunta' => 0,
+            ])
         );
+    }
+
+    public function testVolumeZeroHa10DiasFicaVermelho(): void
+    {
+        $status = PregaoQuestionsService::resolveCardStatusDetailed(null, [], [
+            'recebidas_7d' => 0,
+            'dias_sem_pergunta' => 10,
+            'volume_delta_pct' => -100.0,
+        ]);
+        $this->assertSame('vermelho', $status['status']);
+        $this->assertStringContainsString('sem perguntas há 10 dias', $status['reason']);
+    }
+
+    public function testVolumeQueda60PctFicaAmarelo(): void
+    {
+        $status = PregaoQuestionsService::resolveCardStatusDetailed(100.0, [], [
+            'recebidas_7d' => 4,
+            'dias_sem_pergunta' => 0,
+            'volume_delta_pct' => -60.0,
+            'baseline_28d' => 10.0,
+        ]);
+        $this->assertSame('amarelo', $status['status']);
+        $this->assertStringContainsString('queda', $status['reason']);
+    }
+
+    public function testVolumeNormalTaxa100Verde(): void
+    {
+        $status = PregaoQuestionsService::resolveCardStatusDetailed(100.0, [], [
+            'recebidas_7d' => 12,
+            'dias_sem_pergunta' => 0,
+            'volume_delta_pct' => 10.0,
+            'baseline_28d' => 10.0,
+        ]);
+        $this->assertSame('verde', $status['status']);
     }
 
     public function testFormatDurationHuman(): void
@@ -119,7 +163,11 @@ class PregaoQuestionsServiceTest extends TestCase
         $this->assertSame(80.0, $taxa);
         $this->assertSame(
             'amarelo',
-            PregaoQuestionsService::resolveCardStatus($taxa, [])
+            PregaoQuestionsService::resolveCardStatus($taxa, [], [
+                'recebidas_7d' => 10,
+                'dias_sem_pergunta' => 0,
+                'volume_delta_pct' => 0.0,
+            ])
         );
     }
 }
