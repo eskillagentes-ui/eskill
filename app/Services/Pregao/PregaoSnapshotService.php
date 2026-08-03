@@ -416,7 +416,15 @@ final class PregaoSnapshotService
             'vendas_hoje' => $pick('vendas_hoje', (int) ($metrics['vendas_hoje'] ?? 0)),
             'receita_hoje' => $pick('receita_hoje', (float) ($metrics['receita_hoje'] ?? 0)),
             'ticket_medio' => $pick('ticket_medio', (float) ($metrics['ticket_medio'] ?? 0)),
-            'tacos' => null, // fora até Ads
+            'tacos' => (($m['tacos']['available'] ?? false) === true)
+                ? (isset($m['tacos']['value']) ? (float) $m['tacos']['value'] : (float) ($metrics['tacos'] ?? 0))
+                : null,
+            'acos' => (($m['acos']['available'] ?? false) === true)
+                ? (isset($m['acos']['value']) ? (float) $m['acos']['value'] : null)
+                : null,
+            'gasto_ads_hoje' => (($m['gasto_ads_hoje']['available'] ?? false) === true)
+                ? (isset($m['gasto_ads_hoje']['value']) ? (float) $m['gasto_ads_hoje']['value'] : null)
+                : null,
             'posicao_media' => $pick('posicao_media', (float) ($metrics['posicao_media'] ?? 0)),
             'visitas_7d' => $pick('visitas_7d', (float) ($metrics['visitas_7d'] ?? 0)),
             'exposicao' => (($m['exposicao']['available'] ?? false) === true) ? [

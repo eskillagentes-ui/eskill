@@ -5,84 +5,151 @@ declare(strict_types=1);
 namespace App\Services\Pregao;
 
 /**
- * Calculadora pura do índice ESKL11.
+ * Calculadora pura do índice ESKL11 com renormalização sobre fatores ativos.
  *
- * indice = 1000 × (0.40·Fv + 0.20·Fp + 0.15·Fh + 0.15·Fr + 0.10·Ft)
+ * Pesos nominais: Fv 0.40 · Fe 0.20 · Fh 0.15 · Fr 0.15 · Ft 0.10
+ * Fe = exposição (visitas 7d / baseline 28d)
+ * Ft = TACOS (baseline / atual); ativo quando o coletor Ads emite gasto/TACOS.
  *
- * Sem I/O — testável unitariamente.
+ * indice = 1000 × Σ(w_i·F_i) / Σ(w_i)   apenas para i ativos
  */
 final class AccountIndexCalculator
 {
     public const WEIGHT_VENDAS = 0.40;
-    public const WEIGHT_POSICAO = 0.20;
+    public const WEIGHT_EXPOSICAO = 0.20;
+    /** @deprecated use WEIGHT_EXPOSICAO */
+    public const WEIGHT_POSICAO = self::WEIGHT_EXPOSICAO;
     public const WEIGHT_HEALTH = 0.15;
     public const WEIGHT_REPUTACAO = 0.15;
     public const WEIGHT_TACOS = 0.10;
     public const BASE = 1000.0;
+    public const FACTORS_TOTAL = 5;
+
+    /** @var array<string, float> */
+    public const WEIGHTS = [
+        'Fv' => self::WEIGHT_VENDAS,
+        'Fe' => self::WEIGHT_EXPOSICAO,
+        'Fh' => self::WEIGHT_HEALTH,
+        'Fr' => self::WEIGHT_REPUTACAO,
+        'Ft' => self::WEIGHT_TACOS,
+    ];
 
     /** @var array<string, float> */
     private const REPUTACAO_FACTORS = [
         'verde-escuro' => 1.00,
         'verde_escuro' => 1.00,
         'dark_green' => 1.00,
+        '5_green' => 1.00,
         'verde' => 0.90,
         'green' => 0.90,
+        '4_light_green' => 0.90,
         'amarelo' => 0.70,
         'yellow' => 0.70,
+        '3_yellow' => 0.70,
         'laranja' => 0.40,
         'orange' => 0.40,
+        '2_orange' => 0.40,
         'vermelho' => 0.20,
         'red' => 0.20,
+        '1_red' => 0.20,
     ];
 
     /**
      * @param array{
-     *   vendas_7d?: float|int,
-     *   vendas_7d_baseline?: float|int,
-     *   pos_media_atual?: float|int,
-     *   pos_baseline?: float|int,
-     *   health_medio?: float|int,
-     *   reputacao?: string,
-     *   tacos_atual?: float|int,
-     *   tacos_baseline?: float|int
+     *   vendas_7d?: float|int|null,
+     *   vendas_7d_baseline?: float|int|null,
+     *   visitas_7d?: float|int|null,
+     *   visitas_baseline?: float|int|null,
+     *   health_medio?: float|int|null,
+     *   reputacao?: string|null,
+     *   tacos_atual?: float|int|null,
+     *   tacos_baseline?: float|int|null,
+     *   available?: array{Fv?: bool, Fe?: bool, Fh?: bool, Fr?: bool, Ft?: bool}
      * } $input
      * @return array{
-     *   indice: float,
-     *   factors: array{Fv: float, Fp: float, Fh: float, Fr: float, Ft: float}
+     *   indice: float|null,
+     *   factors: array{Fv: float|null, Fe: float|null, Fh: float|null, Fr: float|null, Ft: float|null},
+     *   active: array{Fv: bool, Fe: bool, Fh: bool, Fr: bool, Ft: bool},
+     *   factors_active: int,
+     *   factors_total: int,
+     *   label: string,
+     *   weight_sum: float
      * }
      */
     public function calculate(array $input): array
     {
-        $fv = $this->factorVendas(
-            (float) ($input['vendas_7d'] ?? 0),
-            (float) ($input['vendas_7d_baseline'] ?? 1)
-        );
-        $fp = $this->factorPosicao(
-            (float) ($input['pos_baseline'] ?? 10),
-            (float) ($input['pos_media_atual'] ?? 10)
-        );
-        $fh = $this->factorHealth((float) ($input['health_medio'] ?? 0));
-        $fr = $this->factorReputacao((string) ($input['reputacao'] ?? 'verde'));
-        $ft = $this->factorTacos(
-            (float) ($input['tacos_baseline'] ?? 10),
-            (float) ($input['tacos_atual'] ?? 0.1)
-        );
+        $available = $input['available'] ?? [];
+        // Compat: meta antiga com Fp → Fe
+        if (!isset($available['Fe']) && isset($available['Fp'])) {
+            $available['Fe'] = (bool) $available['Fp'];
+        }
 
-        $weighted = (self::WEIGHT_VENDAS * $fv)
-            + (self::WEIGHT_POSICAO * $fp)
-            + (self::WEIGHT_HEALTH * $fh)
-            + (self::WEIGHT_REPUTACAO * $fr)
-            + (self::WEIGHT_TACOS * $ft);
+        $active = [
+            'Fv' => (bool) ($available['Fv'] ?? false),
+            'Fe' => (bool) ($available['Fe'] ?? false),
+            'Fh' => (bool) ($available['Fh'] ?? false),
+            'Fr' => (bool) ($available['Fr'] ?? false),
+            'Ft' => (bool) ($available['Ft'] ?? false),
+        ];
+
+        $factors = [
+            'Fv' => null,
+            'Fe' => null,
+            'Fh' => null,
+            'Fr' => null,
+            'Ft' => null,
+        ];
+
+        if ($active['Fv']) {
+            $factors['Fv'] = round($this->factorVendas(
+                (float) ($input['vendas_7d'] ?? 0),
+                (float) ($input['vendas_7d_baseline'] ?? 1)
+            ), 6);
+        }
+        if ($active['Fe']) {
+            $factors['Fe'] = round($this->factorExposicao(
+                (float) ($input['visitas_7d'] ?? 0),
+                (float) ($input['visitas_baseline'] ?? 1)
+            ), 6);
+        }
+        if ($active['Fh']) {
+            $factors['Fh'] = round($this->factorHealth((float) ($input['health_medio'] ?? 0)), 6);
+        }
+        if ($active['Fr']) {
+            $factors['Fr'] = round($this->factorReputacao((string) ($input['reputacao'] ?? 'verde')), 6);
+        }
+        if ($active['Ft']) {
+            $factors['Ft'] = round($this->factorTacos(
+                (float) ($input['tacos_baseline'] ?? 10),
+                (float) ($input['tacos_atual'] ?? 0.1)
+            ), 6);
+        }
+
+        $weightSum = 0.0;
+        $weighted = 0.0;
+        $activeCount = 0;
+        foreach (self::WEIGHTS as $key => $weight) {
+            if (!$active[$key] || $factors[$key] === null) {
+                continue;
+            }
+            $weightSum += $weight;
+            $weighted += $weight * $factors[$key];
+            $activeCount++;
+        }
+
+        $indice = null;
+        if ($activeCount > 0 && $weightSum > 0.0) {
+            $indice = round(self::BASE * ($weighted / $weightSum), 4);
+        }
 
         return [
-            'indice' => round(self::BASE * $weighted, 4),
-            'factors' => [
-                'Fv' => round($fv, 6),
-                'Fp' => round($fp, 6),
-                'Fh' => round($fh, 6),
-                'Fr' => round($fr, 6),
-                'Ft' => round($ft, 6),
-            ],
+            'indice' => $indice,
+            'factors' => $factors,
+            'active' => $active,
+            'factors_active' => $activeCount,
+            'factors_total' => self::FACTORS_TOTAL,
+            'label' => sprintf('%d de %d fatores ativos', $activeCount, self::FACTORS_TOTAL),
+            'weight_sum' => round($weightSum, 6),
         ];
     }
 
@@ -92,6 +159,19 @@ final class AccountIndexCalculator
         return $vendas7d / $den;
     }
 
+    /**
+     * Fe = clamp(visitas_7d / visitas_baseline, 0.5, 2.0)
+     * Baseline tipicamente = média semanal dos 28d anteriores.
+     */
+    public function factorExposicao(float $visitas7d, float $visitasBaseline): float
+    {
+        $den = max($visitasBaseline, 1.0);
+        return $this->clamp($visitas7d / $den, 0.5, 2.0);
+    }
+
+    /**
+     * @deprecated use factorExposicao
+     */
     public function factorPosicao(float $posBaseline, float $posMediaAtual): float
     {
         $atual = $posMediaAtual <= 0.0 ? 0.0001 : $posMediaAtual;
@@ -110,7 +190,15 @@ final class AccountIndexCalculator
         if (isset(self::REPUTACAO_FACTORS[$key])) {
             return self::REPUTACAO_FACTORS[$key];
         }
-        // aliases com underscore já cobertos; fallback verde
+        $raw = strtolower(trim($cor));
+        if (isset(self::REPUTACAO_FACTORS[$raw])) {
+            return self::REPUTACAO_FACTORS[$raw];
+        }
+        foreach (self::REPUTACAO_FACTORS as $alias => $factor) {
+            if (str_contains($raw, str_replace('_', '-', $alias)) || str_contains($raw, $alias)) {
+                return $factor;
+            }
+        }
         $alt = str_replace('-', '_', $key);
         return self::REPUTACAO_FACTORS[$alt] ?? self::REPUTACAO_FACTORS['verde'];
     }
@@ -121,11 +209,20 @@ final class AccountIndexCalculator
         return $this->clamp($tacosBaseline / $atual, 0.5, 2.0);
     }
 
+    public function mapLevelIdToCor(string $levelId): string
+    {
+        $id = strtolower($levelId);
+        return match (true) {
+            str_contains($id, '5_green') => 'verde-escuro',
+            str_contains($id, '4_light') => 'verde',
+            str_contains($id, '3_yellow') => 'amarelo',
+            str_contains($id, '2_orange') => 'laranja',
+            str_contains($id, '1_red') || str_contains($id, 'red') => 'vermelho',
+            default => 'verde',
+        };
+    }
+
     /**
-     * Semáforo da conta a partir dos % vs limites.
-     *
-     * verde se todos <50% do limite; amarelo 50–80%; vermelho >80%.
-     *
      * @param array{reclamacoes_pct?: float, atrasos_pct?: float, cancelamentos_pct?: float} $indicadores
      * @param array{reclamacoes_pct?: float, atrasos_pct?: float, cancelamentos_pct?: float} $limites
      */

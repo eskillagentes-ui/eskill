@@ -54,11 +54,11 @@
                     <div class="vl" id="vRec">—</div>
                     <div class="sb">ticket médio <b id="vTicket">—</b></div>
                 </div>
-                <div class="card" id="cTacos" data-metric="tacos">
+                <a class="card" id="cTacos" href="/dashboard/ads" data-metric="tacos" style="text-decoration:none;color:inherit">
                     <div class="lb">TACOS</div>
                     <div class="vl" id="vTacos">n/d</div>
                     <div class="sb" id="sTacos">aguardando módulo Ads</div>
-                </div>
+                </a>
                 <div class="card" id="cPos" data-metric="visitas_7d">
                     <div class="lb">EXPOSIÇÃO (VISITAS 7D)</div>
                     <div class="vl" id="vPos">n/d</div>

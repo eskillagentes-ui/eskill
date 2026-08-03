@@ -203,7 +203,15 @@
         $('vTicket').textContent = nd(m.ticket_medio, fmtMoney);
         $('pnl').textContent = m.receita_hoje == null ? 'n/d' : ('+ ' + fmtMoney(m.receita_hoje).replace('R$ ', 'R$ '));
         $('vTacos').textContent = m.tacos == null ? 'n/d' : (fmtNum(m.tacos, 1) + '%');
-        if ($('sTacos')) $('sTacos').textContent = m.tacos == null ? 'aguardando módulo Ads' : 'gasto ads / receita';
+        if ($('sTacos')) {
+            if (m.tacos == null) {
+                $('sTacos').textContent = 'aguardando módulo Ads';
+            } else {
+                const acos = m.acos == null ? 'n/d' : (fmtNum(m.acos, 1) + '%');
+                const gasto = m.gasto_ads_hoje == null ? 'n/d' : fmtMoney(m.gasto_ads_hoje);
+                $('sTacos').textContent = 'ACOS ' + acos + ' · gasto hoje ' + gasto;
+            }
+        }
         if (m.visitas_7d == null) {
             $('vPos').textContent = 'n/d';
             if ($('sPos')) $('sPos').textContent = 'aguardando coletor';
@@ -499,7 +507,16 @@
         } else if (p.key === 'receita_hoje' || p.key === 'ticket_medio') {
             el.textContent = fmtMoney(p.value);
         } else if (p.key === 'tacos') {
-            el.textContent = fmtNum(p.value, 1) + '%';
+            el.textContent = p.value == null ? 'n/d' : (fmtNum(p.value, 1) + '%');
+            if ($('sTacos')) {
+                if (p.value == null) {
+                    $('sTacos').textContent = p.message || 'nenhuma campanha ativa';
+                } else {
+                    const acos = p.acos == null ? 'n/d' : (fmtNum(p.acos, 1) + '%');
+                    const gasto = p.gasto_hoje == null ? 'n/d' : fmtMoney(p.gasto_hoje);
+                    $('sTacos').textContent = 'ACOS ' + acos + ' · gasto hoje ' + gasto;
+                }
+            }
         } else if (p.key === 'visitas_7d') {
             el.textContent = fmtNum(p.value, 0);
             if ($('sPos')) $('sPos').textContent = 'visitas 7d (Fe)';

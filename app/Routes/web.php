@@ -346,6 +346,7 @@ $router->post('api/users/role', 'App\Controllers\UserManagementController', 'upd
 $router->get('dashboard/ads', 'App\Controllers\AdsController', 'index');
 $router->get('dashboard/ads/criar', 'App\Controllers\AdsController', 'createWizard');
 $router->get('api/ads/dashboard', 'App\Controllers\AdsController', 'getDashboardData');
+$router->get('api/ads/observation', 'App\Controllers\AdsController', 'getObservationData');
 $router->get('api/ads/products', 'App\Controllers\AdsController', 'getProducts');
 $router->get('api/ads/glossary', 'App\Controllers\AdsController', 'getGlossary');
 $router->post('api/ads/suggest-budget', 'App\Controllers\AdsController', 'suggestBudget');

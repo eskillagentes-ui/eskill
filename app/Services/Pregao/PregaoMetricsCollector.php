@@ -12,8 +12,7 @@ use Throwable;
 /**
  * Coleta métricas reais para o Pregão (sem escrita no ML).
  *
- * Ordem: reputação/semáforo → health → perguntas → vendas → visitas (Fe) → [keywords se RANK_TRACKER_ENABLED].
- * TACOS permanece indisponível até o módulo Ads emitir gasto.
+ * Ordem: reputação/semáforo → health → perguntas → vendas → visitas (Fe) → ads (Ft) → [keywords se RANK_TRACKER_ENABLED].
  */
 final class PregaoMetricsCollector
 {
@@ -37,7 +36,7 @@ final class PregaoMetricsCollector
     }
 
     /**
-     * @param list<string>|null $only Subconjunto: reputation|health|questions|sales|visits|keywords|robots
+     * @param list<string>|null $only Subconjunto: reputation|health|questions|sales|visits|ads|keywords|robots
      * @return array<string, mixed>
      */
     public function collect(int $accountId, ?array $only = null): array
@@ -64,6 +63,9 @@ final class PregaoMetricsCollector
         if ($want('visits')) {
             $results['visits'] = $this->collectVisits($accountId, $meta);
         }
+        if ($want('ads')) {
+            $results['ads'] = $this->collectAds($accountId, $meta);
+        }
         if ($want('keywords')) {
             $results['keywords'] = $this->collectKeywords($accountId, $meta);
         }
@@ -74,12 +76,14 @@ final class PregaoMetricsCollector
         // Fp legado não alimenta o índice (substituído por Fe)
         unset($meta['available']['Fp']);
 
-        // TACOS sempre inativo até Ads
-        $meta['available']['Ft'] = false;
-        $meta['metrics']['tacos'] = [
-            'available' => false,
-            'reason' => 'ads_pending',
-        ];
+        // Se ads não foi coletado neste ciclo, preserva meta Ft já persistida
+        if (!$want('ads') && !isset($meta['metrics']['tacos'])) {
+            $meta['available']['Ft'] = false;
+            $meta['metrics']['tacos'] = [
+                'available' => false,
+                'reason' => 'ads_pending',
+            ];
+        }
         // posição média busca só se rank tracker ligado
         if (!($this->config['rank_tracker_enabled'] ?? false)) {
             $meta['metrics']['posicao_media'] = [
@@ -92,6 +96,68 @@ final class PregaoMetricsCollector
         $results['meta'] = $meta;
 
         return $results;
+    }
+
+    /**
+     * Ads / TACOS (Ft) — read-only.
+     *
+     * @param array<string, mixed> $meta
+     * @return array<string, mixed>
+     */
+    private function collectAds(int $accountId, array &$meta): array
+    {
+        try {
+            $collector = new \App\Services\Ads\AdsMetricsCollector($this->db, $this->emitter);
+            $fullHistory = $this->shouldRunFullAdsHistory($accountId);
+            $result = $collector->collect($accountId, $fullHistory);
+
+            $available = !empty($result['available']) && $result['tacos'] !== null;
+            $meta['available']['Ft'] = $available;
+            $meta['metrics']['tacos'] = [
+                'available' => $available,
+                'value' => $result['tacos'] ?? null,
+                'acos' => $result['acos'] ?? null,
+                'gasto_hoje' => $result['gasto_hoje'] ?? null,
+                'active_campaigns' => $result['active_campaigns'] ?? 0,
+                'message' => $result['message'] ?? null,
+                'source' => 'AdsMetricsCollector',
+                'reason' => $available ? null : ($result['reason'] ?? $result['message'] ?? 'no_tacos'),
+            ];
+            $meta['metrics']['acos'] = [
+                'available' => ($result['acos'] ?? null) !== null,
+                'value' => $result['acos'] ?? null,
+            ];
+            $meta['metrics']['gasto_ads_hoje'] = [
+                'available' => ($result['gasto_hoje'] ?? null) !== null,
+                'value' => $result['gasto_hoje'] ?? null,
+            ];
+
+            $alerts = (new \App\Services\Ads\AdsAlertService($this->db, $this->emitter))->evaluate($accountId);
+            $result['alerts'] = $alerts;
+
+            return array_merge(['ok' => (bool) ($result['ok'] ?? false)], $result);
+        } catch (Throwable $e) {
+            log_warning('PregaoMetricsCollector: ads falhou', [
+                'account_id' => $accountId,
+                'error' => $e->getMessage(),
+            ]);
+            $meta['available']['Ft'] = false;
+            $meta['metrics']['tacos'] = ['available' => false, 'error' => $e->getMessage()];
+            return ['ok' => false, 'error' => $e->getMessage()];
+        }
+    }
+
+    private function shouldRunFullAdsHistory(int $accountId): bool
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT COUNT(*) FROM ads_account_metrics_daily WHERE account_id = ?'
+            );
+            $stmt->execute([$accountId]);
+            return ((int) $stmt->fetchColumn()) < 7;
+        } catch (Throwable $e) {
+            return true;
+        }
     }
 
     /**

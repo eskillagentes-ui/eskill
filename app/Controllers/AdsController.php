@@ -38,18 +38,52 @@ class AdsController extends BaseController
     // ==================== PAGES ====================
 
     /**
-     * Dashboard de Ads (versão humanizada)
+     * Dashboard de Ads — observação read-only (Bloco 5)
      * GET /dashboard/ads
      */
     public function index(): void
     {
-        $pageTitle = 'Meus Anúncios';
+        $pageTitle = 'Ads · Observação';
         $activePage = 'ads';
+        $accountId = (int) ($this->getActiveAccountId() ?? 0);
+        $adsObs = $accountId > 0
+            ? (new \App\Services\Ads\AdsObservationService())->dashboard($accountId)
+            : [
+                'read_only' => true,
+                'active_campaigns' => 0,
+                'has_campaigns' => false,
+                'message' => 'nenhuma conta ativa',
+                'tacos' => null,
+                'acos' => null,
+                'gasto_hoje' => null,
+                'sku_custos_count' => 0,
+                'campaigns' => [],
+                'skus' => [],
+                'cpc_health_series' => [],
+                'recovery' => [],
+            ];
 
         ob_start();
-        require __DIR__ . '/../Views/dashboard/ads/dashboard.php';
+        require __DIR__ . '/../Views/dashboard/ads/observation.php';
         $content = ob_get_clean();
         require __DIR__ . '/../Views/layouts/modern/app.php';
+    }
+
+    /**
+     * Dados do painel de observação
+     * GET /api/ads/observation
+     */
+    public function getObservationData(): void
+    {
+        $this->withErrorHandling(function () {
+            $accountId = $this->getActiveAccountId();
+            if (!$accountId) {
+                $this->jsonError('Nenhuma conta do Mercado Livre configurada.', 400);
+                return;
+            }
+            $data = (new \App\Services\Ads\AdsObservationService())->dashboard((int) $accountId);
+            $this->jsonSuccess($data);
+        }, 'AdsController::getObservationData');
     }
 
     /**
