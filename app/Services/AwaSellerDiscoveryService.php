@@ -28,6 +28,35 @@ class AwaSellerDiscoveryService
 
     public function runScan(array $options = []): array
     {
+        $mode = strtolower(trim((string) ($options['mode'] ?? 'auto')));
+
+        // Deep scan (products/search sharded) — caminho que funciona com PolicyAgent
+        // bloqueando /sites/MLB/search no IP de datacenter.
+        if ($mode === 'deep' || $mode === 'auto') {
+            try {
+                $deep = new AwaSellerDeepScanService($this->accountId, null, $this->registry);
+                $result = $deep->runScan($options);
+                $result['scan_engine'] = 'deep_products';
+                return $result;
+            } catch (\Throwable $deepError) {
+                if ($mode === 'deep') {
+                    throw $deepError;
+                }
+                // auto: cai para o fluxo legado
+            }
+        }
+
+        return $this->runLegacyScan($options);
+    }
+
+    /**
+     * Fluxo legado via BrandAnalyzer (/sites/search ou catalog fallback).
+     *
+     * @param array<string, mixed> $options
+     * @return array<string, mixed>
+     */
+    private function runLegacyScan(array $options = []): array
+    {
         $scope = $this->normalizeScope($options);
         $scanId = $this->registry->createScanRun($scope);
 
@@ -35,7 +64,7 @@ class AwaSellerDiscoveryService
             // Tenta a busca principal (requer endpoint /search acessível do IP do servidor).
             // Se o endpoint estiver bloqueado (WAF/PolicyAgent do ML em IPs de datacenter),
             // cai automaticamente para o modo catálogo que usa endpoints autenticados
-            // (/products/search e /users/{id}/items/search) — nunca bloqueados por IP.
+            // (products/search e users items/search) — nunca bloqueados por IP.
             $analysis = $this->brandAnalyzer->analyzeAwaBrand($scope);
 
             if (empty($analysis['items']) && !$this->brandAnalyzer->isSearchEndpointAccessible()) {
@@ -68,6 +97,7 @@ class AwaSellerDiscoveryService
                 'brand_consistency_score' => (float) ($analysis['brand_consistency_score'] ?? 0),
                 'categories' => $scope['categories'],
                 'top_sellers' => $this->buildTopSellers($sellerPayloads),
+                'scan_engine' => 'legacy_brand_analyzer',
             ];
         } catch (\Throwable $throwable) {
             $this->registry->markScanFailed($scanId, $throwable->getMessage());

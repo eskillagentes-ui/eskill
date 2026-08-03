@@ -473,11 +473,15 @@ class AwaSellerIdentificationService
         }
 
         if ($cnpjRaw === null) {
+            // API pública do ML não expõe CNPJ de terceiros. Não grava not_available
+            // (isso poluía a UI com "Sem CNPJ"). Preencha manualmente ou via import.
             return [
                 'found'      => false,
                 'reason'     => 'no_cnpj_in_profile',
+                'message'    => 'CNPJ não disponível via API pública do ML para este seller. Use cadastro manual.',
                 'id_type'    => $idType ?: null,
                 'is_company' => ($profile['company']['cust_type_id'] ?? '') === 'CO',
+                'nickname'   => $profile['nickname'] ?? null,
             ];
         }
 
@@ -528,6 +532,8 @@ class AwaSellerIdentificationService
                     SELECT 1 FROM awa_seller_identification i
                      WHERE i.seller_registry_id = r.id AND i.cnpj IS NOT NULL
                 )
+                AND (r.auto_id_checked_at IS NULL OR r.auto_id_checked_at < (NOW() - INTERVAL 7 DAY))
+              ORDER BY r.items_count DESC
               LIMIT :limit'
         );
         $stmt->bindValue(':account_id', $this->accountId, \PDO::PARAM_INT);
@@ -540,6 +546,7 @@ class AwaSellerIdentificationService
         foreach ($rows as $row) {
             try {
                 $r = $this->autoIdentifyFromMLProfile((int) $row['id'], $client);
+                $this->touchAutoIdChecked((int) $row['id']);
                 $results['processed']++;
                 if ($r['found'] ?? false) {
                     $results['found']++;
@@ -547,11 +554,29 @@ class AwaSellerIdentificationService
                     $results['not_found']++;
                 }
             } catch (\Throwable $e) {
+                $this->touchAutoIdChecked((int) $row['id']);
                 $results['errors']++;
             }
         }
 
         return $results;
+    }
+
+    private function touchAutoIdChecked(int $registryId): void
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'UPDATE awa_seller_registry
+                    SET auto_id_checked_at = NOW()
+                  WHERE id = :id AND account_id = :account_id'
+            );
+            $stmt->execute([
+                'id' => $registryId,
+                'account_id' => $this->accountId,
+            ]);
+        } catch (\Throwable $e) {
+            // Coluna pode não existir em ambientes antigos — ignora.
+        }
     }
 
     /**

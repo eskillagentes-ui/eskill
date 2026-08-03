@@ -81,6 +81,69 @@ class AwaSellerController extends BaseController
     }
 
     /**
+     * Status Brand Protection Program (membership API + direitos cadastrados).
+     * GET /api/brand/awa/sellers/brand-protection/status (quando rota estiver registrada)
+     * Também disponível via public/api-awa-bpp-status.php
+     */
+    public function getBrandProtectionStatus(): void
+    {
+        $this->ensureViewPermission();
+
+        $this->withErrorHandling(function (): void {
+            $accountId = $this->requireActiveMlAccountId();
+            $bpp = new \App\Services\AwaBrandProtectionService($accountId);
+
+            $this->jsonSuccess([
+                'data' => $bpp->getStatus(),
+            ]);
+        }, 'AwaSellerController::getBrandProtectionStatus');
+    }
+
+    /**
+     * Denúncia BPP (dry-run por padrão).
+     * POST /api/brand/awa/sellers/brand-protection/denounce (quando rota estiver registrada)
+     * Também disponível via public/api-awa-bpp-denounce.php
+     */
+    public function denounceBrandProtectionItem(): void
+    {
+        $this->ensureManagePermission();
+
+        $this->withErrorHandling(function (): void {
+            $accountId = $this->requireActiveMlAccountId();
+            $body = $this->request->json();
+            $body = is_array($body) ? $body : [];
+
+            $itemId = (string) ($body['item_id'] ?? '');
+            $reason = (string) ($body['report_reason_id'] ?? 'PPPI2');
+            $comment = (string) ($body['comment'] ?? '');
+            $dryRun = array_key_exists('dry_run', $body)
+                ? (bool) filter_var($body['dry_run'], FILTER_VALIDATE_BOOLEAN)
+                : true;
+            $confirm = (bool) filter_var($body['confirm'] ?? false, FILTER_VALIDATE_BOOLEAN);
+            $sellerRegistryId = isset($body['seller_registry_id']) ? (int) $body['seller_registry_id'] : null;
+
+            if (!$dryRun && !$confirm) {
+                $this->jsonError('Para denúncia real envie dry_run=false e confirm=true.', 422);
+                return;
+            }
+
+            $bpp = new \App\Services\AwaBrandProtectionService($accountId);
+            $result = $bpp->denounceItem(
+                $itemId,
+                $reason,
+                $comment,
+                $dryRun,
+                $sellerRegistryId > 0 ? $sellerRegistryId : null,
+                'controller'
+            );
+
+            $this->jsonSuccess([
+                'data' => $result,
+            ], $dryRun ? 'Dry-run BPP concluído.' : 'Denúncia BPP processada.');
+        }, 'AwaSellerController::denounceBrandProtectionItem');
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function buildScanOptions(): array
@@ -90,8 +153,17 @@ class AwaSellerController extends BaseController
         $bodyCategories = is_array($body) ? ($body['categories'] ?? null) : null;
 
         $options = [
-            'max_results' => max(1, min(5000, $this->request->inputInt('max_results', 500))),
+            'max_results' => max(1, min(10000, $this->request->inputInt('max_results', 2000))),
+            'mode' => 'deep',
         ];
+
+        $body = is_array($body) ? $body : [];
+        if (isset($body['mode']) && is_string($body['mode'])) {
+            $options['mode'] = strtolower(trim($body['mode']));
+        }
+        if (isset($body['max_results'])) {
+            $options['max_results'] = max(1, min(10000, (int) $body['max_results']));
+        }
 
         $categories = $bodyCategories ?? $queryCategories;
         if (is_array($categories) || is_string($categories)) {
