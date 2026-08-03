@@ -1,0 +1,14 @@
+[Unit]
+Description=eskill Pregao watchlist diário (concorrentes /items?ids=)
+After=network.target
+
+[Service]
+Type=oneshot
+User=eskill
+Group=eskill
+WorkingDirectory=/home/eskill/htdocs/eskill.com.br
+Environment=PREGAO_SEED=false
+Environment=RANK_TRACKER_ENABLED=false
+ExecStart=/usr/bin/php /home/eskill/htdocs/eskill.com.br/bin/pregao-watchlist.php --account-id=1335 --collect
+StandardOutput=append:/home/eskill/htdocs/eskill.com.br/storage/logs/pregao-watchlist.log
+StandardError=append:/home/eskill/htdocs/eskill.com.br/storage/logs/pregao-watchlist.log
