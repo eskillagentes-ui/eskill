@@ -110,3 +110,5 @@ node_modules/
 /blob-report/
 /playwright/.cache/
 /playwright/.auth/
+/app/Controllers/_runtime/
+/app/Services/_runtime/
