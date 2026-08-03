@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/css/pregao.css?v=1">
+<link rel="stylesheet" href="/css/pregao.css?v=3">
 
 <div id="pregao-root" data-account-id="<?= (int)($pregaoAccountId ?? 0) ?>" data-read-only="1">
     <header class="pg-header">
@@ -27,8 +27,14 @@
     <div class="wrap">
         <div>
             <div class="panel">
-                <div class="p-head">📈 ESKL11 — EVOLUÇÃO DA CONTA · CANDLE 1 SESSÃO ≈ 1 DIA <span class="live" id="liveBadge">AO VIVO</span></div>
-                <canvas id="chart"></canvas>
+                <div class="p-head">📈 ESKL11 — EVOLUÇÃO DA CONTA · CANDLE 1 SESSÃO ≈ 1 DIA
+                    <span class="factors" id="factorsBadge">— de 5 fatores ativos</span>
+                    <span class="live" id="liveBadge">AO VIVO</span>
+                </div>
+                <div class="chart-wrap">
+                    <canvas id="chart"></canvas>
+                    <div class="chart-empty" id="chartEmpty" hidden>aguardando primeiro fechamento</div>
+                </div>
                 <div class="chart-foot">
                     <span>ABERTURA <b id="fOpen">—</b></span>
                     <span>MÁXIMA <b id="fHigh">—</b></span>
@@ -50,13 +56,13 @@
                 </div>
                 <div class="card" id="cTacos" data-metric="tacos">
                     <div class="lb">TACOS</div>
-                    <div class="vl" id="vTacos">—</div>
-                    <div class="sb" id="sTacos">—</div>
+                    <div class="vl" id="vTacos">n/d</div>
+                    <div class="sb" id="sTacos">aguardando módulo Ads</div>
                 </div>
-                <div class="card" id="cPos" data-metric="posicao_media">
-                    <div class="lb">POSIÇÃO MÉDIA BUSCA</div>
-                    <div class="vl" id="vPos">—</div>
-                    <div class="sb" id="sPos">—</div>
+                <div class="card" id="cPos" data-metric="visitas_7d">
+                    <div class="lb">EXPOSIÇÃO (VISITAS 7D)</div>
+                    <div class="vl" id="vPos">n/d</div>
+                    <div class="sb" id="sPos">aguardando coletor</div>
                 </div>
                 <div class="card" id="cHealth" data-metric="health_medio">
                     <div class="lb">HEALTH MÉDIO</div>
@@ -114,4 +120,5 @@
         wsPath: '/ws/pregao'
     };
 </script>
-<script src="/js/pregao.js?v=1" defer></script>
+<script src="/js/pregao-chart-layout.js?v=1"></script>
+<script src="/js/pregao.js?v=5" defer></script>

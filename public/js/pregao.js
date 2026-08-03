@@ -28,13 +28,45 @@
     }, 1000);
 
     function fmtMoney(n) {
+        if (n === null || n === undefined || Number.isNaN(Number(n))) return 'n/d';
         return 'R$ ' + Math.round(Number(n) || 0).toLocaleString('pt-BR');
     }
     function fmtNum(n, digits) {
+        if (n === null || n === undefined || Number.isNaN(Number(n))) return 'n/d';
         return Number(n).toLocaleString('pt-BR', {
             minimumFractionDigits: digits,
             maximumFractionDigits: digits
         });
+    }
+    /** Formata segundos como duração humana: 51s · 17m · 8h21 · 2d3h */
+    function fmtDuration(seconds) {
+        if (seconds === null || seconds === undefined || Number.isNaN(Number(seconds))) return 'n/d';
+        let s = Math.max(0, Math.round(Number(seconds)));
+        if (s < 60) return s + 's';
+        if (s < 3600) return Math.floor(s / 60) + 'm';
+        const days = Math.floor(s / 86400);
+        s -= days * 86400;
+        const hours = Math.floor(s / 3600);
+        const mins = Math.floor((s % 3600) / 60);
+        if (days > 0) {
+            return days + 'd' + (hours > 0 ? hours + 'h' : '');
+        }
+        return hours + 'h' + String(mins).padStart(2, '0');
+    }
+    function nd(v, formatter) {
+        if (v === null || v === undefined) return 'n/d';
+        return formatter ? formatter(v) : String(v);
+    }
+    function setFactorsBadge(index) {
+        const el = $('factorsBadge');
+        if (!el) return;
+        if (index && index.label) {
+            el.textContent = index.label;
+            return;
+        }
+        const a = index && index.factors_active != null ? index.factors_active : '—';
+        const t = index && index.factors_total != null ? index.factors_total : 5;
+        el.textContent = a + ' de ' + t + ' fatores ativos';
     }
     function opKey(ev) {
         return (ev.ts || '') + '|' + (ev.payload && ev.payload.msg ? ev.payload.msg : '') + '|' + (ev.payload && ev.payload.sku ? ev.payload.sku : '');
@@ -43,10 +75,19 @@
     /* ---------- CHART ---------- */
     const cv = $('chart');
     const ctx = cv ? cv.getContext('2d') : null;
+    const chartEmpty = $('chartEmpty');
+    const layoutApi = window.PregaoChartLayout || null;
 
     function updateHeader() {
-        if (!candles.length) return;
+        if (!candles.length) {
+            if ($('px')) $('px').textContent = 'n/d';
+            return;
+        }
         const p = cur.c;
+        if (!Number.isFinite(p)) {
+            $('px').textContent = 'n/d';
+            return;
+        }
         const pc = (p / open0 - 1) * 100;
         $('px').textContent = fmtNum(p, 2);
         $('px').style.color = pc >= 0 ? 'var(--up)' : 'var(--down)';
@@ -60,6 +101,11 @@
         $('fLow').textContent = lo.toFixed(0);
     }
 
+    function setChartEmpty(show) {
+        if (chartEmpty) chartEmpty.hidden = !show;
+        if (cv) cv.style.opacity = show ? '0.25' : '1';
+    }
+
     function draw() {
         if (!ctx || !cv) return;
         const dpr = devicePixelRatio || 1;
@@ -68,10 +114,30 @@
         if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
         ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
         ctx.clearRect(0, 0, W, H);
-        if (!candles.length) return;
+
+        if (!candles.length) {
+            setChartEmpty(true);
+            ctx.fillStyle = '#5B6B8C';
+            ctx.font = '13px ' + (getComputedStyle(document.documentElement).getPropertyValue('--mono') || 'monospace');
+            ctx.textAlign = 'center';
+            ctx.fillText('aguardando primeiro fechamento', W / 2, H / 2);
+            ctx.textAlign = 'left';
+            return;
+        }
+        setChartEmpty(false);
 
         const padR = 62, padT = 18, padB = 14;
-        const cw = (W - padR) / candles.length;
+        const plotW = Math.max(1, W - padR);
+        const layout = layoutApi
+            ? layoutApi.computeCandleLayout(plotW, candles.length)
+            : (function fallbackLayout() {
+                const slots = candles.length < 10 ? 10 : candles.length;
+                const slotWidth = plotW / slots;
+                const candleWidth = Math.max(2, Math.min(14, slotWidth * 0.55));
+                const offsetX = candles.length < 10 ? (slots - candles.length) * slotWidth : 0;
+                return { slotWidth: slotWidth, candleWidth: candleWidth, offsetX: offsetX, slots: slots };
+            })();
+
         let hi = -1e9, lo = 1e9;
         candles.forEach((k) => { hi = Math.max(hi, k.h); lo = Math.min(lo, k.l); });
         const sp = (hi - lo) || 1;
@@ -88,13 +154,15 @@
             ctx.fillText(pv.toFixed(0), W - padR + 8, vy + 3);
         }
         candles.forEach((k, i) => {
-            const x = i * cw + cw / 2;
+            const x = layoutApi
+                ? layoutApi.candleCenterX(layout, i)
+                : (layout.offsetX + i * layout.slotWidth + layout.slotWidth / 2);
             const up = k.c >= k.o;
             const col = up ? '#16C784' : '#EA3943';
             ctx.strokeStyle = col;
             ctx.beginPath(); ctx.moveTo(x, y(k.h)); ctx.lineTo(x, y(k.l)); ctx.stroke();
             ctx.fillStyle = col;
-            const bw = Math.max(2, cw * 0.55);
+            const bw = layout.candleWidth;
             const by = y(Math.max(k.o, k.c));
             const bh = Math.max(1.5, Math.abs(y(k.o) - y(k.c)));
             ctx.fillRect(x - bw / 2, by, bw, bh);
@@ -129,19 +197,37 @@
 
     function applyMetrics(m) {
         if (!m) return;
-        $('vVendas').textContent = String(m.vendas_hoje ?? '—');
-        $('fSales').textContent = String(m.vendas_hoje ?? '—');
-        $('vRec').textContent = fmtMoney(m.receita_hoje);
-        $('vTicket').textContent = fmtMoney(m.ticket_medio);
-        $('pnl').textContent = '+ ' + fmtMoney(m.receita_hoje).replace('R$ ', 'R$ ');
-        $('vTacos').textContent = fmtNum(m.tacos ?? 0, 1) + '%';
-        $('vPos').textContent = '#' + fmtNum(m.posicao_media ?? 0, 1);
-        $('vHealth').textContent = fmtNum(m.health_medio ?? 0, 2);
-        $('vPerg').textContent = String(m.perguntas_hoje ?? '—');
-        $('vTmed').textContent = (m.tempo_medio_resposta_s ?? '—') + 's';
-        $('vAcoes').textContent = String(m.acoes_hora ?? '—');
+        $('vVendas').textContent = nd(m.vendas_hoje);
+        $('fSales').textContent = nd(m.vendas_hoje);
+        $('vRec').textContent = nd(m.receita_hoje, fmtMoney);
+        $('vTicket').textContent = nd(m.ticket_medio, fmtMoney);
+        $('pnl').textContent = m.receita_hoje == null ? 'n/d' : ('+ ' + fmtMoney(m.receita_hoje).replace('R$ ', 'R$ '));
+        $('vTacos').textContent = m.tacos == null ? 'n/d' : (fmtNum(m.tacos, 1) + '%');
+        if ($('sTacos')) $('sTacos').textContent = m.tacos == null ? 'aguardando módulo Ads' : 'gasto ads / receita';
+        if (m.visitas_7d == null) {
+            $('vPos').textContent = 'n/d';
+            if ($('sPos')) $('sPos').textContent = 'aguardando coletor';
+        } else {
+            $('vPos').textContent = fmtNum(m.visitas_7d, 0);
+            const base = m.exposicao && m.exposicao.visitas_baseline != null
+                ? fmtNum(m.exposicao.visitas_baseline, 0)
+                : null;
+            if ($('sPos')) {
+                $('sPos').textContent = base ? ('baseline 28d/4 · ' + base) : 'visitas 7d (Fe)';
+            }
+        }
+        $('vHealth').textContent = nd(m.health_medio, (v) => fmtNum(v, 2));
+        $('vPerg').textContent = nd(m.perguntas_hoje);
+        $('vTmed').textContent = m.tempo_medio_resposta_s == null ? 'n/d' : fmtDuration(m.tempo_medio_resposta_s);
+        $('vAcoes').textContent = nd(m.acoes_hora);
 
-        const rep = m.reputacao || {};
+        const rep = m.reputacao;
+        if (!rep) {
+            $('vRep').textContent = 'n/d';
+            $('vRep').style.color = 'var(--mut)';
+            $('sRep').textContent = 'sem seller_reputation';
+            return;
+        }
         const cor = (rep.cor || 'verde').toLowerCase();
         $('vRep').textContent = (cor.indexOf('verde') >= 0 ? '🟢 ' : cor.indexOf('amarelo') >= 0 ? '🟡 ' : '🔴 ') + cor.toUpperCase();
         $('vRep').style.color = cor.indexOf('vermelho') >= 0 ? 'var(--down)' : cor.indexOf('amarelo') >= 0 ? 'var(--ml)' : 'var(--up)';
@@ -149,7 +235,12 @@
     }
 
     function applySemaforo(s) {
-        if (!s) return;
+        if (!s || s.status == null) {
+            const el = $('sema');
+            if (el) el.className = 'sema';
+            if ($('semaText')) $('semaText').textContent = 'SEMÁFORO n/d';
+            return;
+        }
         const status = s.status || 'verde';
         const el = $('sema');
         el.className = 'sema ' + status;
@@ -162,9 +253,13 @@
     }
 
     function renderTape(keywords) {
+        if (keywords == null) {
+            $('tape').innerHTML = '<span>n/d</span><span>n/d</span>';
+            return;
+        }
         const list = Array.isArray(keywords) ? keywords : [];
         if (!list.length) {
-            $('tape').innerHTML = '<span>sem ranks de keyword ainda</span><span>sem ranks de keyword ainda</span>';
+            $('tape').innerHTML = '<span>n/d</span><span>n/d</span>';
             return;
         }
         let tp = '';
@@ -277,6 +372,7 @@
             receita_hoje: ['vRec', 'cRec'],
             ticket_medio: ['vTicket', 'cRec'],
             tacos: ['vTacos', 'cTacos'],
+            visitas_7d: ['vPos', 'cPos'],
             posicao_media: ['vPos', 'cPos'],
             health_medio: ['vHealth', 'cHealth'],
             perguntas_hoje: ['vPerg', 'cPerg'],
@@ -292,15 +388,29 @@
         if (!ids) return;
         const el = $(ids[0]);
         if (!el) return;
-        if (p.key === 'receita_hoje' || p.key === 'ticket_medio') el.textContent = fmtMoney(p.value);
-        else if (p.key === 'tacos') el.textContent = fmtNum(p.value, 1) + '%';
-        else if (p.key === 'posicao_media') el.textContent = '#' + fmtNum(p.value, 1);
-        else if (p.key === 'health_medio') el.textContent = fmtNum(p.value, 2);
-        else if (p.key === 'tempo_medio_resposta_s') el.textContent = p.value + 's';
-        else el.textContent = String(p.value);
+        if (p.value === null || p.value === undefined) {
+            el.textContent = 'n/d';
+        } else if (p.key === 'receita_hoje' || p.key === 'ticket_medio') {
+            el.textContent = fmtMoney(p.value);
+        } else if (p.key === 'tacos') {
+            el.textContent = fmtNum(p.value, 1) + '%';
+        } else if (p.key === 'visitas_7d') {
+            el.textContent = fmtNum(p.value, 0);
+            if ($('sPos')) $('sPos').textContent = 'visitas 7d (Fe)';
+        } else if (p.key === 'posicao_media') {
+            el.textContent = p.value == null ? 'n/d' : ('#' + fmtNum(p.value, 1));
+        } else if (p.key === 'health_medio') {
+            el.textContent = fmtNum(p.value, 2);
+        } else if (p.key === 'tempo_medio_resposta_s') {
+            el.textContent = fmtDuration(p.value);
+        } else {
+            el.textContent = String(p.value);
+        }
 
-        if (p.key === 'vendas_hoje') $('fSales').textContent = String(p.value);
-        if (p.key === 'receita_hoje') $('pnl').textContent = '+ ' + fmtMoney(p.value);
+        if (p.key === 'vendas_hoje') $('fSales').textContent = nd(p.value);
+        if (p.key === 'receita_hoje') {
+            $('pnl').textContent = p.value == null ? 'n/d' : ('+ ' + fmtMoney(p.value));
+        }
 
         const flashCls = p.flash === 'yellow' ? 'flash-y' : (p.flash === 'green' ? 'flash-g' : null);
         if (flashCls) flash(ids[1], flashCls);
@@ -311,6 +421,7 @@
         switch (ev.type) {
             case 'index.tick':
                 applyIndexTick(ev.payload && ev.payload.value);
+                if (ev.payload) setFactorsBadge(ev.payload);
                 break;
             case 'index.candle':
                 applyCandle(ev.payload);
@@ -364,12 +475,17 @@
         candles = (d.candles || []).map((c) => ({
             o: +c.o, h: +c.h, l: +c.l, c: +c.c, date: c.date
         }));
-        if (!candles.length) {
-            const v = Number(d.index && d.index.value) || 1000;
-            candles = [{ o: v, h: v, l: v, c: v, date: new Date().toISOString().slice(0, 10) }];
+        if (candles.length) {
+            cur = { ...candles[candles.length - 1] };
+            open0 = candles[0].o;
+        } else if (d.index && d.index.value != null) {
+            const v = Number(d.index.value);
+            if (Number.isFinite(v)) {
+                cur = { o: v, c: v, h: v, l: v };
+                open0 = v;
+            }
         }
-        cur = { ...candles[candles.length - 1] };
-        open0 = candles[0].o;
+        setFactorsBadge(d.index || {});
         updateHeader();
         draw();
 
@@ -382,6 +498,11 @@
         $('feed').innerHTML = '';
         const ops = (d.operations || []).slice().reverse();
         ops.forEach((ev) => pushOp(ev, true));
+        if (!ops.length && $('feed')) {
+            const li = document.createElement('li');
+            li.innerHTML = '<span class="ic">·</span><span class="tx">fita vazia — sem eventos live<span class="ts">read-only</span></span>';
+            $('feed').appendChild(li);
+        }
     }
 
     /* ---------- TRANSPORT ---------- */
