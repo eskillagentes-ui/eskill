@@ -21,9 +21,11 @@ const runProdValidation = process.env.RUN_PROD_VALIDATION === '1';
 /**
  * Subconjunto seguro (npm run test:e2e:readonly): exclui os 6 specs com
  * POST/DELETE (31 pontos mutantes) — seo, render, exports, ai-center,
- * functional_ai_mcp, production-validation. Use em produção / fora de staging.
+ * functional_ai_mcp, production-validation. Uso permitido apenas em ambiente local
+ * ou staging isolado; nunca apontar esta suíte para produção.
  */
 const e2eReadonly = process.env.E2E_READONLY === '1';
+const mutationAllowed = process.env.E2E_ALLOW_MUTATION === 'true';
 const mutatingSpecs = [
   '**/seo.spec.ts',
   '**/render.spec.ts',
@@ -37,7 +39,7 @@ const testIgnore: string[] = [];
 if (!runProdValidation) {
   testIgnore.push('**/production-validation.spec.ts');
 }
-if (e2eReadonly) {
+if (e2eReadonly || (!mutationAllowed && !runProdValidation)) {
   for (const pattern of mutatingSpecs) {
     if (!testIgnore.includes(pattern)) {
       testIgnore.push(pattern);
@@ -87,7 +89,7 @@ export default defineConfig({
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
     },
-    /** Tag @readonly — npm run test:e2e:readonly (E2E_READONLY=1 já ignora mutantes) */
+    /** Tag @readonly — npm run test:e2e:readonly executa somente casos auditados. */
     {
       name: 'readonly',
       use: { ...devices['Desktop Chrome'] },
