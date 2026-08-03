@@ -18,7 +18,8 @@ use Throwable;
 final class PregaoEmitService
 {
     public const CHANNEL = 'pregao';
-    public const VERSION = 1;
+    /** v2: `ranks` oficial no snapshot; `keywords` alias deprecado. */
+    public const VERSION = 2;
 
     /** Heartbeat de op por coletor: no máximo 1× por hora. */
     public const OP_HEARTBEAT_TTL_SECONDS = 3600;

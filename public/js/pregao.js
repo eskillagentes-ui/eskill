@@ -252,14 +252,16 @@
         $('semaText').textContent = labels[status] || status.toUpperCase();
     }
 
-    function renderTape(keywords) {
-        if (keywords == null) {
-            $('tape').innerHTML = '<span>n/d</span><span>n/d</span>';
+    function renderTape(ranks, rankTrackerEnabled) {
+        const el = $('tape');
+        if (!el) return;
+        if (rankTrackerEnabled === false) {
+            el.innerHTML = '<span>rank tracker desativado</span>';
             return;
         }
-        const list = Array.isArray(keywords) ? keywords : [];
+        const list = Array.isArray(ranks) ? ranks : [];
         if (!list.length) {
-            $('tape').innerHTML = '<span>n/d</span><span>n/d</span>';
+            el.innerHTML = '<span>sem ranks</span>';
             return;
         }
         let tp = '';
@@ -274,7 +276,7 @@
             if (k.pos === 1) { cls = 'y'; label = 'TOPO'; }
             tp += `<span><b>${escapeHtml(k.kw)}</b> #${k.pos} <span class="${cls}">${label}</span></span>`;
         });
-        $('tape').innerHTML = tp + tp;
+        el.innerHTML = tp + tp;
     }
 
     function escapeHtml(str) {
@@ -491,7 +493,7 @@
 
         applyMetrics(d.metrics);
         applySemaforo(d.semaforo);
-        renderTape(d.keywords);
+        renderTape(d.ranks != null ? d.ranks : d.keywords, d.rank_tracker_enabled);
         applyQa(d.qa);
 
         seenOps.clear();

@@ -36,7 +36,7 @@ class PregaoEmitServiceTest extends TestCase
                 $this->callback(static function (string $json): bool {
                     $data = json_decode($json, true);
                     return is_array($data)
-                        && ($data['v'] ?? null) === 1
+                        && ($data['v'] ?? null) === 2
                         && ($data['type'] ?? null) === 'op'
                         && ($data['source'] ?? null) === 'live'
                         && isset($data['ts'], $data['payload'])
@@ -53,7 +53,7 @@ class PregaoEmitServiceTest extends TestCase
             'msg' => 'teste',
         ], 1335);
 
-        $this->assertSame(1, $event['v']);
+        $this->assertSame(2, $event['v']);
         $this->assertSame('op', $event['type']);
         $this->assertSame('live', $event['source']);
         $this->assertSame(1335, $event['account_id']);
