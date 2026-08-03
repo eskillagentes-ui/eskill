@@ -15,6 +15,7 @@ use Throwable;
 final class PregaoStreamService
 {
     private const HEARTBEAT_SECONDS = 15;
+    private const MAX_SECONDS = 3600;
 
     /**
      * Stream SSE autenticado. Filtra por account_id quando informado no evento.
@@ -23,6 +24,7 @@ final class PregaoStreamService
     {
         @ini_set('zlib.output_compression', '0');
         @ini_set('output_buffering', 'off');
+        @ini_set('max_execution_time', '0');
         while (ob_get_level() > 0) {
             ob_end_flush();
         }
@@ -41,61 +43,8 @@ final class PregaoStreamService
         ], JSON_UNESCAPED_UNICODE) . "\n\n";
         $this->flush();
 
-        $redis = $this->connectRedis();
-        if ($redis === null) {
-            echo "event: error\n";
-            echo 'data: ' . json_encode(['error' => 'redis_unavailable']) . "\n\n";
-            $this->flush();
-            return;
-        }
+        $deadline = time() + self::MAX_SECONDS;
 
-        try {
-            $lastHeartbeat = time();
-            // subscribe bloqueia; usamos readTimeout para heartbeats
-            $redis->setOption(Redis::OPT_READ_TIMEOUT, (float) self::HEARTBEAT_SECONDS);
-
-            $redis->subscribe([PregaoEmitService::CHANNEL], function ($redis, string $channel, string $message) use ($accountId, &$lastHeartbeat): void {
-                if (connection_aborted()) {
-                    throw new \RuntimeException('client_aborted');
-                }
-
-                $event = json_decode($message, true);
-                if (!is_array($event)) {
-                    return;
-                }
-
-                $eventAccount = isset($event['account_id']) ? (int) $event['account_id'] : null;
-                if ($accountId !== null && $eventAccount !== null && $eventAccount !== $accountId) {
-                    return;
-                }
-
-                echo 'id: ' . md5($message) . "\n";
-                echo 'event: ' . ($event['type'] ?? 'message') . "\n";
-                echo 'data: ' . $message . "\n\n";
-                $this->flush();
-                $lastHeartbeat = time();
-            });
-        } catch (Throwable $e) {
-            if ($e->getMessage() !== 'client_aborted') {
-                // Timeout de leitura → heartbeat e re-subscribe em loop externo
-                if (stripos($e->getMessage(), 'read error') !== false || stripos($e->getMessage(), 'timed out') !== false) {
-                    echo ": heartbeat " . time() . "\n\n";
-                    $this->flush();
-                    // Reentrar via loop
-                    $this->streamSseLoop($accountId);
-                    return;
-                }
-                log_warning('PregaoStreamService: stream encerrado', ['error' => $e->getMessage()]);
-            }
-        }
-    }
-
-    /**
-     * Loop com re-subscribe após timeout (heartbeats).
-     */
-    private function streamSseLoop(?int $accountId): void
-    {
-        $deadline = time() + 3600; // 1h max por conexão PHP-FPM
         while (time() < $deadline && !connection_aborted()) {
             $redis = $this->connectRedis();
             if ($redis === null) {
@@ -129,7 +78,8 @@ final class PregaoStreamService
                 if ($e->getMessage() === 'client_aborted') {
                     return;
                 }
-                echo ": heartbeat " . time() . "\n\n";
+                // Timeout de leitura → heartbeat e re-subscribe
+                echo ': heartbeat ' . time() . "\n\n";
                 $this->flush();
             }
         }
