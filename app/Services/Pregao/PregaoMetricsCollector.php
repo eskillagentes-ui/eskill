@@ -324,11 +324,32 @@ final class PregaoMetricsCollector
             ], $accountId, 'live');
 
             if ($tempoMedio !== null) {
+                $slow = $tempoMedio > 3600;
+                $human = $this->formatDurationHuman($tempoMedio);
                 $this->emitter->emit('metric.update', [
                     'key' => 'tempo_medio_resposta_s',
                     'value' => $tempoMedio,
-                    'flash' => 'green',
+                    'display' => $human,
+                    'flash' => $slow ? 'yellow' : 'green',
                 ], $accountId, 'live');
+
+                if ($slow && $this->shouldEmitSlowReplyAlert($accountId)) {
+                    $this->emitter->emitOpOnTransition(
+                        'PERGUNTAS_TMED',
+                        [
+                            'robot' => 'PERGUNTAS',
+                            'level' => 'alert',
+                            'icon' => '⏱️',
+                            'msg' => sprintf(
+                                'tempo médio %s · acima de 1h (janela 30d · só respondidas)',
+                                $human
+                            ),
+                        ],
+                        ['tempo_medio_s' => $tempoMedio, 'bucket' => (int) floor($tempoMedio / 3600)],
+                        $accountId,
+                        'live'
+                    );
+                }
             }
 
             return [
@@ -837,6 +858,50 @@ final class PregaoMetricsCollector
                factors_active = VALUES(factors_active),
                factors_total = 5'
         )->execute([$accountId, $json, $active]);
+    }
+
+    /**
+     * Formata segundos como duração humana (alinha com public/js/pregao.js fmtDuration).
+     */
+    private function formatDurationHuman(int $seconds): string
+    {
+        $s = max(0, $seconds);
+        if ($s < 60) {
+            return $s . 's';
+        }
+        if ($s < 3600) {
+            return ((int) floor($s / 60)) . 'm';
+        }
+        $days = (int) floor($s / 86400);
+        $s -= $days * 86400;
+        $hours = (int) floor($s / 3600);
+        $mins = (int) floor(($s % 3600) / 60);
+        if ($days > 0) {
+            return $days . 'd' . ($hours > 0 ? $hours . 'h' : '');
+        }
+        return $hours . 'h' . str_pad((string) $mins, 2, '0', STR_PAD_LEFT);
+    }
+
+    /**
+     * Evita flood na fita: no máx. 1 alerta de tempo médio por hora/conta.
+     */
+    private function shouldEmitSlowReplyAlert(int $accountId): bool
+    {
+        try {
+            $hasSource = $this->columnExists('pregao_events', 'source');
+            $sql = "SELECT COUNT(*) FROM pregao_events
+                    WHERE account_id = ?
+                      AND type = 'op'
+                      AND ts >= DATE_SUB(NOW(), INTERVAL 1 HOUR)
+                      AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.robot')) = 'PERGUNTAS'
+                      AND JSON_UNQUOTE(JSON_EXTRACT(payload, '$.msg')) LIKE 'tempo médio%'"
+                . ($hasSource ? " AND source = 'live'" : '');
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute([$accountId]);
+            return ((int) $stmt->fetchColumn()) === 0;
+        } catch (Throwable $e) {
+            return true;
+        }
     }
 
     private function columnExists(string $table, string $column): bool
