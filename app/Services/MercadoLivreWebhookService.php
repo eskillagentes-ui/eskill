@@ -236,6 +236,7 @@ class MercadoLivreWebhookService
                 "Valor: {$total}",
                 ['order_id' => $orderId]
             );
+            $this->emitPregaoSale($orderId, $order);
         } elseif ($status === 'cancelled') {
             $this->getNotificationService()->create(
                 $userId,
@@ -244,6 +245,43 @@ class MercadoLivreWebhookService
                 'O pedido foi cancelado no Mercado Livre.',
                 ['order_id' => $orderId]
             );
+        }
+    }
+
+    /**
+     * Emite eventos do Pregão a partir de venda paga (somente leitura do pedido — sem escrita no ML).
+     *
+     * @param array<string, mixed> $order
+     */
+    private function emitPregaoSale(string $orderId, array $order): void
+    {
+        try {
+            $data = isset($order['data']) && is_array($order['data']) ? $order['data'] : $order;
+            $valor = (float) ($data['total_amount'] ?? $order['total_amount'] ?? 0);
+            $titulo = '';
+            $sku = null;
+            $items = $data['order_items'] ?? $order['order_items'] ?? [];
+            if (is_array($items) && isset($items[0]) && is_array($items[0])) {
+                $item = $items[0]['item'] ?? $items[0];
+                $titulo = (string) ($item['title'] ?? '');
+                $sku = isset($item['id']) ? (string) $item['id'] : null;
+            }
+
+            if (!function_exists('pregao_emit_sale')) {
+                require_once dirname(__DIR__) . '/Helpers/PregaoHelper.php';
+            }
+
+            pregao_emit_sale([
+                'order_id' => $orderId,
+                'valor' => $valor,
+                'titulo' => $titulo !== '' ? $titulo : "Pedido #{$orderId}",
+                'sku' => $sku,
+            ], $this->accountId);
+        } catch (\Throwable $e) {
+            $this->logger->warning('Pregao emitSale falhou (não bloqueia webhook)', [
+                'order_id' => $orderId,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 
