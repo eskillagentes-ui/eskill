@@ -69,8 +69,11 @@ class AdsService extends MercadoLivreClient
     }
 
     /**
-     * Obtém todas as campanhas de publicidade da conta via API
-     * Retorna array com 'campaigns' e '_meta' indicando fonte dos dados
+     * Obtém todas as campanhas de publicidade da conta via API.
+     * Paginação completa (paging.total) ou incomplete fail-closed — sem teto silencioso.
+     * Status docs: active,paused (filters[status]).
+     *
+     * @return array{campaigns: list<array<string,mixed>>, _meta: array<string,mixed>, ok?: bool, incomplete?: bool, api_status?: int|null, error?: string|null}
      */
     public function getCampaigns(string $status = 'active'): array
     {
@@ -78,6 +81,7 @@ class AdsService extends MercadoLivreClient
             'data_source' => 'unknown',
             'fetched_at' => date('Y-m-d H:i:s'),
             'account_id' => $this->accountId,
+            'incomplete' => false,
         ];
 
         try {
@@ -85,7 +89,14 @@ class AdsService extends MercadoLivreClient
                 $campaigns = $this->getCachedCampaigns($status);
                 $meta['data_source'] = 'local_cache';
                 $meta['reason'] = 'missing_or_expired_token';
-                return ['campaigns' => $campaigns, '_meta' => $meta];
+                return [
+                    'ok' => false,
+                    'campaigns' => $campaigns,
+                    'incomplete' => false,
+                    'api_status' => null,
+                    'error' => 'missing_or_expired_token',
+                    '_meta' => $meta,
+                ];
             }
 
             $adv = $this->resolvePadsAdvertiser();
@@ -93,7 +104,14 @@ class AdsService extends MercadoLivreClient
                 $campaigns = $this->getCachedCampaigns($status);
                 $meta['data_source'] = 'local_cache';
                 $meta['reason'] = 'pads_advertiser_not_found';
-                return ['campaigns' => $campaigns, '_meta' => $meta];
+                return [
+                    'ok' => false,
+                    'campaigns' => $campaigns,
+                    'incomplete' => false,
+                    'api_status' => null,
+                    'error' => 'pads_advertiser_not_found',
+                    '_meta' => $meta,
+                ];
             }
 
             $meta['advertiser_id'] = $adv['advertiser_id'];
@@ -108,30 +126,34 @@ class AdsService extends MercadoLivreClient
                 $adv['site_id'],
                 $adv['advertiser_id']
             );
-            $response = $this->getWithHeaders($endpoint, [
-                'limit' => 50,
-                'offset' => 0,
+
+            $statusFilter = $status === 'all' ? 'active,paused' : strtolower($status);
+            $page = $this->paginatePadsSearch($endpoint, [
                 'date_from' => $from,
                 'date_to' => $to,
                 'metrics' => self::PADS_METRICS,
-            ], ['api-version' => '2']);
+                'filters[status]' => $statusFilter,
+            ], 50);
 
-            if (isset($response['error']) || (isset($response['status']) && (int) $response['status'] >= 400)) {
+            if (!$page['ok']) {
                 $campaigns = $this->getCachedCampaigns($status);
                 $meta['data_source'] = 'local_cache';
-                $meta['reason'] = 'api_error';
-                $meta['api_error'] = $response['message'] ?? ($response['error'] ?? 'unknown');
-                $meta['api_status'] = $response['status'] ?? null;
-                return ['campaigns' => $campaigns, '_meta' => $meta];
-            }
-
-            $results = $response['results'] ?? [];
-            if (!is_array($results)) {
-                $results = [];
+                $meta['reason'] = ($page['incomplete'] ?? false) ? 'pagination_incomplete' : 'api_error';
+                $meta['api_error'] = $page['error'] ?? 'unknown';
+                $meta['api_status'] = $page['api_status'] ?? null;
+                $meta['incomplete'] = (bool) ($page['incomplete'] ?? false);
+                return [
+                    'ok' => false,
+                    'campaigns' => $campaigns,
+                    'incomplete' => (bool) ($page['incomplete'] ?? false),
+                    'api_status' => $page['api_status'] ?? null,
+                    'error' => $page['error'] ?? 'api_error',
+                    '_meta' => $meta,
+                ];
             }
 
             $campaigns = [];
-            foreach ($results as $row) {
+            foreach ($page['results'] as $row) {
                 if (!is_array($row)) {
                     continue;
                 }
@@ -148,15 +170,19 @@ class AdsService extends MercadoLivreClient
 
             if ($campaigns !== []) {
                 $this->cacheCampaigns($campaigns);
-                $meta['data_source'] = 'mercadolivre_api_pads_v2';
-                $meta['api_endpoint'] = $endpoint;
-                return ['campaigns' => $campaigns, '_meta' => $meta];
             }
 
-            $campaigns = $this->getCachedCampaigns($status);
-            $meta['data_source'] = 'local_cache';
-            $meta['reason'] = 'empty_api_response';
-            return ['campaigns' => $campaigns, '_meta' => $meta];
+            $meta['data_source'] = 'mercadolivre_api_pads_v2';
+            $meta['api_endpoint'] = $endpoint;
+            $meta['paging'] = $page['paging'] ?? null;
+            return [
+                'ok' => true,
+                'campaigns' => $campaigns,
+                'incomplete' => false,
+                'api_status' => null,
+                'error' => null,
+                '_meta' => $meta,
+            ];
         } catch (\Exception $e) {
             log_warning('Erro ao buscar campanhas de Ads', [
                 'service' => 'AdsService',
@@ -167,12 +193,20 @@ class AdsService extends MercadoLivreClient
             $meta['data_source'] = 'local_cache';
             $meta['reason'] = 'exception';
             $meta['error'] = $e->getMessage();
-            return ['campaigns' => $campaigns, '_meta' => $meta];
+            return [
+                'ok' => false,
+                'campaigns' => $campaigns,
+                'incomplete' => false,
+                'api_status' => null,
+                'error' => $e->getMessage(),
+                '_meta' => $meta,
+            ];
         }
     }
 
     /**
      * Métricas de campanha em um dia (ou janela) via PADS v2.
+     * Em 429/5xx/erro: preserva api_status/error — nunca mascara como metrics zero.
      *
      * @return array<string, mixed>
      */
@@ -180,7 +214,13 @@ class AdsService extends MercadoLivreClient
     {
         $adv = $this->resolvePadsAdvertiser();
         if ($adv === null) {
-            return $this->getEmptyReport();
+            return $this->padsMetricsFailure(
+                'pads_advertiser_not_found',
+                null,
+                $campaignId,
+                $dateFrom,
+                $dateTo
+            );
         }
 
         $endpoint = sprintf(
@@ -194,26 +234,66 @@ class AdsService extends MercadoLivreClient
             'date_from' => $dateFrom,
             'date_to' => $dateTo,
             'metrics' => self::PADS_METRICS,
+            'filters[campaign_ids]' => $campaignId,
+            'filters[status]' => 'active,paused',
         ], ['api-version' => '2']);
 
+        if ($this->isPadsHttpError($response)) {
+            return $this->padsMetricsFailure(
+                (string) ($response['message'] ?? $response['error'] ?? 'api_error'),
+                isset($response['status']) ? (int) $response['status'] : null,
+                $campaignId,
+                $dateFrom,
+                $dateTo
+            );
+        }
+
+        if (!array_key_exists('results', $response) || !is_array($response['results']) || !array_is_list($response['results'])) {
+            return $this->padsMetricsFailure(
+                'pads_invalid_wire_shape:results',
+                null,
+                $campaignId,
+                $dateFrom,
+                $dateTo
+            );
+        }
+
         $found = null;
-        foreach ($response['results'] ?? [] as $row) {
+        foreach ($response['results'] as $row) {
             if (!is_array($row)) {
-                continue;
+                return $this->padsMetricsFailure(
+                    'pads_invalid_wire_shape:results.row',
+                    null,
+                    $campaignId,
+                    $dateFrom,
+                    $dateTo
+                );
             }
-            if ((string) ($row['id'] ?? '') === $campaignId) {
+            if ((string) ($row['id'] ?? '') === (string) $campaignId) {
                 $found = $row;
                 break;
             }
         }
         if ($found === null) {
             return array_merge($this->getEmptyReport(), [
+                'ok' => true,
+                'api_status' => null,
+                'error' => null,
                 'campaign_id' => $campaignId,
                 'period' => ['from' => $dateFrom, 'to' => $dateTo],
             ]);
         }
 
-        $m = is_array($found['metrics'] ?? null) ? $found['metrics'] : [];
+        if (!array_key_exists('metrics', $found) || !is_array($found['metrics'])) {
+            return $this->padsMetricsFailure(
+                'pads_invalid_wire_shape:metrics',
+                null,
+                $campaignId,
+                $dateFrom,
+                $dateTo
+            );
+        }
+        $m = $found['metrics'];
         $cost = (float) ($m['cost'] ?? 0);
         $revenue = (float) ($m['total_amount'] ?? $m['direct_amount'] ?? 0);
         $clicks = (int) ($m['clicks'] ?? 0);
@@ -221,6 +301,9 @@ class AdsService extends MercadoLivreClient
         $sold = (int) ($m['units_quantity'] ?? 0);
 
         return [
+            'ok' => true,
+            'api_status' => null,
+            'error' => null,
             'campaign_id' => $campaignId,
             'period' => ['from' => $dateFrom, 'to' => $dateTo],
             'metrics' => [
@@ -248,14 +331,30 @@ class AdsService extends MercadoLivreClient
 
     /**
      * Anúncios (SKU) com métricas — PADS ads/search.
+     * aggregation_type: item (padrão; retorna item_id/campaign_id) | DAILY (só date+metrics no wire oficial — sem identidade).
+     * Para histórico SKU por dia com identidade, chamar modo item com date_from=date_to.
+     * Paginação completa ou incomplete fail-closed — sem teto/truncamento silencioso.
      *
-     * @return list<array<string, mixed>>
+     * @return array{ok: bool, items: list<array<string,mixed>>, incomplete: bool, api_status: int|null, error: string|null, aggregation_type: string, paging?: array<string,mixed>|null}
      */
-    public function getAdsItems(string $dateFrom, string $dateTo, int $limit = 50): array
-    {
+    public function getAdsItems(
+        string $dateFrom,
+        string $dateTo,
+        int $limit = 50,
+        string $aggregationType = 'item'
+    ): array {
+        $aggregationType = strtoupper($aggregationType) === 'DAILY' ? 'DAILY' : 'item';
         $adv = $this->resolvePadsAdvertiser();
         if ($adv === null) {
-            return [];
+            return [
+                'ok' => false,
+                'items' => [],
+                'incomplete' => false,
+                'api_status' => null,
+                'error' => 'pads_advertiser_not_found',
+                'aggregation_type' => $aggregationType,
+                'paging' => null,
+            ];
         }
 
         $endpoint = sprintf(
@@ -263,31 +362,47 @@ class AdsService extends MercadoLivreClient
             $adv['site_id'],
             $adv['advertiser_id']
         );
-        $all = [];
-        $offset = 0;
-        do {
-            $response = $this->getWithHeaders($endpoint, [
-                'limit' => $limit,
-                'offset' => $offset,
-                'date_from' => $dateFrom,
-                'date_to' => $dateTo,
-                'metrics' => self::PADS_METRICS,
-            ], ['api-version' => '2']);
-            $batch = $response['results'] ?? [];
-            if (!is_array($batch) || $batch === []) {
-                break;
-            }
-            foreach ($batch as $row) {
-                if (is_array($row)) {
-                    $all[] = $row;
-                }
-            }
-            $total = (int) ($response['paging']['total'] ?? count($all));
-            $offset += $limit;
-            usleep(200000);
-        } while ($offset < $total && $offset < 500);
 
-        return $all;
+        $query = [
+            'date_from' => $dateFrom,
+            'date_to' => $dateTo,
+            'metrics' => self::PADS_METRICS,
+            'filters[statuses]' => 'active,paused',
+        ];
+        if ($aggregationType === 'DAILY') {
+            $query['aggregation_type'] = 'DAILY';
+        }
+
+        $page = $this->paginatePadsSearch($endpoint, $query, max(1, $limit));
+        if (!$page['ok']) {
+            return [
+                'ok' => false,
+                'items' => [],
+                'incomplete' => (bool) ($page['incomplete'] ?? false),
+                'api_status' => $page['api_status'] ?? null,
+                'error' => $page['error'] ?? 'api_error',
+                'aggregation_type' => $aggregationType,
+                'paging' => $page['paging'] ?? null,
+            ];
+        }
+
+        $items = [];
+        foreach ($page['results'] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $items[] = $this->normalizeAdsSearchRow($row, $aggregationType);
+        }
+
+        return [
+            'ok' => true,
+            'items' => $items,
+            'incomplete' => false,
+            'api_status' => null,
+            'error' => null,
+            'aggregation_type' => $aggregationType,
+            'paging' => $page['paging'] ?? null,
+        ];
     }
 
     /**
@@ -318,6 +433,197 @@ class AdsService extends MercadoLivreClient
     }
 
     /**
+     * Paginação PADS completa (offset/limit/total) ou incomplete fail-closed.
+     *
+     * @param array<string, mixed> $baseQuery
+     * @return array{ok: bool, results: list<array<string,mixed>>, incomplete: bool, api_status: int|null, error: string|null, paging: array<string,mixed>|null}
+     */
+    private function paginatePadsSearch(string $endpoint, array $baseQuery, int $limit): array
+    {
+        $all = [];
+        $offset = 0;
+        $total = null;
+        $lastPaging = null;
+        $limit = max(1, $limit);
+
+        while (true) {
+            $query = array_merge($baseQuery, [
+                'limit' => $limit,
+                'offset' => $offset,
+            ]);
+            $response = $this->getWithHeaders($endpoint, $query, ['api-version' => '2']);
+
+            if ($this->isPadsHttpError($response)) {
+                return [
+                    'ok' => false,
+                    'results' => [],
+                    'incomplete' => $all !== [],
+                    'api_status' => isset($response['status']) ? (int) $response['status'] : null,
+                    'error' => (string) ($response['message'] ?? $response['error'] ?? 'api_error'),
+                    'paging' => is_array($response['paging'] ?? null) ? $response['paging'] : $lastPaging,
+                ];
+            }
+
+            if (!array_key_exists('results', $response) || !is_array($response['results']) || !array_is_list($response['results'])) {
+                return [
+                    'ok' => false,
+                    'results' => [],
+                    'incomplete' => $all !== [],
+                    'api_status' => null,
+                    'error' => 'pads_invalid_wire_shape:results',
+                    'paging' => is_array($response['paging'] ?? null) ? $response['paging'] : $lastPaging,
+                ];
+            }
+            $batch = $response['results'];
+            foreach ($batch as $row) {
+                if (!is_array($row)) {
+                    return [
+                        'ok' => false,
+                        'results' => [],
+                        'incomplete' => $all !== [],
+                        'api_status' => null,
+                        'error' => 'pads_invalid_wire_shape:results.row',
+                        'paging' => is_array($response['paging'] ?? null) ? $response['paging'] : $lastPaging,
+                    ];
+                }
+                $all[] = $row;
+            }
+
+            $paging = is_array($response['paging'] ?? null) ? $response['paging'] : [];
+            $lastPaging = $paging;
+            $pageTotal = isset($paging['total']) ? (int) $paging['total'] : null;
+            if ($pageTotal !== null) {
+                $total = $pageTotal;
+            }
+
+            $batchCount = count($batch);
+            if ($batchCount === 0) {
+                // Sem paging.total e sem resultados → fim legítimo
+                if ($total === null || $offset >= $total) {
+                    break;
+                }
+                // paging.total indica mais páginas, mas veio vazio → incomplete
+                return [
+                    'ok' => false,
+                    'results' => [],
+                    'incomplete' => true,
+                    'api_status' => null,
+                    'error' => 'pagination_incomplete',
+                    'paging' => $lastPaging,
+                ];
+            }
+
+            $offset += $limit;
+            if ($total !== null && $offset >= $total) {
+                break;
+            }
+            // Sem total: se batch < limit, última página
+            if ($total === null && $batchCount < $limit) {
+                break;
+            }
+
+            usleep(200000);
+        }
+
+        if ($total !== null && count($all) < $total) {
+            return [
+                'ok' => false,
+                'results' => [],
+                'incomplete' => true,
+                'api_status' => null,
+                'error' => 'pagination_incomplete',
+                'paging' => $lastPaging,
+            ];
+        }
+
+        return [
+            'ok' => true,
+            'results' => $all,
+            'incomplete' => false,
+            'api_status' => null,
+            'error' => null,
+            'paging' => $lastPaging ?? ['offset' => 0, 'total' => count($all), 'limit' => $limit],
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $response
+     */
+    private function isPadsHttpError(array $response): bool
+    {
+        if (isset($response['error']) && $response['error'] !== '' && $response['error'] !== null) {
+            // Respostas PADS OK não trazem "error"; erros ML/client trazem.
+            return true;
+        }
+        if (isset($response['status']) && (int) $response['status'] >= 400) {
+            return true;
+        }
+        return false;
+    }
+
+    /**
+     * @param array<string, mixed>|null $extraMeta
+     * @return array<string, mixed>
+     */
+    private function padsMetricsFailure(
+        string $error,
+        ?int $apiStatus,
+        string $campaignId,
+        string $dateFrom,
+        string $dateTo,
+        ?array $extraMeta = null
+    ): array {
+        $payload = [
+            'ok' => false,
+            'api_status' => $apiStatus,
+            'error' => $error,
+            'campaign_id' => $campaignId,
+            'period' => ['from' => $dateFrom, 'to' => $dateTo],
+            // Sem metrics zero enganosas — consumidor deve checar ok/api_status
+            'metrics' => null,
+            'calculated_metrics' => null,
+            'daily_breakdown' => [],
+        ];
+        if ($extraMeta !== null) {
+            $payload['_meta'] = $extraMeta;
+        }
+        return $payload;
+    }
+
+    /**
+     * Normaliza linha ads/search (item ou DAILY flat).
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function normalizeAdsSearchRow(array $row, string $aggregationType): array
+    {
+        if (strtoupper($aggregationType) !== 'DAILY') {
+            return $row;
+        }
+
+        if (!isset($row['metrics']) || !is_array($row['metrics'])) {
+            $metricKeys = [
+                'clicks', 'prints', 'cost', 'cpc', 'acos', 'roas',
+                'direct_amount', 'indirect_amount', 'total_amount',
+                'units_quantity', 'direct_units_quantity', 'indirect_units_quantity',
+                'ctr', 'cvr', 'sov',
+            ];
+            $metrics = [];
+            foreach ($metricKeys as $key) {
+                if (array_key_exists($key, $row)) {
+                    $metrics[$key] = $row[$key];
+                }
+            }
+            if ($metrics !== []) {
+                $row['metrics'] = $metrics;
+            }
+        }
+
+        return $row;
+    }
+
+    /**
      * Obtém métricas de uma campanha específica em um período.
      *
      * Encapsula getCampaignReport e adiciona metadados de execução.
@@ -337,6 +643,10 @@ class AdsService extends MercadoLivreClient
 
         try {
             $report = $this->getCampaignMetricsForDates($campaignId, $dateFrom, $dateTo);
+            if (($report['ok'] ?? true) === false) {
+                $meta['api_status'] = $report['api_status'] ?? null;
+                $meta['error'] = $report['error'] ?? 'api_error';
+            }
             return array_merge($report, ['_meta' => $meta]);
         } catch (\Exception $e) {
             log_warning('Erro ao obter métricas de campanha', [
@@ -347,21 +657,28 @@ class AdsService extends MercadoLivreClient
             ]);
 
             $meta['error'] = $e->getMessage();
-            return array_merge($this->getEmptyReport(), [
-                'campaign_id' => $campaignId,
-                'period' => ['from' => $dateFrom, 'to' => $dateTo],
-                '_meta' => $meta,
-            ]);
+            return $this->padsMetricsFailure(
+                $e->getMessage(),
+                null,
+                $campaignId,
+                $dateFrom,
+                $dateTo,
+                $meta
+            );
         }
     }
 
     /**
-     * Obtém relatório detalhado de campanha
+     * Obtém relatório detalhado de campanha.
+     * Erros HTTP/API preservam api_status/error — não mascaram como zeros/cache.
      */
     public function getCampaignReport(string $campaignId, string $dateFrom, string $dateTo): array
     {
         try {
             $report = $this->getCampaignMetricsForDates($campaignId, $dateFrom, $dateTo);
+            if (($report['ok'] ?? true) === false) {
+                return $report;
+            }
             if (((float) ($report['metrics']['investment'] ?? 0)) > 0
                 || ((float) ($report['metrics']['revenue'] ?? 0)) > 0
                 || ((int) ($report['metrics']['clicks'] ?? 0)) > 0
@@ -383,7 +700,13 @@ class AdsService extends MercadoLivreClient
                 'campaign_id' => $campaignId,
                 'error' => $e->getMessage(),
             ]);
-            return $this->getCachedReport($campaignId, $dateFrom, $dateTo);
+            return $this->padsMetricsFailure(
+                $e->getMessage(),
+                null,
+                $campaignId,
+                $dateFrom,
+                $dateTo
+            );
         }
     }
 

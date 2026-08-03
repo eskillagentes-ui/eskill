@@ -17,6 +17,7 @@ $dotenv = Dotenv\Dotenv::createImmutable(dirname(__DIR__));
 $dotenv->safeLoad();
 
 use App\Services\Ads\AdsAlertService;
+use App\Services\Ads\AdsCollectCommand;
 use App\Services\Ads\AdsMetricsCollector;
 use App\Services\Pregao\AccountIndexService;
 
@@ -27,23 +28,26 @@ if ($accountId <= 0) {
     exit(1);
 }
 
-$collector = new AdsMetricsCollector();
-$result = $collector->collect($accountId, isset($opts['history']));
-$result['alerts'] = (new AdsAlertService())->evaluate($accountId);
+$command = new AdsCollectCommand(
+    static fn (int $id, bool $history): array => (new AdsMetricsCollector())->collect($id, $history),
+    static fn (int $id): array => (new AdsAlertService())->evaluate($id),
+    static function (int $id): array {
+        $tick = (new AccountIndexService())->tick($id);
 
-if (isset($opts['tick'])) {
-    $tick = (new AccountIndexService())->tick($accountId);
-    $result['tick'] = [
-        'indice' => $tick['indice'],
-        'factors_active' => $tick['factors_active'],
-        'label' => $tick['label'],
-        'factors' => $tick['factors'],
-    ];
-}
+        return [
+            'indice' => $tick['indice'],
+            'factors_active' => $tick['factors_active'],
+            'label' => $tick['label'],
+            'factors' => $tick['factors'],
+        ];
+    }
+);
+$execution = $command->execute($accountId, isset($opts['history']), isset($opts['tick']));
+$result = $execution['result'];
 
 if (isset($opts['json'])) {
     echo json_encode($result, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES) . "\n";
-    exit(0);
+    exit($execution['exit_code']);
 }
 
 fwrite(STDOUT, sprintf(
@@ -68,3 +72,5 @@ if (isset($result['tick'])) {
         $result['tick']['label'] ?? ''
     ));
 }
+
+exit($execution['exit_code']);

@@ -31,7 +31,10 @@ final class AdsMetricsCollector
     public const MAX_STALE_AGE_SECONDS = 3600;
 
     private const BATCH_SLEEP_US = 250000;
-    private const MAX_RETRIES_429 = 4;
+    private const MAX_RETRIES_TRANSIENT = 4;
+
+    /** Janela de histórico diário (today … today-35) — exatamente 36 datas. */
+    public const HISTORY_DAYS = 36;
 
     private PDO $db;
     private PregaoEmitService $emitter;
@@ -247,6 +250,8 @@ final class AdsMetricsCollector
     }
 
     /**
+     * Busca/valida TODOS os payloads remotos em memória; persiste em transação curta sem I/O remoto.
+     *
      * @return array<string, mixed>
      */
     private function collectFromApi(int $accountId, bool $fullHistory): array
@@ -256,46 +261,40 @@ final class AdsMetricsCollector
             $this->apiCallCount++;
             return $ads->getCampaigns('all');
         });
-        $campaigns = $campaignsPayload['campaigns'] ?? [];
-        if (!is_array($campaigns)) {
-            $campaigns = [];
-        }
 
-        // Erros HTTP transitórios no payload
-        $status = (int) ($campaignsPayload['_meta']['api_status'] ?? $campaignsPayload['status'] ?? 0);
-        if ($status === 429 || $status >= 500) {
-            throw new \RuntimeException('pads_http_' . $status);
-        }
-        if (($campaignsPayload['_meta']['data_source'] ?? '') === 'local_cache'
-            && in_array(($campaignsPayload['_meta']['reason'] ?? ''), ['api_error', 'exception'], true)
-            && $campaigns === []
-        ) {
-            throw new \RuntimeException('pads_api_error:' . (string) ($campaignsPayload['_meta']['api_error'] ?? 'unknown'));
-        }
+        // Erros HTTP / incomplete / cache-fallback por falha — nunca tratar como vazio legítimo
+        $this->assertPadsPayloadOk($campaignsPayload, 'campaigns');
+        $campaigns = $this->requireListEnvelope($campaignsPayload, 'campaigns', 'campaigns');
 
-        $active = array_values(array_filter(
+        // Docs: status active,paused — pausadas com gasto histórico entram no backfill
+        $eligible = array_values(array_filter(
             $campaigns,
-            static fn ($c): bool => is_array($c) && strtolower((string) ($c['status'] ?? '')) === 'active'
+            static function ($c): bool {
+                if (!is_array($c)) {
+                    return false;
+                }
+                $st = strtolower((string) ($c['status'] ?? ''));
+                return $st === 'active' || $st === 'paused';
+            }
+        ));
+        $active = array_values(array_filter(
+            $eligible,
+            static fn (array $c): bool => strtolower((string) ($c['status'] ?? '')) === 'active'
         ));
 
-        if ($active === [] && $campaigns === []) {
+        if ($eligible === []) {
             return $this->persistEmpty($accountId, 'nenhuma campanha');
-        }
-        if ($active === []) {
-            return $this->persistEmpty($accountId, 'nenhuma campanha ativa');
         }
 
         $tz = new \DateTimeZone('America/Sao_Paulo');
         $today = new \DateTimeImmutable('today', $tz);
-        $dates = [$today->format('Y-m-d')];
-        if ($fullHistory) {
-            for ($i = 1; $i <= 35; $i++) {
-                $dates[] = $today->modify("-{$i} days")->format('Y-m-d');
-            }
-        }
+        $dates = $this->buildCollectDates($today, $fullHistory);
 
+        // ——— FASE FETCH: só I/O remoto + montagem em memória (zero upserts) ———
+        $campaignRows = [];
         $dayMetrics = [];
-        foreach ($active as $campaign) {
+
+        foreach ($eligible as $campaign) {
             $campaignId = (string) ($campaign['id'] ?? '');
             if ($campaignId === '') {
                 continue;
@@ -309,7 +308,9 @@ final class AdsMetricsCollector
                     $this->apiCallCount++;
                     return $ads->getCampaignReport($campaignId, $date, $date);
                 });
-                $metrics = is_array($report['metrics'] ?? null) ? $report['metrics'] : [];
+                $this->assertPadsPayloadOk($report, 'campaign_report');
+
+                $metrics = $this->requireMapEnvelope($report, 'metrics', 'campaign_report.metrics');
                 $gasto = (float) ($metrics['investment'] ?? 0);
                 $receita = (float) ($metrics['revenue'] ?? 0);
                 $clicks = (int) ($metrics['clicks'] ?? 0);
@@ -321,20 +322,22 @@ final class AdsMetricsCollector
                     $acos = round(($gasto / $receita) * 100, 4);
                 }
                 $roasReal = $gasto > 0 ? round($receita / $gasto, 4) : null;
+                $rowBudget = $budget;
+                $rowRoasObj = $roasObj;
                 if (isset($report['roas_objetivo']) && is_numeric($report['roas_objetivo'])) {
-                    $roasObj = (float) $report['roas_objetivo'];
+                    $rowRoasObj = (float) $report['roas_objetivo'];
                 }
                 if (isset($report['daily_budget']) && is_numeric($report['daily_budget'])) {
-                    $budget = (float) $report['daily_budget'];
+                    $rowBudget = (float) $report['daily_budget'];
                 }
 
-                $this->upsertCampaignDay([
+                $campaignRows[] = [
                     'account_id' => $accountId,
                     'campaign_id' => $campaignId,
                     'date' => $date,
                     'status' => $statusCamp,
-                    'orcamento_diario' => $budget,
-                    'roas_objetivo' => $roasObj,
+                    'orcamento_diario' => $rowBudget,
+                    'roas_objetivo' => $rowRoasObj,
                     'gasto' => $gasto,
                     'impressoes' => $impressions,
                     'cliques' => $clicks,
@@ -344,7 +347,7 @@ final class AdsMetricsCollector
                     'acos' => $acos,
                     'roas_real' => $roasReal,
                     'data' => $campaign,
-                ]);
+                ];
 
                 if (!isset($dayMetrics[$date])) {
                     $dayMetrics[$date] = ['gasto' => 0.0, 'receita_atribuida' => 0.0];
@@ -353,93 +356,24 @@ final class AdsMetricsCollector
                 $dayMetrics[$date]['receita_atribuida'] += $receita;
             }
 
-            if ($this->adsFactory === null) {
-                usleep(self::BATCH_SLEEP_US);
-            }
+            $this->paceRemote();
         }
 
-        // SKU-level via ads/search (read-only) — janela do dia no tick; range amplo só com fullHistory
-        $skuFrom = $fullHistory
-            ? $today->modify('-34 days')->format('Y-m-d')
-            : $today->format('Y-m-d');
-        $skuTo = $today->format('Y-m-d');
-        $adsItems = $this->withBackoff(function () use ($ads, $skuFrom, $skuTo) {
-            $this->apiCallCount++;
-            return $ads->getAdsItems($skuFrom, $skuTo, 50);
-        });
-        if (is_array($adsItems)) {
-            foreach ($adsItems as $item) {
-                if (!is_array($item)) {
-                    continue;
-                }
-                $mlbId = strtoupper((string) ($item['item_id'] ?? ''));
-                $campaignId = (string) ($item['campaign_id'] ?? '');
-                if ($mlbId === '' || $campaignId === '') {
-                    continue;
-                }
-                $m = is_array($item['metrics'] ?? null) ? $item['metrics'] : [];
-                $gasto = (float) ($m['cost'] ?? 0);
-                $receita = (float) ($m['total_amount'] ?? $m['direct_amount'] ?? 0);
-                $clicks = (int) ($m['clicks'] ?? 0);
-                $impressions = (int) ($m['prints'] ?? 0);
-                $sold = (int) ($m['units_quantity'] ?? 0);
-                $cpc = isset($m['cpc']) ? (float) $m['cpc'] : ($clicks > 0 ? round($gasto / $clicks, 4) : null);
-                $acos = isset($m['acos']) ? (float) $m['acos'] : ($receita > 0 ? round(($gasto / $receita) * 100, 4) : null);
-                $roasReal = isset($m['roas']) ? (float) $m['roas'] : ($gasto > 0 ? round($receita / $gasto, 4) : null);
-                $trio = $this->skuCustos->roasTrio($accountId, $mlbId);
-                $health = $this->lookupItemHealth($accountId, $mlbId);
+        // SKU: ads/search aggregation_type=DAILY oficial = date+metrics SEM item_id/campaign_id.
+        // Histórico = exatamente N chamadas diárias em modo item (date_from=date_to), que retornam identidade.
+        $skuRows = $this->fetchSkuRowsInMemory($ads, $accountId, $dates);
 
-                $this->upsertSkuDay([
-                    'account_id' => $accountId,
-                    'campaign_id' => $campaignId,
-                    'mlb_id' => $mlbId,
-                    'date' => $skuTo,
-                    'gasto' => $gasto,
-                    'impressoes' => $impressions,
-                    'cliques' => $clicks,
-                    'cpc_medio' => $cpc,
-                    'vendas_atribuidas' => $sold,
-                    'receita_atribuida' => $receita,
-                    'acos' => $acos,
-                    'roas_real' => $roasReal,
-                    'roas_objetivo' => $trio['roas_objetivo'],
-                    'health' => $health,
-                ]);
-            }
-        }
+        $integrity = $this->assertHistoryIntegrity($dates, $campaignRows, $dayMetrics, count($eligible));
 
-        foreach ($dayMetrics as $date => $agg) {
-            $receitaTotal = $this->receitaTotalConta($accountId, $date);
-            $gasto = (float) $agg['gasto'];
-            $recAttr = (float) $agg['receita_atribuida'];
-            $acos = $recAttr > 0 ? round(($gasto / $recAttr) * 100, 4) : null;
-            $tacos = $receitaTotal > 0 ? round(($gasto / $receitaTotal) * 100, 4) : null;
-
-            $this->db->prepare(
-                'INSERT INTO ads_account_metrics_daily
-                   (account_id, `date`, gasto, receita_atribuida, receita_total, acos, tacos, campanhas_ativas)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-                 ON DUPLICATE KEY UPDATE
-                   gasto = VALUES(gasto),
-                   receita_atribuida = VALUES(receita_atribuida),
-                   receita_total = VALUES(receita_total),
-                   acos = VALUES(acos),
-                   tacos = VALUES(tacos),
-                   campanhas_ativas = VALUES(campanhas_ativas)'
-            )->execute([
-                $accountId,
-                $date,
-                $gasto,
-                $recAttr,
-                $receitaTotal,
-                $acos,
-                $tacos,
-                count($active),
-            ]);
-        }
-
-        $windows = $this->computeWindows($accountId, $today);
-        $this->persistIndexMetrics($accountId, $windows, count($active), false, null);
+        // ——— FASE PERSIST: transação curta, sem I/O remoto ———
+        $windows = $this->persistCollectedMetrics(
+            $accountId,
+            $today,
+            $active,
+            $campaignRows,
+            $skuRows,
+            $dayMetrics
+        );
 
         $this->emitter->emit('metric.update', [
             'key' => 'tacos',
@@ -453,12 +387,324 @@ final class AdsMetricsCollector
             'ok' => true,
             'available' => $windows['tacos_atual'] !== null,
             'active_campaigns' => count($active),
+            'eligible_campaigns' => count($eligible),
             'tacos' => $windows['tacos_atual'],
             'acos' => $windows['acos_atual'],
             'gasto_hoje' => $windows['gasto_hoje'],
             'tacos_baseline' => $windows['tacos_baseline'],
+            'history_days' => count($dates),
+            'history_coverage' => $integrity,
             'message' => null,
         ];
+    }
+
+    /**
+     * Sinaliza dias faltantes/duplicados na janela coletada (fail-closed se incompleto).
+     *
+     * @param list<string> $expectedDates
+     * @param list<array<string, mixed>> $campaignRows
+     * @param array<string, array{gasto: float, receita_atribuida: float}> $dayMetrics
+     * @return array{
+     *   expected_days: int,
+     *   campaign_days_ok: bool,
+     *   account_days_ok: bool,
+     *   missing_campaign_dates: list<string>,
+     *   duplicate_campaign_keys: list<string>,
+     *   missing_account_dates: list<string>
+     * }
+     */
+    private function assertHistoryIntegrity(
+        array         $expectedDates,
+        array $campaignRows,
+        array $dayMetrics,
+        int $eligibleCount
+    ): array {
+        $seenKeys = [];
+        $duplicateKeys = [];
+        $campaignDates = [];
+
+        foreach ($campaignRows as $row) {
+            $date = (string) ($row['date'] ?? '');
+            $cid = (string) ($row['campaign_id'] ?? '');
+            $key = $cid . '|' . $date;
+            if (isset($seenKeys[$key])) {
+                $duplicateKeys[] = $key;
+            }
+            $seenKeys[$key] = true;
+            if ($date !== '') {
+                $campaignDates[$date] = true;
+            }
+        }
+
+        $missingCampaign = [];
+        foreach ($expectedDates as $date) {
+            if (!isset($campaignDates[$date])) {
+                $missingCampaign[] = $date;
+            }
+        }
+
+        $missingAccount = [];
+        foreach ($expectedDates as $date) {
+            if (!isset($dayMetrics[$date])) {
+                $missingAccount[] = $date;
+            }
+        }
+
+        // Com campanhas elegíveis, cada data esperada deve ter ≥1 report e 1 agregado de conta.
+        if ($eligibleCount > 0 && ($missingCampaign !== [] || $missingAccount !== [] || $duplicateKeys !== [])) {
+            throw new \RuntimeException(sprintf(
+                'pads_history_integrity: missing_campaign=%s missing_account=%s duplicates=%s',
+                implode(',', $missingCampaign) ?: '-',
+                implode(',', $missingAccount) ?: '-',
+                implode(',', $duplicateKeys) ?: '-'
+            ));
+        }
+
+        return [
+            'expected_days' => count($expectedDates),
+            'campaign_days_ok' => $missingCampaign === [] && $duplicateKeys === [],
+            'account_days_ok' => $missingAccount === [],
+            'missing_campaign_dates' => $missingCampaign,
+            'duplicate_campaign_keys' => $duplicateKeys,
+            'missing_account_dates' => $missingAccount,
+        ];
+    }
+
+    /**
+     * today (tick) ou today…today-35 — exatamente HISTORY_DAYS datas.
+     *
+     * @return list<string>
+     */
+    private function buildCollectDates(\DateTimeImmutable $today, bool $fullHistory): array
+    {
+        if (!$fullHistory) {
+            return [$today->format('Y-m-d')];
+        }
+
+        $dates = [];
+        for ($i = 0; $i < self::HISTORY_DAYS; $i++) {
+            $dates[] = $today->modify("-{$i} days")->format('Y-m-d');
+        }
+        return $dates;
+    }
+
+    /**
+     * @param object $ads
+     * @param list<string> $dates
+     * @return list<array<string, mixed>>
+     */
+    private function fetchSkuRowsInMemory(object $ads, int $accountId, array $dates): array
+    {
+        $skuRows = [];
+        foreach ($dates as $date) {
+            $adsItemsPayload = $this->withBackoff(function () use ($ads, $date) {
+                $this->apiCallCount++;
+                // Modo item + date_from=date_to → identidade (item_id/campaign_id); NÃO usar DAILY.
+                return $ads->getAdsItems($date, $date, 50, 'item');
+            });
+            $this->assertPadsPayloadOk($adsItemsPayload, 'ads_items');
+            $adsItems = $this->requireListEnvelope($adsItemsPayload, 'items', 'ads_items.items');
+
+            foreach ($adsItems as $item) {
+                $mlbId = strtoupper((string) ($item['item_id'] ?? ''));
+                $campaignId = (string) ($item['campaign_id'] ?? '');
+                // Date da chamada (date_from=date_to); item mode não exige date no wire.
+                $rowDate = $date;
+                if ($mlbId === '' || $campaignId === '' || $rowDate === '') {
+                    throw new \RuntimeException('pads_invalid_wire_shape:missing_item_id_campaign_id_or_date');
+                }
+
+                $m = $this->requireMapEnvelope($item, 'metrics', 'ads_items.metrics');
+                $gasto = (float) ($m['cost'] ?? 0);
+                $receita = (float) ($m['total_amount'] ?? $m['direct_amount'] ?? 0);
+                $clicks = (int) ($m['clicks'] ?? 0);
+                $impressions = (int) ($m['prints'] ?? 0);
+                $sold = (int) ($m['units_quantity'] ?? 0);
+                $cpc = isset($m['cpc']) ? (float) $m['cpc'] : ($clicks > 0 ? round($gasto / $clicks, 4) : null);
+                $acos = isset($m['acos']) ? (float) $m['acos'] : ($receita > 0 ? round(($gasto / $receita) * 100, 4) : null);
+                $roasReal = isset($m['roas']) ? (float) $m['roas'] : ($gasto > 0 ? round($receita / $gasto, 4) : null);
+                $trio = $this->skuCustos->roasTrio($accountId, $mlbId);
+                $health = $this->lookupItemHealth($accountId, $mlbId);
+
+                $skuRows[] = [
+                    'account_id' => $accountId,
+                    'campaign_id' => $campaignId,
+                    'mlb_id' => $mlbId,
+                    'date' => $rowDate,
+                    'gasto' => $gasto,
+                    'impressoes' => $impressions,
+                    'cliques' => $clicks,
+                    'cpc_medio' => $cpc,
+                    'vendas_atribuidas' => $sold,
+                    'receita_atribuida' => $receita,
+                    'acos' => $acos,
+                    'roas_real' => $roasReal,
+                    'roas_objetivo' => $trio['roas_objetivo'] ?? null,
+                    'health' => $health,
+                ];
+            }
+
+            $this->paceRemote();
+        }
+
+        return $skuRows;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $active
+     * @param list<array<string, mixed>> $campaignRows
+     * @param list<array<string, mixed>> $skuRows
+     * @param array<string, array{gasto: float, receita_atribuida: float}> $dayMetrics
+     * @return array<string, mixed>
+     */
+    private function persistCollectedMetrics(
+        int $accountId,
+        \DateTimeImmutable $today,
+        array $active,
+        array $campaignRows,
+        array $skuRows,
+        array $dayMetrics
+    ): array {
+        $startedTxn = false;
+        try {
+            if (!$this->db->inTransaction()) {
+                $this->db->beginTransaction();
+                $startedTxn = true;
+            }
+
+            foreach ($campaignRows as $row) {
+                $this->upsertCampaignDay($row);
+            }
+            foreach ($skuRows as $row) {
+                $this->upsertSkuDay($row);
+            }
+
+            foreach ($dayMetrics as $date => $agg) {
+                $receitaTotal = $this->receitaTotalConta($accountId, (string) $date);
+                $gasto = (float) $agg['gasto'];
+                $recAttr = (float) $agg['receita_atribuida'];
+                $acos = $recAttr > 0 ? round(($gasto / $recAttr) * 100, 4) : null;
+                $tacos = $receitaTotal > 0 ? round(($gasto / $receitaTotal) * 100, 4) : null;
+
+                $this->db->prepare(
+                    'INSERT INTO ads_account_metrics_daily
+                       (account_id, `date`, gasto, receita_atribuida, receita_total, acos, tacos, campanhas_ativas)
+                     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                     ON DUPLICATE KEY UPDATE
+                       gasto = VALUES(gasto),
+                       receita_atribuida = VALUES(receita_atribuida),
+                       receita_total = VALUES(receita_total),
+                       acos = VALUES(acos),
+                       tacos = VALUES(tacos),
+                       campanhas_ativas = VALUES(campanhas_ativas)'
+                )->execute([
+                    $accountId,
+                    $date,
+                    $gasto,
+                    $recAttr,
+                    $receitaTotal,
+                    $acos,
+                    $tacos,
+                    count($active),
+                ]);
+            }
+
+            $windows = $this->computeWindows($accountId, $today);
+            $this->persistIndexMetrics($accountId, $windows, count($active), false, null);
+
+            if ($startedTxn) {
+                $this->db->commit();
+            }
+
+            return $windows;
+        } catch (Throwable $e) {
+            if ($startedTxn && $this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            throw $e;
+        }
+    }
+
+    private function paceRemote(): void
+    {
+        if ($this->adsFactory === null) {
+            usleep(self::BATCH_SLEEP_US);
+        }
+    }
+
+    /**
+     * Contrato unificado: ok=false / api_status 429|5xx / incomplete → throw (nunca persistir).
+     *
+     * @param array<string, mixed> $payload
+     */
+    private function assertPadsPayloadOk(array $payload, string $context): void
+    {
+        $status = $this->extractApiStatus($payload);
+        if ($status === 429 || $status >= 500) {
+            throw new \RuntimeException('pads_http_' . $status);
+        }
+        if (!empty($payload['incomplete']) || (($payload['error'] ?? null) === 'pagination_incomplete')) {
+            throw new \RuntimeException('pads_pagination_incomplete:' . $context);
+        }
+        if (array_key_exists('ok', $payload) && $payload['ok'] === false) {
+            $err = (string) ($payload['error'] ?? $payload['_meta']['api_error'] ?? $payload['_meta']['error'] ?? 'unknown');
+            throw new \RuntimeException('pads_api_error:' . $err);
+        }
+        $metaSource = (string) ($payload['_meta']['data_source'] ?? '');
+        $metaReason = (string) ($payload['_meta']['reason'] ?? '');
+        if ($metaSource === 'local_cache' && in_array($metaReason, ['api_error', 'exception', 'pagination_incomplete'], true)) {
+            throw new \RuntimeException('pads_api_error:' . (string) ($payload['_meta']['api_error'] ?? $payload['error'] ?? $metaReason));
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return list<array<string, mixed>>
+     */
+    private function requireListEnvelope(array $payload, string $key, string $context): array
+    {
+        if (!array_key_exists($key, $payload) || !is_array($payload[$key]) || !array_is_list($payload[$key])) {
+            throw new \RuntimeException('pads_invalid_wire_shape:' . $context);
+        }
+
+        $rows = [];
+        foreach ($payload[$key] as $row) {
+            if (!is_array($row)) {
+                throw new \RuntimeException('pads_invalid_wire_shape:' . $context . '.row');
+            }
+            $rows[] = $row;
+        }
+        return $rows;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function requireMapEnvelope(array $payload, string $key, string $context): array
+    {
+        if (!array_key_exists($key, $payload) || !is_array($payload[$key])) {
+            throw new \RuntimeException('pads_invalid_wire_shape:' . $context);
+        }
+        return $payload[$key];
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function extractApiStatus(array $payload): ?int
+    {
+        foreach ([
+            $payload['api_status'] ?? null,
+            $payload['status'] ?? null,
+            $payload['_meta']['api_status'] ?? null,
+            $payload['_meta']['product_ads_status'] ?? null,
+        ] as $candidate) {
+            if ($candidate !== null && $candidate !== '' && is_numeric($candidate)) {
+                return (int) $candidate;
+            }
+        }
+        return null;
     }
 
     private function makeAdsClient(int $accountId): object
@@ -1067,22 +1313,61 @@ final class AdsMetricsCollector
         $delay = 500000;
         while (true) {
             $attempt++;
-            $result = $fn();
-            $status = null;
-            if (is_array($result)) {
-                $status = $result['status'] ?? ($result['_meta']['product_ads_status'] ?? null);
-                $err = (string) ($result['error'] ?? '');
-                if ($status === 429 || str_contains(strtolower($err), 'too many') || str_contains($err, '429')) {
-                    if ($attempt >= self::MAX_RETRIES_429) {
-                        return $result;
-                    }
+            try {
+                $result = $fn();
+            } catch (Throwable $e) {
+                $retryStatus = $this->retryableStatusFromThrowable($e);
+                if ($retryStatus === null) {
+                    throw $e;
+                }
+                if ($attempt >= self::MAX_RETRIES_TRANSIENT) {
+                    throw new \RuntimeException('pads_http_' . $retryStatus, 0, $e);
+                }
+                if ($this->adsFactory === null) {
                     usleep($delay);
                     $delay = min($delay * 2, 8000000);
-                    continue;
                 }
+                continue;
             }
-            return $result;
+
+            if (!is_array($result)) {
+                return $result;
+            }
+
+            $status = $this->extractApiStatus($result);
+            $error = (string) ($result['error'] ?? $result['_meta']['api_error'] ?? $result['_meta']['error'] ?? '');
+            $errorLower = strtolower($error);
+            $retryStatus = null;
+            if (
+                $status === 429
+                || str_contains($errorLower, 'too many')
+                || str_contains($error, '429')
+                || str_contains($errorLower, 'pads_http_429')
+            ) {
+                $retryStatus = 429;
+            } elseif ($status !== null && $status >= 500 && $status <= 599) {
+                $retryStatus = $status;
+            }
+
+            if ($retryStatus === null) {
+                return $result;
+            }
+            if ($attempt >= self::MAX_RETRIES_TRANSIENT) {
+                throw new \RuntimeException('pads_http_' . $retryStatus);
+            }
+            if ($this->adsFactory === null) {
+                usleep($delay);
+                $delay = min($delay * 2, 8000000);
+            }
         }
+    }
+
+    private function retryableStatusFromThrowable(Throwable $error): ?int
+    {
+        if (preg_match('/pads_http_(429|5[0-9]{2})/', strtolower($error->getMessage()), $matches) !== 1) {
+            return null;
+        }
+        return (int) $matches[1];
     }
 
     private function tablesReady(): bool

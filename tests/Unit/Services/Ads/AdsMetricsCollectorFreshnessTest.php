@@ -94,10 +94,17 @@ class AdsMetricsCollectorFreshnessTest extends TestCase
                     return [];
                 }
 
-                public function getAdsItems(string $from, string $to, int $limit = 50): array
+                public function getAdsItems(string $from, string $to, int $limit = 50, string $aggregationType = 'item'): array
                 {
                     $this->counter->n++;
-                    return [];
+                    return [
+                        'ok' => true,
+                        'items' => [],
+                        'incomplete' => false,
+                        'api_status' => null,
+                        'error' => null,
+                        'aggregation_type' => $aggregationType,
+                    ];
                 }
             };
         };
@@ -127,9 +134,16 @@ class AdsMetricsCollectorFreshnessTest extends TestCase
                     return [];
                 }
 
-                public function getAdsItems(string $from, string $to, int $limit = 50): array
+                public function getAdsItems(string $from, string $to, int $limit = 50, string $aggregationType = 'item'): array
                 {
-                    return [];
+                    return [
+                        'ok' => true,
+                        'items' => [],
+                        'incomplete' => false,
+                        'api_status' => null,
+                        'error' => null,
+                        'aggregation_type' => $aggregationType,
+                    ];
                 }
             };
         });
@@ -254,9 +268,16 @@ class AdsMetricsCollectorFreshnessTest extends TestCase
                     return [];
                 }
 
-                public function getAdsItems(string $from, string $to, int $limit = 50): array
+                public function getAdsItems(string $from, string $to, int $limit = 50, string $aggregationType = 'item'): array
                 {
-                    return [];
+                    return [
+                        'ok' => true,
+                        'items' => [],
+                        'incomplete' => false,
+                        'api_status' => null,
+                        'error' => null,
+                        'aggregation_type' => $aggregationType,
+                    ];
                 }
             };
         });
