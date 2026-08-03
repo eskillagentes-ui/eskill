@@ -1,0 +1,15 @@
+[Unit]
+Description=eskill Pregao keyword rank tracker (2x/dia)
+After=network.target
+
+[Service]
+Type=oneshot
+User=eskill
+Group=eskill
+WorkingDirectory=/home/eskill/htdocs/eskill.com.br
+Environment=PREGAO_SEED=false
+Environment=RANK_TRACKER_ENABLED=false
+# Religue com RANK_TRACKER_ENABLED=true e systemctl enable --now pregao-keywords.timer
+ExecStart=/usr/bin/php /home/eskill/htdocs/eskill.com.br/bin/pregao-collect.php --account-id=1335 --only=keywords --tick
+StandardOutput=append:/home/eskill/htdocs/eskill.com.br/storage/logs/pregao-keywords.log
+StandardError=append:/home/eskill/htdocs/eskill.com.br/storage/logs/pregao-keywords.log
