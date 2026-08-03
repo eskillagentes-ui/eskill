@@ -73,3 +73,11 @@ php bin/pregao-index-tick.php --account-id=1335 --loop --interval=45
 - Gateway WS escutando `127.0.0.1:8091`
 - `pregao_emit` OK
 - `/api/pregao/snapshot` sem sessão → **401** (esperado)
+
+## Smoke executado pelo agente (2026-08-02 21:36 -03)
+
+- Workers: WS `:8091` + tick `--account-id=1335 --loop` (nohup)
+- Nginx: `/ws/pregao` + `/api/pregao/stream` aplicados em `sites-enabled` e reload OK
+- `pregao_emit_sale` → 5 eventos; snapshot autenticado **17ms**, vendas_hoje=2, fita com VENDA
+- Página `/dashboard/pregao` → **200** com `#pregao-root` / ESKL11
+- Ticket WS + handshake → **101 Switching Protocols**
