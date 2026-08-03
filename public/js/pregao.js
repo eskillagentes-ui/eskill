@@ -2,6 +2,9 @@
  * Pregão client — snapshot inicial + WS (com fallback SSE) e reconexão exponencial.
  * 100% leitura: nenhum endpoint de escrita no ML.
  */
+/* eslint-env browser */
+/* global window, document, matchMedia, setInterval, devicePixelRatio, getComputedStyle,
+          addEventListener, fetch, setTimeout, clearTimeout, location, WebSocket, EventSource, console */
 (function () {
     'use strict';
 
@@ -16,7 +19,6 @@
     let open0 = 1000;
     let cur = { o: 1000, c: 1000, h: 1000, l: 1000 };
     let reconnectAttempt = 0;
-    let transport = null;
     let es = null;
     let ws = null;
     let intentionalClose = false;
@@ -325,9 +327,6 @@
                 break;
             case 'keyword.rank':
                 if (ev.payload) {
-                    // merge single rank into tape via re-fetch not needed — append visually
-                    const existing = [];
-                    // soft update: reload tape from current DOM is hard; keep simple append marker
                     const k = ev.payload;
                     const node = document.createElement('span');
                     node.innerHTML = `<b>${escapeHtml(k.kw)}</b> #${k.pos}`;
@@ -432,7 +431,6 @@
 
     function bindWs(socket) {
         ws = socket;
-        transport = 'ws';
         setConn('ws');
         reconnectAttempt = 0;
         intentionalClose = false;
@@ -454,7 +452,6 @@
     function connectSse() {
         const url = (boot.streamUrl || '/api/pregao/stream') + (accountId ? ('?account_id=' + accountId) : '');
         es = new EventSource(url, { withCredentials: true });
-        transport = 'sse';
         setConn('sse');
         reconnectAttempt = 0;
 

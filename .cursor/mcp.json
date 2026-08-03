@@ -1,0 +1,16 @@
+{
+  "mcpServers": {
+    "codacy": {
+      "command": "bash",
+      "args": [
+        "/home/eskill/htdocs/eskill.com.br/bin/codacy-mcp-start.sh"
+      ]
+    },
+    "mercadolibre-mcp-server": {
+      "url": "https://mcp.mercadolibre.com/mcp"
+    },
+    "mercadopago-mcp-server": {
+      "url": "https://mcp.mercadopago.com/mcp"
+    }
+  }
+}
