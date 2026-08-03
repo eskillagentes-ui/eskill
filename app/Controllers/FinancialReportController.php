@@ -56,10 +56,28 @@ class FinancialReportController extends BaseController
      */
     public function index(): void
     {
-        $this->renderView('dashboard/financials', [
-            'pageTitle' => 'Relatórios Financeiros',
-            'activePage' => 'financials',
-        ]);
+        $pageTitle = 'Relatórios Financeiros';
+        $activePage = 'financials';
+        $cspNonce = $GLOBALS['cspNonce'] ?? ($_SESSION['csp_nonce'] ?? '');
+
+        $viewFile = __DIR__ . '/../Views/dashboard/financials.php';
+        ob_start();
+        require $viewFile;
+        $content = (string) ob_get_clean();
+
+        // const/let no topo do script NÃO ficam em window; o onclick="financialManager.loadData()"
+        // do botão Filtrar precisa de propriedade global.
+        $content = str_replace(
+            'const financialManager = {',
+            'window.financialManager = {',
+            $content,
+            $count
+        );
+        if ($count < 1) {
+            log_error('financials: falha ao expor window.financialManager para o botão Filtrar');
+        }
+
+        require __DIR__ . '/../Views/layouts/modern/app.php';
     }
 
     /**
