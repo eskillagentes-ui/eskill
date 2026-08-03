@@ -17,8 +17,8 @@
     const seenOps = new Set();
     let candles = [];
     let currentDate = null;
-    let open0 = 1000;
-    let cur = { o: 1000, c: 1000, h: 1000, l: 1000 };
+    let open0 = null;
+    let cur = { o: null, c: null, h: null, l: null };
     let reconnectAttempt = 0;
     let es = null;
     let ws = null;
@@ -114,6 +114,7 @@
         if (chartEmpty) chartEmpty.hidden = !show;
         if (cv) cv.style.opacity = show ? '0.25' : '1';
     }
+
 
     function draw() {
         if (!ctx || !cv) return;
@@ -443,7 +444,20 @@
         const v = Number(value);
         if (!Number.isFinite(v)) return;
         cur.c = v;
-        const currentIndex = currentDate ? findCandleIndex(currentDate) : -1;
+        if (!currentDate) {
+            currentDate = new Date().toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+        }
+        let currentIndex = currentDate ? findCandleIndex(currentDate) : -1;
+        // Sem candle do dia (snapshot falhou): sintetiza um para o gráfico não ficar vazio
+        if (currentIndex < 0 && currentDate) {
+            candles.push({ o: v, h: v, l: v, c: v, date: currentDate });
+            currentIndex = candles.length - 1;
+            if (!Number.isFinite(open0)) open0 = v;
+            cur.o = v;
+            cur.h = v;
+            cur.l = v;
+            cur.date = currentDate;
+        }
         if (currentIndex >= 0) {
             cur.h = cur.h == null ? v : Math.max(cur.h, v);
             cur.l = cur.l == null ? v : Math.min(cur.l, v);
@@ -464,9 +478,10 @@
         if (idx >= 0) candles[idx] = row;
         else candles.push(row);
         if (candles.length > 90) candles = candles.slice(-90);
+        if (!currentDate) currentDate = c.date;
         if (c.date === currentDate) {
             cur = { ...row };
-            open0 = row.o;
+            open0 = Number.isFinite(row.o) ? row.o : open0;
         }
         updateHeader();
         draw();
@@ -792,6 +807,10 @@
         .then(() => connectRealtime())
         .catch((err) => {
             console.error('[pregao] snapshot', err);
+            open0 = null;
+            cur = { o: null, c: null, h: null, l: null, date: currentDate, change_pct: null };
+            updateHeader();
+            draw();
             $('semaText').textContent = 'FALHA NO SNAPSHOT';
             connectSse();
         });

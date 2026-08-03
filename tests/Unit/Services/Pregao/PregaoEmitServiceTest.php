@@ -213,4 +213,95 @@ class PregaoEmitServiceTest extends TestCase
         $this->assertNotNull($a);
         $this->assertNotNull($b);
     }
+
+    public function testHeartbeatMsgNeutraNaoReaproveitaAlerta(): void
+    {
+        $pdo = $this->createMock(PDO::class);
+        $stmt = $this->createMock(\PDOStatement::class);
+        $stmt->method('execute')->willReturn(true);
+        $infoStmt = $this->createMock(\PDOStatement::class);
+        $infoStmt->method('fetchColumn')->willReturn(1);
+        $pdo->method('prepare')->willReturn($stmt);
+        $pdo->method('query')->willReturn($infoStmt);
+
+        $store = [];
+        $redis = $this->createMock(Redis::class);
+        $redis->method('get')->willReturnCallback(static function (string $key) use (&$store) {
+            return $store[$key] ?? false;
+        });
+        $redis->method('set')->willReturnCallback(static function (string $key, $value) use (&$store): bool {
+            $store[$key] = (string) $value;
+            return true;
+        });
+        $redis->method('publish')->willReturn(1);
+        $redis->method('lPush')->willReturn(1);
+        $redis->method('lTrim')->willReturn(true);
+
+        $service = new PregaoEmitService($pdo, $redis);
+        $payload = [
+            'robot' => 'ADS',
+            'level' => 'alert',
+            'icon' => '🛑',
+            'msg' => 'MLB1 · abaixo do breakeven — candidato a pausa (ROAS 0.00x < 3.84x)',
+        ];
+        $fp = ['on' => true, 'roas' => 0];
+
+        $first = $service->emitOpOnTransition('ADS_ABAIXO_BREAKEVEN:MLB1', $payload, $fp, 1335, 'live');
+        $this->assertNotNull($first);
+        $this->assertArrayNotHasKey('heartbeat', $first['payload']);
+
+        // força janela de heartbeat expirada (simula >1h)
+        $store['pregao:heartbeat:1335:robot:ADS'] = (string) (time() - PregaoEmitService::OP_HEARTBEAT_TTL_SECONDS - 1);
+
+        $hb = $service->emitOpOnTransition('ADS_ABAIXO_BREAKEVEN:MLB1', $payload, $fp, 1335, 'live');
+        $this->assertNotNull($hb);
+        $this->assertTrue($hb['payload']['heartbeat'] ?? false);
+        $this->assertSame('info', $hb['payload']['level']);
+        $this->assertSame('ADS · heartbeat (coletor vivo)', $hb['payload']['msg']);
+        $this->assertStringNotContainsString('candidato a pausa', (string) $hb['payload']['msg']);
+    }
+
+    public function testHeartbeatNoMaximoUmaVezPorColetorNaMesmaHora(): void
+    {
+        $pdo = $this->createMock(PDO::class);
+        $stmt = $this->createMock(\PDOStatement::class);
+        $stmt->method('execute')->willReturn(true);
+        $infoStmt = $this->createMock(\PDOStatement::class);
+        $infoStmt->method('fetchColumn')->willReturn(1);
+        $pdo->method('prepare')->willReturn($stmt);
+        $pdo->method('query')->willReturn($infoStmt);
+
+        $store = [];
+        $redis = $this->createMock(Redis::class);
+        $redis->method('get')->willReturnCallback(static function (string $key) use (&$store) {
+            return $store[$key] ?? false;
+        });
+        $redis->method('set')->willReturnCallback(static function (string $key, $value) use (&$store): bool {
+            $store[$key] = (string) $value;
+            return true;
+        });
+        $redis->method('publish')->willReturn(1);
+        $redis->method('lPush')->willReturn(1);
+        $redis->method('lTrim')->willReturn(true);
+
+        $service = new PregaoEmitService($pdo, $redis);
+        $payload = [
+            'robot' => 'ADS',
+            'level' => 'alert',
+            'icon' => '🛑',
+            'msg' => 'alerta',
+        ];
+
+        $service->emitOpOnTransition('ADS_A:MLB1', $payload, ['on' => true], 1335, 'live');
+        $service->emitOpOnTransition('ADS_B:MLB2', $payload, ['on' => true], 1335, 'live');
+
+        $store['pregao:heartbeat:1335:robot:ADS'] = (string) (time() - PregaoEmitService::OP_HEARTBEAT_TTL_SECONDS - 1);
+
+        $hb1 = $service->emitOpOnTransition('ADS_A:MLB1', $payload, ['on' => true], 1335, 'live');
+        $hb2 = $service->emitOpOnTransition('ADS_B:MLB2', $payload, ['on' => true], 1335, 'live');
+
+        $this->assertNotNull($hb1);
+        $this->assertTrue($hb1['payload']['heartbeat'] ?? false);
+        $this->assertNull($hb2, 'segundo stateKey do mesmo robô na mesma hora não deve emitir outro heartbeat');
+    }
 }

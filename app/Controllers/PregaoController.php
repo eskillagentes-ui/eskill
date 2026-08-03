@@ -39,10 +39,13 @@ class PregaoController extends BaseController
             exit;
         }
 
-        $accountId = $this->getActiveAccountId();
+        $accountId = $this->resolveAccountId();
+        if ($accountId === null) {
+            $accountId = $this->resolveFallbackAccountId();
+        }
         $pageTitle = 'Pregão';
         $currentPage = 'pregao';
-        $pregaoAccountId = $accountId;
+        $pregaoAccountId = $accountId ?? 0;
 
         ob_start();
         require __DIR__ . '/../Views/dashboard/pregao.php';
@@ -65,6 +68,9 @@ class PregaoController extends BaseController
         }
 
         $accountId = $this->resolveAccountId();
+        if ($accountId === null) {
+            $accountId = $this->resolveFallbackAccountId();
+        }
         if ($accountId === null) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada', 'data' => null]);
@@ -98,6 +104,9 @@ class PregaoController extends BaseController
         }
 
         $accountId = $this->resolveAccountId();
+        if ($accountId === null) {
+            $accountId = $this->resolveFallbackAccountId();
+        }
         $service = new PregaoStreamService();
         $service->streamSse($accountId);
     }
@@ -115,6 +124,9 @@ class PregaoController extends BaseController
         }
 
         $accountId = $this->resolveAccountId();
+        if ($accountId === null) {
+            $accountId = $this->resolveFallbackAccountId();
+        }
         if ($accountId === null) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
@@ -178,5 +190,39 @@ class PregaoController extends BaseController
             return (int) $fromQuery;
         }
         return $this->getActiveAccountId();
+    }
+
+    /**
+     * Fallback: primeira conta ML ativa do usuário autenticado.
+     * Evita snapshot 400 + gráfico vazio quando a sessão não tem active_ml_account_id.
+     */
+    private function resolveFallbackAccountId(): ?int
+    {
+        $userId = $this->getUserId();
+        if ($userId === null || $userId <= 0) {
+            return null;
+        }
+
+        try {
+            $db = \App\Database::getInstance();
+            $stmt = $db->prepare(
+                "SELECT id FROM ml_accounts
+                 WHERE user_id = ?
+                   AND (status IN ('active', 'connected') OR status IS NULL)
+                 ORDER BY id ASC
+                 LIMIT 1"
+            );
+            $stmt->execute([$userId]);
+            $id = $stmt->fetchColumn();
+            if ($id === false || (int) $id <= 0) {
+                return null;
+            }
+            $accountId = (int) $id;
+            $_SESSION['active_ml_account_id'] = $accountId;
+            $_SESSION['account_id'] = $accountId;
+            return $accountId;
+        } catch (Throwable $e) {
+            return null;
+        }
     }
 }

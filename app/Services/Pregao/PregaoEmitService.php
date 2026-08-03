@@ -21,7 +21,7 @@ final class PregaoEmitService
     /** v2: `ranks` oficial no snapshot; `keywords` alias deprecado. */
     public const VERSION = 2;
 
-    /** Heartbeat de op por coletor: no máximo 1× por hora. */
+    /** Heartbeat de op por coletor (robô): no máximo 1× por hora. */
     public const OP_HEARTBEAT_TTL_SECONDS = 3600;
 
     /** @var list<string> */
@@ -124,21 +124,26 @@ final class PregaoEmitService
 
         $previous = $this->readLastState($cacheKey);
         $changed = $previous === null || $previous !== $fingerprint;
+        $robot = (string) ($payload['robot'] ?? 'SISTEMA');
+        // P0: heartbeat ≤1×/h por coletor (robô), não por stateKey/SKU
+        $hbKey = 'pregao:heartbeat:' . $accountPart . ':robot:' . $robot;
 
         if ($changed) {
             $this->writeLastState($cacheKey, $fingerprint);
-            // reinicia janela de heartbeat — próximo heartbeat só após 1h sem mudança
-            $this->markHeartbeat('pregao:heartbeat:' . $accountPart . ':' . $stateKey);
+            // reinicia janela de heartbeat do coletor — próximo só após 1h sem transição
+            $this->markHeartbeat($hbKey);
             return $this->emit('op', $payload, $accountId, $source);
         }
 
-        $hbKey = 'pregao:heartbeat:' . $accountPart . ':' . $stateKey;
         if ($this->shouldEmitHeartbeat($hbKey)) {
-            $hbPayload = $payload;
-            $hbPayload['level'] = 'info';
-            $hbPayload['heartbeat'] = true;
-            $msg = (string) ($payload['msg'] ?? '');
-            $hbPayload['msg'] = ($msg !== '' ? $msg . ' · ' : '') . 'heartbeat (coletor vivo)';
+            $hbPayload = [
+                'robot' => $robot,
+                'level' => 'info',
+                'icon' => (string) ($payload['icon'] ?? '•'),
+                'heartbeat' => true,
+                // msg neutra — não reaproveitar texto de alerta (evita "candidato a pausa · heartbeat")
+                'msg' => $robot . ' · heartbeat (coletor vivo)',
+            ];
             $this->markHeartbeat($hbKey);
             return $this->emit('op', $hbPayload, $accountId, $source);
         }
