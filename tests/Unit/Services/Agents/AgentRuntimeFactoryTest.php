@@ -8,6 +8,7 @@ use App\Services\Agents\AgentRuntimeFactory;
 use App\Services\Agents\AgentRuntimeReadGatewayInterface;
 use App\Services\Agents\CriadorAgent;
 use App\Services\Agents\QaMergeGate;
+use App\Services\Agents\SentinelaAgent;
 use App\Services\Agents\SnapshotEnvelope;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
@@ -268,6 +269,22 @@ final class AgentRuntimeFactoryTest extends TestCase
         self::assertFalse($context->metadata()['sentinela_snapshot']['payload']['ok']);
     }
 
+    public function testSentinelaRejeitaPctQueNaoCorrespondeAoValorBruto(): void
+    {
+        $gateway = new AgentRuntimeReadGatewayFake();
+        foreach ($gateway->sentinela['risks'] as &$risk) {
+            if ($risk['risk_key'] === 'reclamacoes') {
+                $risk['pct_of_limit'] = 81.0;
+            }
+        }
+        unset($risk);
+        $gateway->sentinela['semaforo'] = 'vermelho';
+
+        $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-risk-value-pct-mismatch');
+
+        self::assertFalse($context->metadata()['sentinela_snapshot']['payload']['ok']);
+    }
+
     public function testSentinelaRejeitaCampoExtraAntesDeProjetarRisco(): void
     {
         $gateway = new AgentRuntimeReadGatewayFake();
@@ -283,7 +300,8 @@ final class AgentRuntimeFactoryTest extends TestCase
         string $riskKey,
         float $value,
         float $limit,
-        float $pct
+        float $pct,
+        string $status
     ): void {
         $gateway = new AgentRuntimeReadGatewayFake();
         foreach ($gateway->sentinela['risks'] as &$risk) {
@@ -293,20 +311,37 @@ final class AgentRuntimeFactoryTest extends TestCase
             $risk['value_num'] = $value;
             $risk['limit_num'] = $limit;
             $risk['pct_of_limit'] = $pct;
-            $risk['status'] = 'amarelo';
+            $risk['status'] = $status;
         }
         unset($risk);
-        $gateway->sentinela['semaforo'] = 'amarelo';
+        $gateway->sentinela['semaforo'] = $status;
 
         $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-real-threshold-' . $riskKey);
 
         self::assertTrue($context->metadata()['sentinela_snapshot']['payload']['ok']);
+        self::assertSame('success', (new SentinelaAgent())->run($context)->status());
     }
 
     public function legitimateConfiguredSentinelaThresholds(): iterable
     {
-        yield 'atrasos 7 de 15' => ['atrasos', 7.0, 15.0, 46.67];
-        yield 'cancelamentos 1 de 2.5' => ['cancelamentos', 1.0, 2.5, 40.0];
+        yield 'reclamacoes abaixo amarelo' => ['reclamacoes', 0.9999, 2.0, 50.0, 'verde'];
+        yield 'reclamacoes no amarelo' => ['reclamacoes', 1.0, 2.0, 50.0, 'amarelo'];
+        yield 'reclamacoes acima amarelo' => ['reclamacoes', 1.0001, 2.0, 50.01, 'amarelo'];
+        yield 'reclamacoes abaixo vermelho' => ['reclamacoes', 1.5999, 2.0, 80.0, 'amarelo'];
+        yield 'reclamacoes no vermelho' => ['reclamacoes', 1.6, 2.0, 80.0, 'vermelho'];
+        yield 'reclamacoes acima vermelho' => ['reclamacoes', 1.6001, 2.0, 80.01, 'vermelho'];
+        yield 'atrasos abaixo amarelo' => ['atrasos', 6.9999, 15.0, 46.67, 'verde'];
+        yield 'atrasos no amarelo' => ['atrasos', 7.0, 15.0, 46.67, 'amarelo'];
+        yield 'atrasos acima amarelo' => ['atrasos', 7.0001, 15.0, 46.67, 'amarelo'];
+        yield 'atrasos abaixo vermelho' => ['atrasos', 11.9999, 15.0, 80.0, 'amarelo'];
+        yield 'atrasos no vermelho' => ['atrasos', 12.0, 15.0, 80.0, 'vermelho'];
+        yield 'atrasos acima vermelho' => ['atrasos', 12.0001, 15.0, 80.0, 'vermelho'];
+        yield 'cancelamentos abaixo amarelo' => ['cancelamentos', 0.9999, 2.5, 40.0, 'verde'];
+        yield 'cancelamentos no amarelo' => ['cancelamentos', 1.0, 2.5, 40.0, 'amarelo'];
+        yield 'cancelamentos acima amarelo' => ['cancelamentos', 1.0001, 2.5, 40.0, 'amarelo'];
+        yield 'cancelamentos abaixo vermelho' => ['cancelamentos', 1.9999, 2.5, 80.0, 'amarelo'];
+        yield 'cancelamentos no vermelho' => ['cancelamentos', 2.0, 2.5, 80.0, 'vermelho'];
+        yield 'cancelamentos acima vermelho' => ['cancelamentos', 2.0001, 2.5, 80.0, 'vermelho'];
     }
 
     public function testAdsRejeitaSkuVazioMalformadoSemIgnorarLinha(): void

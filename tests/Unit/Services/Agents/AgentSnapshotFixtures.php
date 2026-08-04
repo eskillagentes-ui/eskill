@@ -34,19 +34,40 @@ trait AgentSnapshotFixtures
     /** @return array<string, mixed> */
     protected function validRisk(string $key = 'oauth', string $status = 'amarelo'): array
     {
+        $configured = [
+            'reclamacoes' => [
+                'limit' => 2.0,
+                'values' => ['verde' => 0.0, 'amarelo' => 1.0, 'vermelho' => 1.6],
+            ],
+            'atrasos' => [
+                'limit' => 15.0,
+                'values' => ['verde' => 0.0, 'amarelo' => 7.0, 'vermelho' => 12.0],
+            ],
+            'cancelamentos' => [
+                'limit' => 2.5,
+                'values' => ['verde' => 0.0, 'amarelo' => 1.0, 'vermelho' => 2.0],
+            ],
+        ];
         $pct = match ($status) {
             'vermelho' => 81.0,
             'amarelo' => 50.0,
             'nd' => null,
             default => 10.0,
         };
+        $value = $status === 'nd' ? null : 1.0;
+        $limit = $status === 'nd' ? null : 10.0;
+        if (isset($configured[$key]) && $status !== 'nd') {
+            $value = $configured[$key]['values'][$status];
+            $limit = $configured[$key]['limit'];
+            $pct = round(($value / $limit) * 100.0, 2);
+        }
 
         return [
             'risk_key' => $key,
             'label' => $key,
-            'value_num' => $status === 'nd' ? null : 1.0,
+            'value_num' => $value,
             'value_text' => $status === 'nd' ? null : 'ok',
-            'limit_num' => $status === 'nd' ? null : 10.0,
+            'limit_num' => $limit,
             'pct_of_limit' => $pct,
             'status' => $status,
             'reason' => 'test',

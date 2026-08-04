@@ -424,6 +424,8 @@ final class AgentRuntimeFactory
             || !SentinelaRiskStatusPolicy::isConsistent(
                 $risk['risk_key'],
                 $risk['status'],
+                $risk['value_num'],
+                $risk['limit_num'],
                 $risk['pct_of_limit']
             )
         ) {
@@ -771,11 +773,10 @@ final class AgentRuntimeFactory
             if ($risk['status'] === 'nd') {
                 continue;
             }
-            $pct = $risk['pct_of_limit'];
-            if ($risk['status'] === 'vermelho' || ($pct !== null && (float) $pct > 80.0)) {
+            if ($risk['status'] === 'vermelho') {
                 return 'vermelho';
             }
-            if ($risk['status'] === 'amarelo' || ($pct !== null && (float) $pct >= 50.0)) {
+            if ($risk['status'] === 'amarelo') {
                 $worst = 'amarelo';
             }
         }

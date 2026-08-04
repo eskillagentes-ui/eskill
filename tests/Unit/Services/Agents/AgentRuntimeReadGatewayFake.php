@@ -26,10 +26,19 @@ final class AgentRuntimeReadGatewayFake implements AgentRuntimeReadGatewayInterf
         $risks = [];
         foreach ($keys as $key) {
             $nd = $key === 'nf_pendente';
+            $configuredLimit = match ($key) {
+                'reclamacoes' => 2.0,
+                'atrasos' => 15.0,
+                'cancelamentos' => 2.5,
+                default => 10.0,
+            };
+            $configuredPctRisk = in_array($key, ['reclamacoes', 'atrasos', 'cancelamentos'], true);
             $risks[] = [
                 'risk_key' => $key, 'label' => $key,
-                'value_num' => $nd ? null : 1.0, 'value_text' => $nd ? null : 'ok',
-                'limit_num' => $nd ? null : 10.0, 'pct_of_limit' => $nd ? null : 10.0,
+                'value_num' => $nd ? null : ($configuredPctRisk ? 0.0 : 1.0),
+                'value_text' => $nd ? null : 'ok',
+                'limit_num' => $nd ? null : $configuredLimit,
+                'pct_of_limit' => $nd ? null : ($configuredPctRisk ? 0.0 : 10.0),
                 'status' => $nd ? 'nd' : 'verde', 'reason' => 'ok', 'source' => 'unit',
                 'meta' => null, 'collected_at' => $nd ? null : '2026-08-03 12:00:00',
             ];
