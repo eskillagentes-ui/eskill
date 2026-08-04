@@ -112,11 +112,9 @@ final class AgentContext
         }
 
         if (
-            array_key_exists('account_id', $value)
-            && array_key_exists('correlation_id', $value)
-            && array_key_exists('payload', $value)
+            self::hasExactKeys($value, SnapshotEnvelope::KEYS)
             && is_array($value['payload'])
-            && array_key_exists('results', $value['payload'])
+            && self::hasExactKeys($value['payload'], ['results'])
             && is_array($value['payload']['results'])
         ) {
             $results = [];
@@ -135,6 +133,16 @@ final class AgentContext
         }
 
         throw new InvalidArgumentException('qa_results_snapshot must be a provenance envelope');
+    }
+
+    /** @param array<array-key, mixed> $value @param list<string> $expected */
+    private static function hasExactKeys(array $value, array $expected): bool
+    {
+        $actual = array_keys($value);
+        sort($actual);
+        sort($expected);
+
+        return $actual === $expected;
     }
 
     private static function exportQaEnvelope(mixed $value): mixed

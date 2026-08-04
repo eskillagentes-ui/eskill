@@ -66,6 +66,35 @@ final class AgentContextTest extends TestCase
         AgentResult::success('lint', 'ok', ['port' => static fn (): array => []]);
     }
 
+    /** @dataProvider qaEnvelopeComCamposExtras */
+    public function testRejeitaEnvelopeQaComCamposExtras(array $envelope): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        new AgentContext(1, 'local', 'corr-qa-extra', false, [
+            'qa_results_snapshot' => $envelope,
+        ]);
+    }
+
+    /** @return iterable<string, array{array<string, mixed>}> */
+    public function qaEnvelopeComCamposExtras(): iterable
+    {
+        $result = AgentResult::success('php-lint', 'ok');
+        yield 'campo extra no envelope' => [[
+            'account_id' => 1,
+            'correlation_id' => 'corr-qa-extra',
+            'payload' => ['results' => ['php-lint' => $result]],
+            'extra' => true,
+        ]];
+        yield 'campo extra no payload' => [[
+            'account_id' => 1,
+            'correlation_id' => 'corr-qa-extra',
+            'payload' => [
+                'results' => ['php-lint' => $result],
+                'extra' => true,
+            ],
+        ]];
+    }
+
     /** @dataProvider invalidContext */
     public function testRejeitaContextoInvalido(int $accountId, string $environment, string $correlationId): void
     {

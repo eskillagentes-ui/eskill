@@ -1,12 +1,12 @@
 {
   "scripts": {
     "test": "npm run test:e2e",
-    "test:e2e": "mkdir -p .tmp/playwright-transform-cache-0 && TMPDIR=.tmp playwright test",
-    "test:e2e:readonly": "mkdir -p .tmp/playwright-transform-cache-0 && TMPDIR=.tmp E2E_READONLY=1 playwright test --project=readonly",
-    "test:e2e:staging": "mkdir -p .tmp/playwright-transform-cache-0 && TMPDIR=.tmp E2E_ALLOW_MUTATION=true PLAYWRIGHT_BASE_URL=http://staging.eskill.com.br PLAYWRIGHT_SKIP_WEBSERVER=1 playwright test --project=chromium",
-    "test:e2e:headed": "playwright test --headed",
-    "test:e2e:ui": "playwright test --ui",
-    "test:e2e:debug": "playwright test --debug"
+    "test:e2e": "node scripts/run-playwright-tests.cjs",
+    "test:e2e:readonly": "node scripts/run-playwright-tests.cjs --readonly --project=readonly",
+    "test:e2e:staging": "node scripts/run-playwright-tests.cjs --staging --project=chromium",
+    "test:e2e:headed": "node scripts/run-playwright-tests.cjs --headed",
+    "test:e2e:ui": "node scripts/run-playwright-tests.cjs --ui",
+    "test:e2e:debug": "node scripts/run-playwright-tests.cjs --debug"
   },
   "devDependencies": {
     "@playwright/test": "^1.59.1",

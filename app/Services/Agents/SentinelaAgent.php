@@ -49,7 +49,8 @@ final class SentinelaAgent extends LegacyReadOnlyAgentAdapter
             || !$this->isRiskList($payload['risks'])
             || !array_key_exists('monitored', $payload)
             || !is_int($payload['monitored'])
-            || $payload['monitored'] < 0
+            || $payload['monitored'] <= 0
+            || !$this->hasCoherentRiskGrid($payload['semaforo'], $payload['risks'])
         ) {
             return $this->failed('invalid_legacy_payload');
         }
@@ -62,6 +63,34 @@ final class SentinelaAgent extends LegacyReadOnlyAgentAdapter
         return $payload['ok'] === true
             ? $this->success($data)
             : $this->failed('sentinela_unavailable', $data);
+    }
+
+    /** @param list<array<string, mixed>> $risks */
+    private function hasCoherentRiskGrid(string $semaforo, array $risks): bool
+    {
+        if ($risks === []) {
+            return $semaforo === 'verde';
+        }
+
+        $seen = [];
+        $statuses = [];
+        foreach ($risks as $risk) {
+            $key = $risk['risk_key'];
+            if (isset($seen[$key])) {
+                return false;
+            }
+            $seen[$key] = true;
+            $statuses[] = $risk['status'];
+        }
+        if (count(array_unique($statuses)) === 1 && $statuses[0] === 'nd') {
+            return false;
+        }
+
+        $expected = in_array('vermelho', $statuses, true)
+            ? 'vermelho'
+            : (in_array('amarelo', $statuses, true) ? 'amarelo' : 'verde');
+
+        return $semaforo === $expected;
     }
 
     /** @param array<array-key, mixed> $value */

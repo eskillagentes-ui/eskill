@@ -87,7 +87,10 @@ final class AgentRosterIntegrationTest extends TestCase
     {
         $context = $this->context([
             'sentinela_snapshot' => $this->envelope([
-                'ok' => true, 'semaforo' => 'verde', 'risks' => [], 'monitored' => 0,
+                'ok' => true,
+                'semaforo' => 'verde',
+                'risks' => [$this->validRisk('oauth', 'verde')],
+                'monitored' => 1,
             ]),
             // collector ausente → failed
             'financeiro_snapshot' => $this->envelope([
@@ -111,7 +114,7 @@ final class AgentRosterIntegrationTest extends TestCase
 
     public function testFactoryCriaRosterNaOrdemEsperada(): void
     {
-        $factory = new AgentRuntimeFactory();
+        $factory = new AgentRuntimeFactory(new AgentRuntimeReadGatewayFake());
         $names = array_map(static fn ($a) => $a->name(), $factory->createRoster());
         $this->assertSame(
             ['sentinela', 'coletor', 'financeiro', 'otimizador', 'criador', 'qa'],

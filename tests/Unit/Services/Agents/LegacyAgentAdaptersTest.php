@@ -206,6 +206,31 @@ final class LegacyAgentAdaptersTest extends TestCase
             'extra' => true,
         ], 'invalid_legacy_payload'];
     }
+    /** @dataProvider invalidSentinelaSemantics */
+    public function testSentinelaRejeitaInvariantesSemanticas(array $payload): void
+    {
+        $result = (new SentinelaAgent())->run($this->context([
+            'sentinela_snapshot' => $this->envelope($payload),
+        ]));
+        self::assertSame('failed', $result->status());
+        self::assertSame('invalid_legacy_payload', $result->reason());
+    }
+
+    public function invalidSentinelaSemantics(): iterable
+    {
+        $green = $this->validRisk('oauth', 'verde');
+        $yellow = $this->validRisk('rate_limit', 'amarelo');
+        $red = $this->validRisk('chargeback', 'vermelho');
+        $nd = $this->validRisk('catalogo', 'nd');
+        yield 'monitored zero' => [['ok' => true, 'semaforo' => 'verde', 'risks' => [], 'monitored' => 0]];
+        yield 'risk key duplicate' => [['ok' => true, 'semaforo' => 'verde', 'risks' => [$green, $green], 'monitored' => 2]];
+        yield 'grade toda nd' => [['ok' => true, 'semaforo' => 'verde', 'risks' => [$nd], 'monitored' => 1]];
+        yield 'vermelho exige semaforo vermelho' => [['ok' => true, 'semaforo' => 'amarelo', 'risks' => [$green, $red], 'monitored' => 2]];
+        yield 'amarelo exige semaforo amarelo' => [['ok' => true, 'semaforo' => 'verde', 'risks' => [$green, $yellow], 'monitored' => 2]];
+        yield 'somente verdes exige semaforo verde' => [['ok' => true, 'semaforo' => 'amarelo', 'risks' => [$green], 'monitored' => 1]];
+        yield 'grade vazia so pode verde' => [['ok' => true, 'semaforo' => 'amarelo', 'risks' => [], 'monitored' => 1]];
+    }
+
 }
 
 /** Helper estático para data providers (sem $this). */

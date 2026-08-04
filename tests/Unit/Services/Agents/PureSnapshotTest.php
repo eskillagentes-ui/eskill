@@ -76,6 +76,58 @@ final class PureSnapshotTest extends TestCase
         PureSnapshot::normalize($callableArray);
     }
 
+    public function testRejeitaCallableNaoCarregadoSemAcionarAutoloader(): void
+    {
+        $autoloadCalls = 0;
+        $loader = static function (string $class) use (&$autoloadCalls): void {
+            if ($class === 'Audit\\NeverLoaded') {
+                $autoloadCalls++;
+            }
+        };
+        spl_autoload_register($loader);
+        $thrown = null;
+        try {
+            PureSnapshot::normalize(['Audit\\NeverLoaded', 'run']);
+        } catch (\InvalidArgumentException $error) {
+            $thrown = $error;
+        } finally {
+            spl_autoload_unregister($loader);
+        }
+
+        $this->assertInstanceOf(\InvalidArgumentException::class, $thrown);
+        $this->assertSame(0, $autoloadCalls);
+    }
+
+    public function testRejeitaCallableStringNaoCarregadaSemAcionarAutoloader(): void
+    {
+        $autoloadCalls = 0;
+        $loader = static function (string $class) use (&$autoloadCalls): void {
+            if ($class === 'Audit\\NeverLoaded') {
+                $autoloadCalls++;
+            }
+        };
+        spl_autoload_register($loader);
+        $thrown = null;
+        try {
+            PureSnapshot::normalize('Audit\\NeverLoaded::run');
+        } catch (\InvalidArgumentException $error) {
+            $thrown = $error;
+        } finally {
+            spl_autoload_unregister($loader);
+        }
+
+        $this->assertInstanceOf(\InvalidArgumentException::class, $thrown);
+        $this->assertSame(0, $autoloadCalls);
+    }
+
+    public function testRejeitaReferenciaDeClasseConvencionalSemConsultarEstadoCarregado(): void
+    {
+        $this->assertFalse(class_exists('AuditNeverLoadedProbe', false));
+
+        $this->expectException(\InvalidArgumentException::class);
+        PureSnapshot::normalize(['AuditNeverLoadedProbe', 'run']);
+    }
+
     public function testAgentResultRejeitaClosureEmData(): void
     {
         $this->expectException(\InvalidArgumentException::class);

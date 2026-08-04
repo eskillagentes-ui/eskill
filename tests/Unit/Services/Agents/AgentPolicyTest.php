@@ -133,4 +133,17 @@ class AgentPolicyTest extends TestCase
         $this->assertTrue($this->policy->allowsMlRead($ctx, 'ml.items.get'));
         $this->assertFalse($this->policy->allowsMlWrite($ctx, 'ml.items.get'));
     }
+
+    public function testAgentResultDesfazReferenciasEmEmittedOps(): void
+    {
+        $operation = 'ml.price.patch';
+        $operations = [&$operation];
+        $result = AgentResult::success('agente', 'ok', [], true, $operations);
+
+        $operation = 'ml.ads.update';
+        $returned = $result->emittedOps();
+        $returned[0] = 'ml.item.publish';
+
+        $this->assertSame(['ml.price.patch'], $result->emittedOps());
+    }
 }

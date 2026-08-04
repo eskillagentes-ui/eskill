@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace App\Services\Agents;
 
 use InvalidArgumentException;
-use ReflectionReference;
 
 /**
  * Normalizador recursivo de snapshots puros (sem referências PHP, callables ou I/O).
@@ -36,7 +35,7 @@ final class PureSnapshot
         }
 
         if (is_string($value)) {
-            if (is_callable($value)) {
+            if (self::isCallableStringRepresentation($value)) {
                 throw new InvalidArgumentException('snapshot rejects callable strings');
             }
 
@@ -60,7 +59,7 @@ final class PureSnapshot
         }
 
         // Callable arrays (ex.: [$obj, 'method'] ou ['Cls', 'method']) antes de percorrer.
-        if (is_callable($value)) {
+        if (self::isCallableArrayRepresentation($value)) {
             throw new InvalidArgumentException('snapshot rejects callable arrays');
         }
 
@@ -81,6 +80,69 @@ final class PureSnapshot
         return $normalized;
     }
 
+    private static function isCallableStringRepresentation(string $value): bool
+    {
+        if (function_exists($value)) {
+            return true;
+        }
+
+        $separator = strpos($value, '::');
+        if ($separator === false || strpos($value, '::', $separator + 2) !== false) {
+            return false;
+        }
+
+        return self::isClassName(substr($value, 0, $separator))
+            && self::isIdentifier(substr($value, $separator + 2));
+    }
+
+    /** @param array<array-key, mixed> $value */
+    private static function isCallableArrayRepresentation(array $value): bool
+    {
+        if (!array_is_list($value) || count($value) !== 2 || !is_string($value[1])) {
+            return false;
+        }
+        if (!self::isIdentifier($value[1])) {
+            return false;
+        }
+
+        return is_object($value[0])
+            || (is_string($value[0]) && self::isClassReference($value[0]));
+    }
+
+    private static function isClassReference(string $value): bool
+    {
+        if (!self::isClassName($value)) {
+            return false;
+        }
+        $normalized = ltrim($value, chr(92));
+        if (str_contains($normalized, chr(92))) {
+            return true;
+        }
+
+        // Decisão puramente sintática: não consulta nem autocarrega símbolos.
+        return preg_match('/[A-Z_\x80-\xff]/', $normalized) === 1;
+    }
+
+    private static function isClassName(string $value): bool
+    {
+        $value = ltrim($value, '\\');
+        if ($value === '') {
+            return false;
+        }
+        foreach (explode('\\', $value) as $part) {
+            if (!self::isIdentifier($part)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static function isIdentifier(string $value): bool
+    {
+        return preg_match('/^[A-Za-z_\x80-\xff][A-Za-z0-9_\x80-\xff]*$/D', $value) === 1;
+    }
+
     /**
      * @param array<array-key, mixed> $value
      * @return array<array-key, mixed>
@@ -90,9 +152,6 @@ final class PureSnapshot
         $out = [];
         foreach ($value as $key => $item) {
             // Quebra referências PHP: copia o valor atual para um slot novo.
-            if (class_exists(ReflectionReference::class)) {
-                ReflectionReference::fromArrayElement($value, $key);
-            }
             $out[$key] = self::normalize($item, $allowAgentResult, $depth + 1);
         }
 

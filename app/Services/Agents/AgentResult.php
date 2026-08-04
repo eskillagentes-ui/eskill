@@ -50,14 +50,15 @@ final class AgentResult
             throw new InvalidArgumentException('agent must be a non-empty string');
         }
 
-        self::assertValidEmittedOps($emittedOps);
+        $normalizedOps = PureSnapshot::normalizeArray($emittedOps, false);
+        self::assertValidEmittedOps($normalizedOps);
 
         $this->status = $status;
         $this->agent = $agent;
         $this->reason = $reason;
         $this->data = PureSnapshot::normalizeArray($data, true);
         $this->stateChanged = $stateChanged;
-        $this->emittedOps = array_values($emittedOps);
+        $this->emittedOps = $normalizedOps;
     }
 
     /** @param array<int|string, int|string> $emittedOps */
@@ -163,6 +164,9 @@ final class AgentResult
     /** @return list<string> */
     public function emittedOps(): array
     {
-        return $this->emittedOps;
+        /** @var list<string> $copy */
+        $copy = PureSnapshot::normalizeArray($this->emittedOps, false);
+
+        return $copy;
     }
 }
