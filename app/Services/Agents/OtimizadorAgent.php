@@ -16,13 +16,20 @@ final class OtimizadorAgent implements AgentInterface
         }
     }
 
-    public function name(): string { return self::NAME; }
+    public function name(): string
+    {
+        return self::NAME;
+    }
 
     public function run(AgentContext $context): AgentResult
     {
         $metadata = $context->metadata();
-        $observed = $metadata['optimizer_observation_snapshot'] ?? null;
-        if (!$this->validObservation($observed)) {
+        $observed = SnapshotEnvelope::extract(
+            $metadata['optimizer_observation_snapshot'] ?? null,
+            $context->accountId(),
+            $context->correlationId()
+        );
+        if ($observed === null || !$this->validObservation($observed)) {
             return AgentResult::failed(self::NAME, 'invalid_optimizer_observation_snapshot');
         }
 
@@ -37,8 +44,12 @@ final class OtimizadorAgent implements AgentInterface
             $mlbIds[] = $normalized['mlb_id'];
         }
 
-        $costSnapshot = $metadata['optimizer_cost_snapshot'] ?? null;
-        if (!$this->validCosts($costSnapshot, $mlbIds)) {
+        $costSnapshot = SnapshotEnvelope::extract(
+            $metadata['optimizer_cost_snapshot'] ?? null,
+            $context->accountId(),
+            $context->correlationId()
+        );
+        if ($costSnapshot === null || !$this->validCosts($costSnapshot, $mlbIds)) {
             return AgentResult::failed(self::NAME, 'invalid_optimizer_cost_snapshot');
         }
 
@@ -66,6 +77,7 @@ final class OtimizadorAgent implements AgentInterface
         }
 
         $data = ['recommendations' => $recommendations, 'read_only' => true];
+
         return $allActionable
             ? AgentResult::success(self::NAME, 'recommendations_ready', $data)
             : AgentResult::blocked(self::NAME, 'cost_validation_blocked', $data);
@@ -137,7 +149,9 @@ final class OtimizadorAgent implements AgentInterface
     {
         $actual = array_keys($value);
         sort($actual);
-        sort($keys);
-        return $actual === $keys;
+        $expected = $keys;
+        sort($expected);
+
+        return $actual === $expected;
     }
 }

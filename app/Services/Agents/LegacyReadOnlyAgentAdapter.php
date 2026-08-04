@@ -16,8 +16,13 @@ abstract class LegacyReadOnlyAgentAdapter implements AgentInterface
 
     final public function run(AgentContext $context): AgentResult
     {
-        $payload = $context->metadata()[$this->snapshotKey()] ?? null;
-        if (!is_array($payload) || !$this->hasValidEnvelope($payload)) {
+        $raw = $context->metadata()[$this->snapshotKey()] ?? null;
+        $payload = SnapshotEnvelope::extract(
+            $raw,
+            $context->accountId(),
+            $context->correlationId()
+        );
+        if ($payload === null || !$this->hasValidEnvelope($payload)) {
             return $this->failed('invalid_legacy_payload');
         }
 
@@ -31,6 +36,9 @@ abstract class LegacyReadOnlyAgentAdapter implements AgentInterface
             || ($payload['_meta']['incomplete'] ?? false) === true
         ) {
             return $this->failed('incomplete_legacy_payload');
+        }
+        if ($this->hasDisallowedError($payload)) {
+            return $this->failed('legacy_error');
         }
         if ($this->violatesReadOnlyContract($payload)) {
             return $this->failed('read_only_violation');
@@ -75,7 +83,10 @@ abstract class LegacyReadOnlyAgentAdapter implements AgentInterface
         if (array_key_exists('incomplete', $payload) && !is_bool($payload['incomplete'])) {
             return false;
         }
-        if (array_key_exists('error', $payload) && !is_string($payload['error'])) {
+        if (array_key_exists('error', $payload)
+            && $payload['error'] !== null
+            && !is_string($payload['error'])
+        ) {
             return false;
         }
         foreach (['api_status', 'http_status', 'status'] as $statusKey) {
@@ -104,6 +115,7 @@ abstract class LegacyReadOnlyAgentAdapter implements AgentInterface
             return false;
         }
         $status = (int) $value;
+
         return $status >= 100 && $status <= 599;
     }
 
@@ -122,7 +134,8 @@ abstract class LegacyReadOnlyAgentAdapter implements AgentInterface
                 continue;
             }
             $status = (int) $candidate;
-            if ($status >= 400 && $status <= 599) {
+            // Somente 2xx representa sucesso HTTP legado.
+            if ($status < 200 || $status > 299) {
                 return $status;
             }
         }
@@ -131,11 +144,29 @@ abstract class LegacyReadOnlyAgentAdapter implements AgentInterface
     }
 
     /** @param array<string, mixed> $payload */
+    private function hasDisallowedError(array $payload): bool
+    {
+        if (!array_key_exists('error', $payload)) {
+            return false;
+        }
+        $error = $payload['error'];
+        if ($error === null || $error === '') {
+            return false;
+        }
+        if ($error === 'pagination_incomplete') {
+            return false;
+        }
+
+        return is_string($error);
+    }
+
+    /** @param array<string, mixed> $payload */
     private function violatesReadOnlyContract(array $payload): bool
     {
         if (array_key_exists('state_changed', $payload) && $payload['state_changed'] !== false) {
             return true;
         }
+
         return array_key_exists('emitted_ops', $payload)
             && (!is_array($payload['emitted_ops']) || $payload['emitted_ops'] !== []);
     }

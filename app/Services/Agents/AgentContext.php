@@ -41,42 +41,120 @@ final class AgentContext
             throw new InvalidArgumentException('correlationId must be a non-empty string');
         }
 
-        self::assertPureSnapshot($metadata);
         $this->accountId = $accountId;
         $this->environment = $environment;
         $this->correlationId = $correlationId;
         $this->mlWriteAutomation = $mlWriteAutomation;
-        $this->metadata = $metadata;
+        $this->metadata = self::canonicalizeMetadata($metadata);
     }
 
-    public function accountId(): int { return $this->accountId; }
+    public function accountId(): int
+    {
+        return $this->accountId;
+    }
 
     /** @return 'local'|'staging'|'production' */
-    public function environment(): string { return $this->environment; }
+    public function environment(): string
+    {
+        return $this->environment;
+    }
 
-    public function correlationId(): string { return $this->correlationId; }
-    public function mlWriteAutomation(): bool { return $this->mlWriteAutomation; }
+    public function correlationId(): string
+    {
+        return $this->correlationId;
+    }
+
+    public function mlWriteAutomation(): bool
+    {
+        return $this->mlWriteAutomation;
+    }
 
     /** @return array<string, mixed> */
-    public function metadata(): array { return $this->metadata; }
-
-    private static function assertPureSnapshot(mixed $value, int $depth = 0): void
+    public function metadata(): array
     {
-        if ($depth > 32) {
-            throw new InvalidArgumentException('metadata snapshot nesting is too deep');
+        $out = [];
+        foreach ($this->metadata as $key => $value) {
+            if ($key === 'qa_results_snapshot') {
+                $out[$key] = self::exportQaEnvelope($value);
+                continue;
+            }
+            $out[$key] = PureSnapshot::normalize($value, false);
         }
-        if ($value === null || is_scalar($value)) {
-            return;
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $metadata
+     * @return array<string, mixed>
+     */
+    private static function canonicalizeMetadata(array $metadata): array
+    {
+        $out = [];
+        foreach ($metadata as $key => $value) {
+            if (!is_string($key) || $key === '') {
+                throw new InvalidArgumentException('metadata keys must be non-empty strings');
+            }
+            if ($key === 'qa_results_snapshot') {
+                $out[$key] = self::canonicalizeQaEnvelope($value);
+                continue;
+            }
+            $out[$key] = PureSnapshot::normalize($value, false);
         }
-        if ($value instanceof AgentResult) {
-            self::assertPureSnapshot($value->data(), $depth + 1);
-            return;
-        }
+
+        return $out;
+    }
+
+    private static function canonicalizeQaEnvelope(mixed $value): mixed
+    {
         if (!is_array($value)) {
-            throw new InvalidArgumentException('metadata must contain only pure snapshot values');
+            return PureSnapshot::normalize($value, false);
         }
-        foreach ($value as $item) {
-            self::assertPureSnapshot($item, $depth + 1);
+
+        if (
+            array_key_exists('account_id', $value)
+            && array_key_exists('correlation_id', $value)
+            && array_key_exists('payload', $value)
+            && is_array($value['payload'])
+            && array_key_exists('results', $value['payload'])
+            && is_array($value['payload']['results'])
+        ) {
+            $results = [];
+            foreach ($value['payload']['results'] as $id => $result) {
+                if (!is_string($id) || !$result instanceof AgentResult) {
+                    throw new InvalidArgumentException('qa results must be AgentResult instances');
+                }
+                $results[$id] = PureSnapshot::normalize($result, true);
+            }
+
+            return [
+                'account_id' => $value['account_id'],
+                'correlation_id' => $value['correlation_id'],
+                'payload' => ['results' => $results],
+            ];
         }
+
+        throw new InvalidArgumentException('qa_results_snapshot must be a provenance envelope');
+    }
+
+    private static function exportQaEnvelope(mixed $value): mixed
+    {
+        if (!is_array($value)) {
+            return PureSnapshot::normalize($value, false);
+        }
+        $results = [];
+        $sourceResults = $value['payload']['results'] ?? [];
+        if (!is_array($sourceResults)) {
+            return PureSnapshot::normalize($value, false);
+        }
+        foreach ($sourceResults as $id => $result) {
+            $results[$id] = PureSnapshot::normalize($result, true);
+        }
+
+        return [
+            'account_id' => $value['account_id'],
+            'correlation_id' => $value['correlation_id'],
+            'payload' => ['results' => $results],
+        ];
     }
 }

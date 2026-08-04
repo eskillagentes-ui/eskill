@@ -4,83 +4,192 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Services\Agents;
 
-use App\Services\Agents\AgentContext;
 use App\Services\Agents\AgentResult;
 use App\Services\Agents\QaAgent;
+use App\Services\Agents\QaMergeGate;
+use App\Services\Agents\SnapshotEnvelope;
 use PHPUnit\Framework\TestCase;
 
 /** @covers \App\Services\Agents\QaAgent */
 final class QaAgentTest extends TestCase
 {
-    public function testConsolidaResultadosDoSnapshotNaOrdem(): void
-    {
-        $qa = new QaAgent();
-        $result = $qa->run($this->context([
-            'php-lint' => AgentResult::success('php-lint', 'ok'),
-            'phpunit-agents' => AgentResult::success('phpunit-agents', 'ok'),
-        ]));
+    use AgentSnapshotFixtures;
 
+    public function testConsolidaTodosOsChecksObrigatorios(): void
+    {
+        $result = (new QaAgent())->run($this->context([
+            'qa_results_snapshot' => $this->envelope(
+                ['results' => $this->fullQaResults()],
+                10,
+                'corr-legacy-snapshot',
+                true
+            ),
+        ]));
         $this->assertSame('success', $result->status());
-        $this->assertSame(['php-lint', 'phpunit-agents'], $result->data()['order']);
-        $this->assertSame(['approved' => true, 'reason' => 'approved'], $result->data()['checks']['php-lint']);
+        $this->assertSame(QaMergeGate::REQUIRED_CHECK_IDS, $result->data()['order']);
         $this->assertFalse($result->stateChanged());
         $this->assertSame([], $result->emittedOps());
     }
 
-    /** @dataProvider invalidSnapshots */
-    public function testSnapshotInvalidoFalhaFechado(mixed $snapshot): void
+    public function testOnlyOneSuccessEhImpossivel(): void
     {
-        $metadata = $snapshot === '__missing__' ? [] : ['qa_results_snapshot' => $snapshot];
-        $result = (new QaAgent())->run(new AgentContext(1, 'local', 'corr-qa-invalid', false, $metadata));
+        $onlyOne = [
+            QaMergeGate::REQUIRED_CHECK_IDS[0] => AgentResult::success(
+                QaMergeGate::REQUIRED_CHECK_IDS[0],
+                'ok'
+            ),
+        ];
+        $result = (new QaAgent())->run($this->context([
+            'qa_results_snapshot' => $this->envelope(
+                ['results' => $onlyOne],
+                10,
+                'corr-legacy-snapshot',
+                true
+            ),
+        ]));
         $this->assertSame('failed', $result->status());
         $this->assertSame('invalid_qa_results_snapshot', $result->reason());
-        $this->assertSame([], $result->data());
     }
 
-    /** @return iterable<string, array{mixed}> */
-    public function invalidSnapshots(): iterable
+    public function testConjuntoParcialFalha(): void
     {
-        yield 'ausente' => ['__missing__'];
-        yield 'vazio' => [[]];
-        yield 'id vazio' => [['' => AgentResult::success('x')]];
-        yield 'resultado escalar' => [['lint' => 'success']];
-        yield 'array forjado' => [['lint' => ['status' => 'success']]];
+        $partial = $this->fullQaResults();
+        unset($partial[QaMergeGate::REQUIRED_CHECK_IDS[3]]);
+        $result = (new QaAgent())->run($this->context([
+            'qa_results_snapshot' => $this->envelope(
+                ['results' => $partial],
+                10,
+                'corr-legacy-snapshot',
+                true
+            ),
+        ]));
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('invalid_qa_results_snapshot', $result->reason());
     }
 
-    /** @dataProvider rejectedResults */
-    public function testReprovaResultadoQueViolaContrato(AgentResult $candidate, string $reason): void
+    public function testConjuntoComExtraFalha(): void
     {
-        $result = (new QaAgent())->run($this->context(['contract' => $candidate]));
+        $extra = $this->fullQaResults();
+        $extra['extra-check'] = AgentResult::success('extra-check', 'ok');
+        $result = (new QaAgent())->run($this->context([
+            'qa_results_snapshot' => $this->envelope(
+                ['results' => $extra],
+                10,
+                'corr-legacy-snapshot',
+                true
+            ),
+        ]));
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('invalid_qa_results_snapshot', $result->reason());
+    }
+
+    public function testOrdemDiferenteFalha(): void
+    {
+        $ids = QaMergeGate::REQUIRED_CHECK_IDS;
+        $reversed = array_reverse($ids);
+        $results = [];
+        foreach ($reversed as $id) {
+            $results[$id] = AgentResult::success($id, 'ok');
+        }
+        $result = (new QaAgent())->run($this->context([
+            'qa_results_snapshot' => $this->envelope(
+                ['results' => $results],
+                10,
+                'corr-legacy-snapshot',
+                true
+            ),
+        ]));
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('invalid_qa_results_snapshot', $result->reason());
+    }
+
+    public function testOutraContaFalha(): void
+    {
+        $result = (new QaAgent())->run($this->context([
+            'qa_results_snapshot' => $this->envelope(
+                ['results' => $this->fullQaResults()],
+                99,
+                'corr-legacy-snapshot',
+                true
+            ),
+        ], 10));
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('invalid_qa_results_snapshot', $result->reason());
+    }
+
+    public function testOutraCorrelacaoFalha(): void
+    {
+        $result = (new QaAgent())->run($this->context([
+            'qa_results_snapshot' => $this->envelope(
+                ['results' => $this->fullQaResults()],
+                10,
+                'other',
+                true
+            ),
+        ], 10, 'corr-legacy-snapshot'));
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('invalid_qa_results_snapshot', $result->reason());
+    }
+
+    public function testStatusNaoSuccessFalhaChecks(): void
+    {
+        $qa = $this->fullQaResults();
+        $qa[QaMergeGate::REQUIRED_CHECK_IDS[0]] = AgentResult::failed(
+            QaMergeGate::REQUIRED_CHECK_IDS[0],
+            'nope'
+        );
+        $result = (new QaAgent())->run($this->context([
+            'qa_results_snapshot' => $this->envelope(
+                ['results' => $qa],
+                10,
+                'corr-legacy-snapshot',
+                true
+            ),
+        ]));
         $this->assertSame('failed', $result->status());
         $this->assertSame('checks_failed', $result->reason());
-        $this->assertSame(['approved' => false, 'reason' => $reason], $result->data()['checks']['contract']);
-        $this->assertFalse($result->stateChanged());
-        $this->assertSame([], $result->emittedOps());
     }
 
-    /** @return iterable<string, array{AgentResult, string}> */
-    public function rejectedResults(): iterable
+    public function testStateChangedRejeitado(): void
     {
-        yield 'status' => [AgentResult::failed('contract'), 'status_not_success'];
-        yield 'nome' => [AgentResult::success('other'), 'agent_mismatch'];
-        yield 'estado' => [AgentResult::success('contract', 'ok', [], true), 'state_changed'];
-        yield 'ops' => [AgentResult::success('contract', 'ok', [], false, ['unsafe']), 'emitted_ops'];
+        $qa = $this->fullQaResults();
+        $qa[QaMergeGate::REQUIRED_CHECK_IDS[1]] = AgentResult::success(
+            QaMergeGate::REQUIRED_CHECK_IDS[1],
+            'ok',
+            [],
+            true
+        );
+        $result = (new QaAgent())->run($this->context([
+            'qa_results_snapshot' => $this->envelope(
+                ['results' => $qa],
+                10,
+                'corr-legacy-snapshot',
+                true
+            ),
+        ]));
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('checks_failed', $result->reason());
     }
 
-    public function testIgnoraMetadataDeComandos(): void
+    public function testEmittedOpsRejeitado(): void
     {
-        $context = new AgentContext(1, 'local', 'corr-qa-command', false, [
-            'commands' => ['php-lint', 'deploy'],
-            'qa_results_snapshot' => ['php-lint' => AgentResult::success('php-lint')],
-        ]);
-        $result = (new QaAgent())->run($context);
-        $this->assertSame(['php-lint'], $result->data()['order']);
-        $this->assertArrayNotHasKey('commands', $result->data());
-    }
-
-    /** @param array<string, AgentResult> $snapshot */
-    private function context(array $snapshot): AgentContext
-    {
-        return new AgentContext(10, 'local', 'corr-qa-snapshot', false, ['qa_results_snapshot' => $snapshot]);
+        $qa = $this->fullQaResults();
+        $qa[QaMergeGate::REQUIRED_CHECK_IDS[2]] = AgentResult::success(
+            QaMergeGate::REQUIRED_CHECK_IDS[2],
+            'ok',
+            [],
+            false,
+            ['op']
+        );
+        $result = (new QaAgent())->run($this->context([
+            'qa_results_snapshot' => $this->envelope(
+                ['results' => $qa],
+                10,
+                'corr-legacy-snapshot',
+                true
+            ),
+        ]));
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('checks_failed', $result->reason());
     }
 }

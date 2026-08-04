@@ -16,7 +16,10 @@ final class CriadorAgent implements AgentInterface
         }
     }
 
-    public function name(): string { return self::NAME; }
+    public function name(): string
+    {
+        return self::NAME;
+    }
 
     public function run(AgentContext $context): AgentResult
     {
@@ -26,8 +29,12 @@ final class CriadorAgent implements AgentInterface
             return AgentResult::blocked(self::NAME, 'creator_request_blocked');
         }
 
-        $source = $metadata['creator_source_snapshot'] ?? null;
-        if (!$this->validSource($source, $requested['source_mlb_id'])) {
+        $source = SnapshotEnvelope::extract(
+            $metadata['creator_source_snapshot'] ?? null,
+            $context->accountId(),
+            $context->correlationId()
+        );
+        if ($source === null || !$this->validSource($source, $requested['source_mlb_id'])) {
             return AgentResult::failed(self::NAME, 'invalid_creator_source_snapshot');
         }
         if ($source['valid'] !== true
@@ -96,7 +103,7 @@ final class CriadorAgent implements AgentInterface
             return false;
         }
 
-        return $item['id'] === $mlbId || preg_match('/^MLB[0-9]+$/', $item['id']) === 1;
+        return $item['id'] === $mlbId;
     }
 
     /** @param array<string, mixed> $value @param list<string> $keys */
@@ -104,7 +111,9 @@ final class CriadorAgent implements AgentInterface
     {
         $actual = array_keys($value);
         sort($actual);
-        sort($keys);
-        return $actual === $keys;
+        $expected = $keys;
+        sort($expected);
+
+        return $actual === $expected;
     }
 }

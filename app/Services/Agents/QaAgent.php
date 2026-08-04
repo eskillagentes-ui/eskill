@@ -16,20 +16,32 @@ final class QaAgent implements AgentInterface
         }
     }
 
-    public function name(): string { return self::NAME; }
+    public function name(): string
+    {
+        return self::NAME;
+    }
 
     public function run(AgentContext $context): AgentResult
     {
-        $snapshot = $context->metadata()['qa_results_snapshot'] ?? null;
-        if (!$this->validSnapshot($snapshot)) {
+        $raw = $context->metadata()['qa_results_snapshot'] ?? null;
+        $payload = SnapshotEnvelope::extract(
+            $raw,
+            $context->accountId(),
+            $context->correlationId(),
+            true
+        );
+        if ($payload === null || !$this->validPayload($payload)) {
             return AgentResult::failed(self::NAME, 'invalid_qa_results_snapshot');
         }
 
+        /** @var array<string, AgentResult> $snapshot */
+        $snapshot = $payload['results'];
         $reports = [];
         $order = [];
         $allApproved = true;
-        foreach ($snapshot as $id => $candidate) {
+        foreach (QaMergeGate::REQUIRED_CHECK_IDS as $id) {
             $order[] = $id;
+            $candidate = $snapshot[$id];
             $reason = $this->rejectionReason($id, $candidate);
             $approved = $reason === 'approved';
             $allApproved = $allApproved && $approved;
@@ -42,13 +54,21 @@ final class QaAgent implements AgentInterface
             : AgentResult::failed(self::NAME, 'checks_failed', $data);
     }
 
-    private function validSnapshot(mixed $snapshot): bool
+    private function validPayload(mixed $payload): bool
     {
-        if (!is_array($snapshot) || $snapshot === []) {
+        if (!is_array($payload)
+            || array_keys($payload) !== ['results']
+            || !is_array($payload['results'])
+        ) {
             return false;
         }
-        foreach ($snapshot as $id => $result) {
-            if (!is_string($id) || trim($id) === '' || !$result instanceof AgentResult) {
+        $results = $payload['results'];
+        $ids = array_keys($results);
+        if ($ids !== QaMergeGate::REQUIRED_CHECK_IDS) {
+            return false;
+        }
+        foreach ($results as $id => $result) {
+            if (!is_string($id) || !$result instanceof AgentResult) {
                 return false;
             }
         }
@@ -58,10 +78,19 @@ final class QaAgent implements AgentInterface
 
     private function rejectionReason(string $id, AgentResult $result): string
     {
-        if ($result->status() !== 'success') { return 'status_not_success'; }
-        if ($result->agent() !== $id) { return 'agent_mismatch'; }
-        if ($result->stateChanged()) { return 'state_changed'; }
-        if ($result->emittedOps() !== []) { return 'emitted_ops'; }
+        if ($result->status() !== 'success') {
+            return 'status_not_success';
+        }
+        if ($result->agent() !== $id) {
+            return 'agent_mismatch';
+        }
+        if ($result->stateChanged()) {
+            return 'state_changed';
+        }
+        if ($result->emittedOps() !== []) {
+            return 'emitted_ops';
+        }
+
         return 'approved';
     }
 }

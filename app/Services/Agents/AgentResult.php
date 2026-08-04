@@ -55,7 +55,7 @@ final class AgentResult
         $this->status = $status;
         $this->agent = $agent;
         $this->reason = $reason;
-        $this->data = $data;
+        $this->data = PureSnapshot::normalizeArray($data, true);
         $this->stateChanged = $stateChanged;
         $this->emittedOps = array_values($emittedOps);
     }
@@ -152,7 +152,7 @@ final class AgentResult
     /** @return array<string, mixed> */
     public function data(): array
     {
-        return $this->data;
+        return PureSnapshot::normalizeArray($this->data, true);
     }
 
     public function stateChanged(): bool

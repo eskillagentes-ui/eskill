@@ -6,6 +6,7 @@ namespace Tests\Unit\Services\Agents;
 
 use App\Services\Agents\AgentContext;
 use App\Services\Agents\AgentResult;
+use App\Services\Agents\SnapshotEnvelope;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use stdClass;
@@ -13,6 +14,8 @@ use stdClass;
 /** @covers \App\Services\Agents\AgentContext */
 final class AgentContextTest extends TestCase
 {
+    use AgentSnapshotFixtures;
+
     public function testCriaContextoValidoComDefaults(): void
     {
         $ctx = new AgentContext(10, 'local', 'corr-abc-1', false);
@@ -23,24 +26,30 @@ final class AgentContextTest extends TestCase
         $this->assertSame([], $ctx->metadata());
     }
 
-    public function testAceitaSnapshotsEscalaresEAgentResultSeguro(): void
+    public function testAceitaSnapshotsEscalaresEAgentResultNoEnvelopeQa(): void
     {
         $result = AgentResult::success('lint', 'ok', ['files' => ['a.php']]);
         $ctx = new AgentContext(1, 'staging', 'corr-snapshot', false, [
             'flag' => true,
             'count' => 2,
             'nested' => ['value' => null],
-            'qa_results_snapshot' => ['lint' => $result],
+            'qa_results_snapshot' => SnapshotEnvelope::wrap(
+                1,
+                'corr-snapshot',
+                ['results' => ['lint' => $result]],
+                true
+            ),
         ]);
 
-        $this->assertSame($result, $ctx->metadata()['qa_results_snapshot']['lint']);
+        $stored = $ctx->metadata()['qa_results_snapshot']['payload']['results']['lint'];
+        $this->assertInstanceOf(AgentResult::class, $stored);
+        $this->assertSame(['files' => ['a.php']], $stored->data());
     }
 
     /** @dataProvider impureMetadata */
     public function testRejeitaCapacidadeArbitrariaNaMetadata(array $metadata): void
     {
         $this->expectException(InvalidArgumentException::class);
-        $this->expectExceptionMessage('pure snapshot');
         new AgentContext(1, 'local', 'corr-impure', false, $metadata);
     }
 
@@ -49,11 +58,12 @@ final class AgentContextTest extends TestCase
     {
         yield 'closure direta' => [['port' => static fn (): array => []]];
         yield 'objeto arbitrario aninhado' => [['nested' => ['port' => new stdClass()]]];
-        yield 'closure dentro de AgentResult' => [[
-            'qa_results_snapshot' => [
-                'lint' => AgentResult::success('lint', 'ok', ['port' => static fn (): array => []]),
-            ],
-        ]];
+    }
+
+    public function testRejeitaClosureDentroDeAgentResultNaCriacao(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        AgentResult::success('lint', 'ok', ['port' => static fn (): array => []]);
     }
 
     /** @dataProvider invalidContext */

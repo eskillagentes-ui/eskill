@@ -8,6 +8,7 @@ use App\Services\Agents\AgentContext;
 use App\Services\Agents\AgentResult;
 use App\Services\Agents\QaAgent;
 use App\Services\Agents\QaMergeGate;
+use App\Services\Agents\SnapshotEnvelope;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
@@ -28,7 +29,12 @@ final class QaMergeGateIntegrationTest extends TestCase
                 $snapshot[$id] = AgentResult::success($id, 'forged_success');
             }
             $forged = (new QaAgent())->run(new AgentContext(1, 'local', 'qa-forgery-test', false, [
-                'qa_results_snapshot' => $snapshot,
+                'qa_results_snapshot' => SnapshotEnvelope::wrap(
+                    1,
+                    'qa-forgery-test',
+                    ['results' => $snapshot],
+                    true
+                ),
             ]));
             self::assertSame('success', $forged->status());
 

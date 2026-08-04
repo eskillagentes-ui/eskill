@@ -4,47 +4,64 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Services\Agents;
 
-use App\Services\Agents\AgentContext;
 use App\Services\Agents\AgentPolicy;
-use App\Services\Agents\AgentResult;
+use App\Services\Agents\AgentRuntimeFactory;
 use App\Services\Agents\CollectorAgent;
 use App\Services\Agents\CriadorAgent;
 use App\Services\Agents\FinanceiroAgent;
 use App\Services\Agents\OrchestratorAgent;
 use App\Services\Agents\OtimizadorAgent;
 use App\Services\Agents\QaAgent;
-use App\Services\Agents\QaMergeGate;
 use App\Services\Agents\SentinelaAgent;
 use PHPUnit\Framework\TestCase;
 
 /** @covers \App\Services\Agents\OrchestratorAgent */
+/** @covers \App\Services\Agents\AgentRuntimeFactory */
 final class AgentRosterIntegrationTest extends TestCase
 {
+    use AgentSnapshotFixtures;
+
     public function testCompoePapeisSomenteComSnapshotsSemEstadoOuOperacoes(): void
     {
-        $qa = [];
-        foreach (QaMergeGate::REQUIRED_CHECK_IDS as $id) {
-            $qa[$id] = AgentResult::success($id, 'ok');
-        }
-        $context = new AgentContext(10, 'local', 'corr-snapshot-roster', false, [
-            'sentinela_snapshot' => [
-                'ok' => true, 'semaforo' => 'verde', 'risks' => [], 'monitored' => 1,
+        $pnl = AgentRuntimeFactory::emptyPnL();
+        $resumo = [
+            'today' => $pnl,
+            'current_month' => $pnl,
+            'previous_month' => $pnl,
+            'variations' => [
+                'gross_revenue' => 0.0,
+                'net_profit' => 0.0,
+                'total_orders' => 0.0,
+                'avg_margin' => 0.0,
             ],
-            'collector_snapshot' => [
+        ];
+        $risk = $this->validRisk('oauth', 'verde');
+        $context = $this->context([
+            'sentinela_snapshot' => $this->envelope([
+                'ok' => true, 'semaforo' => 'verde', 'risks' => [$risk], 'monitored' => 1,
+            ]),
+            'collector_snapshot' => $this->envelope([
                 'ok' => true, 'available' => true, 'cached' => true, 'stale' => false, 'api_calls' => 0,
-            ],
-            'financeiro_snapshot' => ['ok' => true, 'resumo' => [], 'metrics' => []],
-            'optimizer_observation_snapshot' => ['recommendations' => [[
+            ]),
+            'financeiro_snapshot' => $this->envelope([
+                'ok' => true, 'resumo' => $resumo, 'metrics' => AgentRuntimeFactory::emptyMetrics(),
+            ]),
+            'optimizer_observation_snapshot' => $this->envelope(['recommendations' => [[
                 'mlb_id' => 'MLB1', 'kind' => 'ads_roas', 'recommended_roas' => 2.5,
-            ]]],
-            'optimizer_cost_snapshot' => ['items' => ['MLB1' => [
+            ]]]),
+            'optimizer_cost_snapshot' => $this->envelope(['items' => ['MLB1' => [
                 'validated' => true, 'suspicious' => false, 'cost' => 10.0,
-            ]]],
+            ]]]),
             'creator_request' => ['source_mlb_id' => 'MLB2'],
-            'creator_source_snapshot' => [
+            'creator_source_snapshot' => $this->envelope([
                 'valid' => true, 'duplicate' => false, 'item' => ['id' => 'MLB2'],
-            ],
-            'qa_results_snapshot' => $qa,
+            ]),
+            'qa_results_snapshot' => $this->envelope(
+                ['results' => $this->fullQaResults()],
+                10,
+                'corr-legacy-snapshot',
+                true
+            ),
         ]);
         $orchestrator = new OrchestratorAgent([
             new SentinelaAgent(), new CollectorAgent(), new FinanceiroAgent(),
@@ -64,5 +81,41 @@ final class AgentRosterIntegrationTest extends TestCase
         }
         $this->assertFalse($result->stateChanged());
         $this->assertSame([], $result->emittedOps());
+    }
+
+    public function testFalhaDeUmSnapshotNaoImpedeAgentesSeguintes(): void
+    {
+        $context = $this->context([
+            'sentinela_snapshot' => $this->envelope([
+                'ok' => true, 'semaforo' => 'verde', 'risks' => [], 'monitored' => 0,
+            ]),
+            // collector ausente → failed
+            'financeiro_snapshot' => $this->envelope([
+                'ok' => true,
+                'resumo' => $this->validResumo(),
+                'metrics' => $this->validMetrics(),
+            ]),
+        ]);
+        $orchestrator = new OrchestratorAgent([
+            new SentinelaAgent(),
+            new CollectorAgent(),
+            new FinanceiroAgent(),
+        ], new AgentPolicy());
+        $result = $orchestrator->run($context);
+        $this->assertSame(['sentinela', 'coletor', 'financeiro'], $result->data()['order']);
+        $this->assertSame('success', $result->data()['results'][0]->status());
+        $this->assertSame('failed', $result->data()['results'][1]->status());
+        $this->assertSame('success', $result->data()['results'][2]->status());
+        $this->assertSame('failed', $result->status());
+    }
+
+    public function testFactoryCriaRosterNaOrdemEsperada(): void
+    {
+        $factory = new AgentRuntimeFactory();
+        $names = array_map(static fn ($a) => $a->name(), $factory->createRoster());
+        $this->assertSame(
+            ['sentinela', 'coletor', 'financeiro', 'otimizador', 'criador', 'qa'],
+            $names
+        );
     }
 }
