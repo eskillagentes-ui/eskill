@@ -27,6 +27,7 @@
             <exclude>tests/Unit/AIIntegrationTest.php</exclude>
             <!-- Runtime de agentes é DB-free e gate obrigatório de segurança. -->
             <file>tests/Unit/Services/Agents/AgentContextTest.php</file>
+            <file>tests/Unit/Services/Agents/AgentSnapshotSafetyTest.php</file>
             <file>tests/Unit/Services/Agents/AgentPolicyTest.php</file>
             <file>tests/Unit/Services/Agents/AgentRosterIntegrationTest.php</file>
             <file>tests/Unit/Services/Agents/AgentRuntimeContractsTest.php</file>

@@ -4,41 +4,32 @@ declare(strict_types=1);
 
 namespace App\Services\Agents;
 
-/**
- * Adapter read-only para leituras financeiras legadas.
- */
+/** Transforma o snapshot read-only financeiro. */
 final class FinanceiroAgent extends LegacyReadOnlyAgentAdapter
 {
     public const NAME = 'financeiro';
+    private const SNAPSHOT_KEY = 'financeiro_snapshot';
 
-    public function name(): string
-    {
-        return self::NAME;
-    }
+    public function name(): string { return self::NAME; }
+    protected function snapshotKey(): string { return self::SNAPSHOT_KEY; }
 
-    /**
-     * @param array<string, mixed> $payload
-     */
+    /** @return list<string> */
+    protected function payloadKeys(): array { return ['resumo', 'metrics']; }
+
+    /** @param array<string, mixed> $payload */
     protected function mapPayload(array $payload): AgentResult
     {
-        if (
-            !array_key_exists('resumo', $payload)
+        if (!array_key_exists('resumo', $payload)
             || !is_array($payload['resumo'])
             || !array_key_exists('metrics', $payload)
             || !is_array($payload['metrics'])
         ) {
             return $this->failed('invalid_legacy_payload');
         }
+        $data = ['resumo' => $payload['resumo'], 'metrics' => $payload['metrics']];
 
-        $data = [
-            'resumo' => $payload['resumo'],
-            'metrics' => $payload['metrics'],
-        ];
-
-        if ($payload['ok'] !== true) {
-            return $this->failed('financeiro_unavailable', $data);
-        }
-
-        return $this->success($data);
+        return $payload['ok'] === true
+            ? $this->success($data)
+            : $this->failed('financeiro_unavailable', $data);
     }
 }

@@ -7,186 +7,80 @@ namespace Tests\Unit\Services\Agents;
 use App\Services\Agents\AgentContext;
 use App\Services\Agents\AgentResult;
 use App\Services\Agents\QaAgent;
-use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
-use RuntimeException;
 
-/**
- * @covers \App\Services\Agents\QaAgent
- */
-class QaAgentTest extends TestCase
+/** @covers \App\Services\Agents\QaAgent */
+final class QaAgentTest extends TestCase
 {
-    public function testExecutaChecksUmaVezNaOrdemERetornaSuccessSeguro(): void
+    public function testConsolidaResultadosDoSnapshotNaOrdem(): void
     {
-        $calls = [];
-        $qa = new QaAgent([
-            'php-lint' => function (AgentContext $context) use (&$calls): AgentResult {
-                $calls[] = 'php-lint';
-                return AgentResult::success('php-lint', 'ok');
-            },
-            'phpunit-agents' => function (AgentContext $context) use (&$calls): AgentResult {
-                $calls[] = 'phpunit-agents';
-                return AgentResult::success('phpunit-agents', 'ok');
-            },
-        ]);
-
-        $result = $qa->run($this->context());
-
-        $this->assertSame(['php-lint', 'phpunit-agents'], $calls);
-        $this->assertSame('qa', $qa->name());
-        $this->assertSame('qa', $result->agent());
-        $this->assertSame('success', $result->status());
-        $this->assertSame('all_checks_passed', $result->reason());
-        $this->assertSame(
-            [
-                'checks' => [
-                    'php-lint' => ['approved' => true, 'reason' => 'approved'],
-                    'phpunit-agents' => ['approved' => true, 'reason' => 'approved'],
-                ],
-                'order' => ['php-lint', 'phpunit-agents'],
-            ],
-            $result->data()
-        );
-        $this->assertFalse($result->stateChanged());
-        $this->assertSame([], $result->emittedOps());
-    }
-
-    /**
-     * @dataProvider invalidConfigurations
-     * @param array<mixed, mixed> $checks
-     */
-    public function testRejeitaConfiguracaoInvalida(array $checks): void
-    {
-        $this->expectException(InvalidArgumentException::class);
-        new QaAgent($checks);
-    }
-
-    /** @return array<string, array{0: array<mixed, mixed>}> */
-    public function invalidConfigurations(): array
-    {
-        $valid = static function (AgentContext $context): AgentResult {
-            return AgentResult::success('valid', 'ok');
-        };
-
-        return [
-            'lista vazia' => [[]],
-            'id vazio' => [['' => $valid]],
-            'id em branco' => [['   ' => $valid]],
-            'id nao string' => [[0 => $valid]],
-            'check nao callable' => [['valid' => 'not-callable']],
-        ];
-    }
-
-    /**
-     * @dataProvider invalidAgentResults
-     */
-    public function testReprovaResultadoQueViolaContrato(AgentResult $checkResult, string $expectedReason): void
-    {
-        $qa = new QaAgent([
-            'contract' => static function (AgentContext $context) use ($checkResult): AgentResult {
-                return $checkResult;
-            },
-        ]);
-
-        $result = $qa->run($this->context());
-
-        $this->assertSame('failed', $result->status());
-        $this->assertSame('checks_failed', $result->reason());
-        $this->assertSame(
-            ['approved' => false, 'reason' => $expectedReason],
-            $result->data()['checks']['contract']
-        );
-        $this->assertFalse($result->stateChanged());
-        $this->assertSame([], $result->emittedOps());
-    }
-
-    /** @return array<string, array{0: AgentResult, 1: string}> */
-    public function invalidAgentResults(): array
-    {
-        return [
-            'skipped' => [AgentResult::skipped('contract', 'skip detail'), 'status_not_success'],
-            'blocked' => [AgentResult::blocked('contract', 'block detail'), 'status_not_success'],
-            'failed' => [AgentResult::failed('contract', 'failure detail'), 'status_not_success'],
-            'nome divergente' => [AgentResult::success('other', 'ok'), 'agent_mismatch'],
-            'mudou estado' => [AgentResult::success('contract', 'ok', [], true), 'state_changed'],
-            'emitiu ops' => [AgentResult::success('contract', 'ok', [], false, ['op:unsafe']), 'emitted_ops'],
-        ];
-    }
-
-    public function testFalhaGenericamenteEmThrowableERetornoInvalidoMasContinua(): void
-    {
-        $calls = [];
-        $qa = new QaAgent([
-            'throws' => function (AgentContext $context) use (&$calls): AgentResult {
-                $calls[] = 'throws';
-                throw new RuntimeException('segredo-interno-que-nao-pode-vazar');
-            },
-            'invalid' => function (AgentContext $context) use (&$calls) {
-                $calls[] = 'invalid';
-                return ['status' => 'success'];
-            },
-            'after' => function (AgentContext $context) use (&$calls): AgentResult {
-                $calls[] = 'after';
-                return AgentResult::success('after', 'ok');
-            },
-        ]);
-
-        $result = $qa->run($this->context());
-
-        $this->assertSame(['throws', 'invalid', 'after'], $calls);
-        $this->assertSame('failed', $result->status());
-        $this->assertSame(['approved' => false, 'reason' => 'check_exception'], $result->data()['checks']['throws']);
-        $this->assertSame(['approved' => false, 'reason' => 'invalid_result'], $result->data()['checks']['invalid']);
-        $this->assertSame(['approved' => true, 'reason' => 'approved'], $result->data()['checks']['after']);
-        $this->assertStringNotContainsString('segredo-interno', serialize($result->data()));
-        $this->assertFalse($result->stateChanged());
-        $this->assertSame([], $result->emittedOps());
-    }
-
-    public function testIgnoraComandosDaMetadataEUsaSomenteIdsDeCheckCapturados(): void
-    {
-        $qa = new QaAgent([
-            'php-lint' => static function (AgentContext $context): AgentResult {
-                return AgentResult::success('php-lint', 'captured');
-            },
-            'phpunit-agents' => static function (AgentContext $context): AgentResult {
-                return AgentResult::success('phpunit-agents', 'captured');
-            },
-        ]);
-        $context = $this->context([
-            'commands' => ['php-lint', 'phpunit-agents', 'e2e-readonly'],
-        ]);
-
-        $result = $qa->run($context);
+        $qa = new QaAgent();
+        $result = $qa->run($this->context([
+            'php-lint' => AgentResult::success('php-lint', 'ok'),
+            'phpunit-agents' => AgentResult::success('phpunit-agents', 'ok'),
+        ]));
 
         $this->assertSame('success', $result->status());
         $this->assertSame(['php-lint', 'phpunit-agents'], $result->data()['order']);
+        $this->assertSame(['approved' => true, 'reason' => 'approved'], $result->data()['checks']['php-lint']);
+        $this->assertFalse($result->stateChanged());
+        $this->assertSame([], $result->emittedOps());
+    }
+
+    /** @dataProvider invalidSnapshots */
+    public function testSnapshotInvalidoFalhaFechado(mixed $snapshot): void
+    {
+        $metadata = $snapshot === '__missing__' ? [] : ['qa_results_snapshot' => $snapshot];
+        $result = (new QaAgent())->run(new AgentContext(1, 'local', 'corr-qa-invalid', false, $metadata));
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('invalid_qa_results_snapshot', $result->reason());
+        $this->assertSame([], $result->data());
+    }
+
+    /** @return iterable<string, array{mixed}> */
+    public function invalidSnapshots(): iterable
+    {
+        yield 'ausente' => ['__missing__'];
+        yield 'vazio' => [[]];
+        yield 'id vazio' => [['' => AgentResult::success('x')]];
+        yield 'resultado escalar' => [['lint' => 'success']];
+        yield 'array forjado' => [['lint' => ['status' => 'success']]];
+    }
+
+    /** @dataProvider rejectedResults */
+    public function testReprovaResultadoQueViolaContrato(AgentResult $candidate, string $reason): void
+    {
+        $result = (new QaAgent())->run($this->context(['contract' => $candidate]));
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('checks_failed', $result->reason());
+        $this->assertSame(['approved' => false, 'reason' => $reason], $result->data()['checks']['contract']);
+        $this->assertFalse($result->stateChanged());
+        $this->assertSame([], $result->emittedOps());
+    }
+
+    /** @return iterable<string, array{AgentResult, string}> */
+    public function rejectedResults(): iterable
+    {
+        yield 'status' => [AgentResult::failed('contract'), 'status_not_success'];
+        yield 'nome' => [AgentResult::success('other'), 'agent_mismatch'];
+        yield 'estado' => [AgentResult::success('contract', 'ok', [], true), 'state_changed'];
+        yield 'ops' => [AgentResult::success('contract', 'ok', [], false, ['unsafe']), 'emitted_ops'];
+    }
+
+    public function testIgnoraMetadataDeComandos(): void
+    {
+        $context = new AgentContext(1, 'local', 'corr-qa-command', false, [
+            'commands' => ['php-lint', 'deploy'],
+            'qa_results_snapshot' => ['php-lint' => AgentResult::success('php-lint')],
+        ]);
+        $result = (new QaAgent())->run($context);
+        $this->assertSame(['php-lint'], $result->data()['order']);
         $this->assertArrayNotHasKey('commands', $result->data());
     }
 
-    public function testImplementacaoNaoPossuiCapacidadesDeShellOuIntegracoesExternas(): void
+    /** @param array<string, AgentResult> $snapshot */
+    private function context(array $snapshot): AgentContext
     {
-        $sources = [
-            file_get_contents(__DIR__ . '/../../../../app/Services/Agents/QaAgent.php'),
-            file_get_contents(__DIR__ . '/../../../../app/Services/Agents/QaMergeGate.php'),
-        ];
-
-        foreach ($sources as $source) {
-            $this->assertIsString($source);
-            foreach (['exec', 'system', 'shell_exec', 'passthru', 'proc_open'] as $function) {
-                $this->assertDoesNotMatchRegularExpression(
-                    '/\\b' . preg_quote($function, '/') . '\\s*\\(/',
-                    $source
-                );
-            }
-            foreach (['git', 'deploy', 'MercadoLivre', 'PDO', 'Database'] as $capability) {
-                $this->assertStringNotContainsString($capability, $source);
-            }
-        }
-    }
-
-    private function context(array $metadata = []): AgentContext
-    {
-        return new AgentContext(10, 'local', 'corr-qa', false, $metadata);
+        return new AgentContext(10, 'local', 'corr-qa-snapshot', false, ['qa_results_snapshot' => $snapshot]);
     }
 }

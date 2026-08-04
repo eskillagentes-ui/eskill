@@ -5,23 +5,17 @@ declare(strict_types=1);
 namespace Tests\Unit\Services\Agents;
 
 use App\Services\Agents\AgentContext;
+use App\Services\Agents\AgentResult;
 use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
+use stdClass;
 
-/**
- * @covers \App\Services\Agents\AgentContext
- */
-class AgentContextTest extends TestCase
+/** @covers \App\Services\Agents\AgentContext */
+final class AgentContextTest extends TestCase
 {
     public function testCriaContextoValidoComDefaults(): void
     {
-        $ctx = new AgentContext(
-            accountId: 10,
-            environment: 'local',
-            correlationId: 'corr-abc-1',
-            mlWriteAutomation: false
-        );
-
+        $ctx = new AgentContext(10, 'local', 'corr-abc-1', false);
         $this->assertSame(10, $ctx->accountId());
         $this->assertSame('local', $ctx->environment());
         $this->assertSame('corr-abc-1', $ctx->correlationId());
@@ -29,51 +23,53 @@ class AgentContextTest extends TestCase
         $this->assertSame([], $ctx->metadata());
     }
 
-    public function testAceitaEnvironmentsPermitidos(): void
+    public function testAceitaSnapshotsEscalaresEAgentResultSeguro(): void
     {
-        foreach (['local', 'staging', 'production'] as $env) {
-            $ctx = new AgentContext(1, $env, 'corr-1', false, ['k' => 'v']);
-            $this->assertSame($env, $ctx->environment());
-            $this->assertSame(['k' => 'v'], $ctx->metadata());
-        }
+        $result = AgentResult::success('lint', 'ok', ['files' => ['a.php']]);
+        $ctx = new AgentContext(1, 'staging', 'corr-snapshot', false, [
+            'flag' => true,
+            'count' => 2,
+            'nested' => ['value' => null],
+            'qa_results_snapshot' => ['lint' => $result],
+        ]);
+
+        $this->assertSame($result, $ctx->metadata()['qa_results_snapshot']['lint']);
     }
 
-    public function testRejeitaAccountIdZero(): void
+    /** @dataProvider impureMetadata */
+    public function testRejeitaCapacidadeArbitrariaNaMetadata(array $metadata): void
     {
         $this->expectException(InvalidArgumentException::class);
-        new AgentContext(0, 'local', 'corr-1', false);
+        $this->expectExceptionMessage('pure snapshot');
+        new AgentContext(1, 'local', 'corr-impure', false, $metadata);
     }
 
-    public function testRejeitaAccountIdNegativo(): void
+    /** @return iterable<string, array{array<string, mixed>}> */
+    public function impureMetadata(): iterable
+    {
+        yield 'closure direta' => [['port' => static fn (): array => []]];
+        yield 'objeto arbitrario aninhado' => [['nested' => ['port' => new stdClass()]]];
+        yield 'closure dentro de AgentResult' => [[
+            'qa_results_snapshot' => [
+                'lint' => AgentResult::success('lint', 'ok', ['port' => static fn (): array => []]),
+            ],
+        ]];
+    }
+
+    /** @dataProvider invalidContext */
+    public function testRejeitaContextoInvalido(int $accountId, string $environment, string $correlationId): void
     {
         $this->expectException(InvalidArgumentException::class);
-        new AgentContext(-1, 'local', 'corr-1', false);
+        new AgentContext($accountId, $environment, $correlationId, false);
     }
 
-    public function testRejeitaEnvironmentInvalido(): void
+    /** @return iterable<string, array{int, string, string}> */
+    public function invalidContext(): iterable
     {
-        $this->expectException(InvalidArgumentException::class);
-        new AgentContext(1, 'prod', 'corr-1', false);
-    }
-
-    public function testRejeitaCorrelationIdVazio(): void
-    {
-        $this->expectException(InvalidArgumentException::class);
-        new AgentContext(1, 'local', '', false);
-    }
-
-    public function testRejeitaCorrelationIdSomenteEspacos(): void
-    {
-        $this->expectException(InvalidArgumentException::class);
-        new AgentContext(1, 'local', '   ', false);
-    }
-
-    public function testMlWriteAutomationTipadoComoBool(): void
-    {
-        $on = new AgentContext(1, 'staging', 'corr-on', true);
-        $off = new AgentContext(1, 'staging', 'corr-off', false);
-
-        $this->assertTrue($on->mlWriteAutomation());
-        $this->assertFalse($off->mlWriteAutomation());
+        yield 'id zero' => [0, 'local', 'corr'];
+        yield 'id negativo' => [-1, 'local', 'corr'];
+        yield 'ambiente' => [1, 'prod', 'corr'];
+        yield 'correlation vazia' => [1, 'local', ''];
+        yield 'correlation em branco' => [1, 'local', '   '];
     }
 }

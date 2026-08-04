@@ -6,9 +6,7 @@ namespace App\Services\Agents;
 
 use InvalidArgumentException;
 
-/**
- * Contexto imutável compartilhado pelos agentes do runtime.
- */
+/** Contexto imutável compartilhado pelos agentes do runtime. */
 final class AgentContext
 {
     /** @var list<string> */
@@ -20,15 +18,12 @@ final class AgentContext
     private string $environment;
 
     private string $correlationId;
-
     private bool $mlWriteAutomation;
 
     /** @var array<string, mixed> */
     private array $metadata;
 
-    /**
-     * @param array<string, mixed> $metadata
-     */
+    /** @param array<string, mixed> $metadata */
     public function __construct(
         int $accountId,
         string $environment,
@@ -39,17 +34,14 @@ final class AgentContext
         if ($accountId <= 0) {
             throw new InvalidArgumentException('accountId must be a positive integer');
         }
-
         if (!in_array($environment, self::ENVIRONMENTS, true)) {
-            throw new InvalidArgumentException(
-                'environment must be one of: ' . implode('|', self::ENVIRONMENTS)
-            );
+            throw new InvalidArgumentException('environment must be one of: ' . implode('|', self::ENVIRONMENTS));
         }
-
         if (trim($correlationId) === '') {
             throw new InvalidArgumentException('correlationId must be a non-empty string');
         }
 
+        self::assertPureSnapshot($metadata);
         $this->accountId = $accountId;
         $this->environment = $environment;
         $this->correlationId = $correlationId;
@@ -57,30 +49,34 @@ final class AgentContext
         $this->metadata = $metadata;
     }
 
-    public function accountId(): int
-    {
-        return $this->accountId;
-    }
+    public function accountId(): int { return $this->accountId; }
 
     /** @return 'local'|'staging'|'production' */
-    public function environment(): string
-    {
-        return $this->environment;
-    }
+    public function environment(): string { return $this->environment; }
 
-    public function correlationId(): string
-    {
-        return $this->correlationId;
-    }
-
-    public function mlWriteAutomation(): bool
-    {
-        return $this->mlWriteAutomation;
-    }
+    public function correlationId(): string { return $this->correlationId; }
+    public function mlWriteAutomation(): bool { return $this->mlWriteAutomation; }
 
     /** @return array<string, mixed> */
-    public function metadata(): array
+    public function metadata(): array { return $this->metadata; }
+
+    private static function assertPureSnapshot(mixed $value, int $depth = 0): void
     {
-        return $this->metadata;
+        if ($depth > 32) {
+            throw new InvalidArgumentException('metadata snapshot nesting is too deep');
+        }
+        if ($value === null || is_scalar($value)) {
+            return;
+        }
+        if ($value instanceof AgentResult) {
+            self::assertPureSnapshot($value->data(), $depth + 1);
+            return;
+        }
+        if (!is_array($value)) {
+            throw new InvalidArgumentException('metadata must contain only pure snapshot values');
+        }
+        foreach ($value as $item) {
+            self::assertPureSnapshot($item, $depth + 1);
+        }
     }
 }

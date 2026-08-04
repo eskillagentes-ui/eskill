@@ -4,106 +4,52 @@ declare(strict_types=1);
 
 namespace App\Services\Agents;
 
-use Throwable;
-
-/**
- * Produz exclusivamente recomendacoes a partir de observacoes e custos validados.
- *
- * As portas legadas retornam payloads heterogeneos. O uso de mixed nos
- * PHPDocs e restrito a esses payloads, validados antes de qualquer uso.
- */
+/** Produz recomendações somente de snapshots de observação e custos. */
 final class OtimizadorAgent implements AgentInterface
 {
     public const NAME = 'otimizador';
 
-    /** @var callable(int): array */
-    private $observePort;
-
-    /** @var callable(int, list<string>): array */
-    private $costValidationPort;
-
-    /**
-     * @param callable(int): array $observePort
-     * @param callable(int, list<string>): array $costValidationPort
-     */
-    public function __construct(callable $observePort, callable $costValidationPort)
+    public function __construct()
     {
-        $this->observePort = $observePort;
-        $this->costValidationPort = $costValidationPort;
+        if (func_num_args() !== 0) {
+            throw new \InvalidArgumentException('snapshot agents do not accept dependencies');
+        }
     }
 
-    public function name(): string
-    {
-        return self::NAME;
-    }
+    public function name(): string { return self::NAME; }
 
     public function run(AgentContext $context): AgentResult
     {
-        try {
-            $observed = ($this->observePort)($context->accountId());
-        } catch (Throwable) {
-            return AgentResult::failed(self::NAME, 'optimizer_unavailable');
-        }
-
-        if (!is_array($observed)) {
-            return AgentResult::failed(self::NAME, 'optimizer_unavailable');
-        }
-
-        if ($this->isRemoteFailure($observed)
-            || !isset($observed['recommendations'])
-            || !is_array($observed['recommendations'])
-            || !$this->isSequentialList($observed['recommendations'])
-            || $observed['recommendations'] === []
-        ) {
-            return AgentResult::failed(self::NAME, 'optimizer_unavailable');
+        $metadata = $context->metadata();
+        $observed = $metadata['optimizer_observation_snapshot'] ?? null;
+        if (!$this->validObservation($observed)) {
+            return AgentResult::failed(self::NAME, 'invalid_optimizer_observation_snapshot');
         }
 
         $recommendations = [];
         $mlbIds = [];
-
         foreach ($observed['recommendations'] as $recommendation) {
-            if (!is_array($recommendation)) {
-                return AgentResult::failed(self::NAME, 'optimizer_unavailable');
-            }
-
             $normalized = $this->normalizeRecommendation($recommendation);
-            if ($normalized === null) {
-                return AgentResult::failed(self::NAME, 'optimizer_unavailable');
+            if ($normalized === null || in_array($normalized['mlb_id'], $mlbIds, true)) {
+                return AgentResult::failed(self::NAME, 'invalid_optimizer_observation_snapshot');
             }
-
             $recommendations[] = $normalized;
             $mlbIds[] = $normalized['mlb_id'];
         }
 
-        try {
-            $costValidation = ($this->costValidationPort)($context->accountId(), $mlbIds);
-        } catch (Throwable) {
-            return AgentResult::failed(self::NAME, 'optimizer_unavailable');
-        }
-
-        if (!is_array($costValidation)) {
-            return AgentResult::failed(self::NAME, 'optimizer_unavailable');
-        }
-
-        if ($this->isRemoteFailure($costValidation)
-            || !isset($costValidation['items'])
-            || !is_array($costValidation['items'])
-        ) {
-            return AgentResult::failed(self::NAME, 'optimizer_unavailable');
+        $costSnapshot = $metadata['optimizer_cost_snapshot'] ?? null;
+        if (!$this->validCosts($costSnapshot, $mlbIds)) {
+            return AgentResult::failed(self::NAME, 'invalid_optimizer_cost_snapshot');
         }
 
         $allActionable = true;
-
         foreach ($recommendations as $index => $recommendation) {
             $mlbId = $recommendation['mlb_id'];
-            $cost = $costValidation['items'][$mlbId] ?? null;
+            $cost = $costSnapshot['items'][$mlbId] ?? null;
             $actionable = is_array($cost)
-                && ($cost['validated'] ?? false) === true
-                && ($cost['suspicious'] ?? true) === false
-                && isset($cost['cost'])
-                && is_numeric($cost['cost'])
+                && $cost['validated'] === true
+                && $cost['suspicious'] === false
                 && (float) $cost['cost'] > 0.0;
-
             if (!$actionable) {
                 $allActionable = false;
                 $recommendations[$index] = [
@@ -114,84 +60,84 @@ final class OtimizadorAgent implements AgentInterface
                 ];
                 continue;
             }
-
             $recommendation['actionable'] = true;
             $recommendation['blocked'] = false;
             $recommendations[$index] = $recommendation;
         }
 
-        $data = [
-            'recommendations' => $recommendations,
-            'read_only' => true,
-        ];
-
-        if (!$allActionable) {
-            return AgentResult::blocked(self::NAME, 'cost_validation_blocked', $data);
-        }
-
-        return AgentResult::success(self::NAME, 'recommendations_ready', $data);
+        $data = ['recommendations' => $recommendations, 'read_only' => true];
+        return $allActionable
+            ? AgentResult::success(self::NAME, 'recommendations_ready', $data)
+            : AgentResult::blocked(self::NAME, 'cost_validation_blocked', $data);
     }
 
-    /**
-     * @param array<string, mixed> $recommendation
-     * @return array{mlb_id: string, kind: string, recommended_roas: float}|null
-     */
-    private function normalizeRecommendation(array $recommendation): ?array
+    private function validObservation(mixed $snapshot): bool
     {
-        $keys = array_keys($recommendation);
-        sort($keys);
-        if ($keys !== ['kind', 'mlb_id', 'recommended_roas']) {
-            return null;
-        }
-
-        $mlbId = $recommendation['mlb_id'];
-        $kind = $recommendation['kind'];
-        $recommendedRoas = $recommendation['recommended_roas'];
-        if (!is_string($mlbId)
-            || preg_match('/^MLB[0-9]+$/', $mlbId) !== 1
-            || $kind !== 'ads_roas'
-            || (!is_int($recommendedRoas) && !is_float($recommendedRoas))
-        ) {
-            return null;
-        }
-
-        $recommendedRoas = (float) $recommendedRoas;
-        if (!is_finite($recommendedRoas)
-            || $recommendedRoas <= 0.0
-            || $recommendedRoas > 100.0
-        ) {
-            return null;
-        }
-
-        return [
-            'mlb_id' => $mlbId,
-            'kind' => $kind,
-            'recommended_roas' => $recommendedRoas,
-        ];
+        return is_array($snapshot)
+            && array_keys($snapshot) === ['recommendations']
+            && is_array($snapshot['recommendations'])
+            && $snapshot['recommendations'] !== []
+            && array_is_list($snapshot['recommendations']);
     }
 
-    /** @param array<int|string, mixed> $value */
-    private function isSequentialList(array $value): bool
+    /** @param list<string> $mlbIds */
+    private function validCosts(mixed $snapshot, array $mlbIds): bool
     {
-        $expectedKey = 0;
-        foreach ($value as $key => $_item) {
-            if ($key !== $expectedKey) {
+        if (!is_array($snapshot)
+            || array_keys($snapshot) !== ['items']
+            || !is_array($snapshot['items'])
+        ) {
+            return false;
+        }
+        foreach ($snapshot['items'] as $mlbId => $cost) {
+            if (!is_string($mlbId)
+                || !in_array($mlbId, $mlbIds, true)
+                || !is_array($cost)
+                || !$this->hasExactKeys($cost, ['validated', 'suspicious', 'cost'])
+                || !is_bool($cost['validated'])
+                || !is_bool($cost['suspicious'])
+                || (!is_int($cost['cost']) && !is_float($cost['cost']))
+                || !is_finite((float) $cost['cost'])
+                || (float) $cost['cost'] < 0.0
+            ) {
                 return false;
             }
-            $expectedKey++;
         }
 
         return true;
     }
 
-    /** @param array<string, mixed> $payload */
-    private function isRemoteFailure(array $payload): bool
+    /** @return array{mlb_id: string, kind: string, recommended_roas: float}|null */
+    private function normalizeRecommendation(mixed $recommendation): ?array
     {
-        $status = $payload['http_status'] ?? $payload['status'] ?? null;
-        if (is_string($status) && ctype_digit($status)) {
-            $status = (int) $status;
+        if (!is_array($recommendation)
+            || !$this->hasExactKeys($recommendation, ['kind', 'mlb_id', 'recommended_roas'])
+        ) {
+            return null;
+        }
+        $mlbId = $recommendation['mlb_id'];
+        $kind = $recommendation['kind'];
+        $roas = $recommendation['recommended_roas'];
+        if (!is_string($mlbId)
+            || preg_match('/^MLB[0-9]+$/', $mlbId) !== 1
+            || $kind !== 'ads_roas'
+            || (!is_int($roas) && !is_float($roas))
+            || !is_finite((float) $roas)
+            || (float) $roas <= 0.0
+            || (float) $roas > 100.0
+        ) {
+            return null;
         }
 
-        return is_int($status) && $status >= 400 && $status <= 599;
+        return ['mlb_id' => $mlbId, 'kind' => $kind, 'recommended_roas' => (float) $roas];
+    }
+
+    /** @param array<string, mixed> $value @param list<string> $keys */
+    private function hasExactKeys(array $value, array $keys): bool
+    {
+        $actual = array_keys($value);
+        sort($actual);
+        sort($keys);
+        return $actual === $keys;
     }
 }
