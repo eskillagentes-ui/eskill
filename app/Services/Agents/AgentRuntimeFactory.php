@@ -398,7 +398,7 @@ final class AgentRuntimeFactory
             }
         }
         if ($dashboard['monitored'] !== $monitored
-            || $dashboard['semaforo'] !== $this->evaluateSemaforo($risks)
+            || $dashboard['semaforo'] !== SentinelaRiskStatusPolicy::aggregateStatus($risks)
         ) {
             return null;
         }
@@ -765,23 +765,6 @@ final class AgentRuntimeFactory
             : null;
     }
 
-    /** @param list<array<string, mixed>> $risks */
-    private function evaluateSemaforo(array $risks): string
-    {
-        $worst = 'verde';
-        foreach ($risks as $risk) {
-            if ($risk['status'] === 'nd') {
-                continue;
-            }
-            if ($risk['status'] === 'vermelho') {
-                return 'vermelho';
-            }
-            if ($risk['status'] === 'amarelo') {
-                $worst = 'amarelo';
-            }
-        }
-        return $worst;
-    }
 
     private function approximatelyEqual(float $left, float $right, float $epsilon = 0.000001): bool
     {

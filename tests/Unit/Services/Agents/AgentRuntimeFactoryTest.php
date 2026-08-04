@@ -285,6 +285,33 @@ final class AgentRuntimeFactoryTest extends TestCase
         self::assertFalse($context->metadata()['sentinela_snapshot']['payload']['ok']);
     }
 
+    /** @dataProvider invalidSentinelaNumericObservations */
+    public function testSentinelaRejeitaObservacaoNumericaInvalida(array $overrides, int $monitored): void
+    {
+        $gateway = new AgentRuntimeReadGatewayFake();
+        foreach ($gateway->sentinela['risks'] as &$risk) {
+            if ($risk['risk_key'] === 'oauth') {
+                $risk = array_replace($risk, $overrides);
+            }
+        }
+        unset($risk);
+        $gateway->sentinela['monitored'] = $monitored;
+
+        $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-risk-invalid-number');
+
+        self::assertFalse($context->metadata()['sentinela_snapshot']['payload']['ok']);
+        self::assertSame('failed', (new SentinelaAgent())->run($context)->status());
+    }
+
+    public function invalidSentinelaNumericObservations(): iterable
+    {
+        yield 'value negativo' => [['value_num' => -1.0], 10];
+        yield 'limit negativo' => [['limit_num' => -2.0], 10];
+        yield 'nd com valor observado' => [[
+            'status' => 'nd', 'value_num' => 1.0, 'pct_of_limit' => null, 'collected_at' => null,
+        ], 9];
+    }
+
     public function testSentinelaRejeitaCampoExtraAntesDeProjetarRisco(): void
     {
         $gateway = new AgentRuntimeReadGatewayFake();

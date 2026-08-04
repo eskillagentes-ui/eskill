@@ -94,25 +94,7 @@ final class SentinelaAgent extends LegacyReadOnlyAgentAdapter
 
         return $actualKeys === $expectedKeys
             && $monitored === $collected
-            && $semaforo === $this->evaluateSemaforo($risks);
-    }
-
-    /** @param list<array<string, mixed>> $risks */
-    private function evaluateSemaforo(array $risks): string
-    {
-        $worst = 'verde';
-        foreach ($risks as $risk) {
-            if ($risk['status'] === 'nd') {
-                continue;
-            }
-            if ($risk['status'] === 'vermelho') {
-                return 'vermelho';
-            }
-            if ($risk['status'] === 'amarelo') {
-                $worst = 'amarelo';
-            }
-        }
-        return $worst;
+            && $semaforo === SentinelaRiskStatusPolicy::aggregateStatus($risks);
     }
 
     /** @param array<array-key, mixed> $value */

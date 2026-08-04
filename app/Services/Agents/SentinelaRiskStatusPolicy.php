@@ -21,8 +21,16 @@ final class SentinelaRiskStatusPolicy
         mixed $limit,
         mixed $pct
     ): bool {
+        if (($value !== null && (!self::isFiniteNumber($value) || (float) $value < 0.0))
+            || ($limit !== null && (!self::isFiniteNumber($limit) || (float) $limit <= 0.0))
+        ) {
+            return false;
+        }
+        if ($status === 'nd') {
+            return $value === null && $pct === null;
+        }
         if ($pct === null) {
-            return $status === 'nd';
+            return false;
         }
         if ((!is_int($pct) && !is_float($pct)) || !is_finite((float) $pct) || (float) $pct < 0) {
             return false;
@@ -59,6 +67,40 @@ final class SentinelaRiskStatusPolicy
         };
 
         return $actualSeverity >= $minimumSeverity;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $risks
+     * @return 'verde'|'amarelo'|'vermelho'
+     */
+    public static function aggregateStatus(array $risks): string
+    {
+        $worst = 'verde';
+        foreach ($risks as $risk) {
+            $status = $risk['status'] ?? null;
+            $trustedStatus = is_string($risk['risk_key'] ?? null)
+                && is_string($status)
+                && self::isConsistent(
+                    $risk['risk_key'],
+                    $status,
+                    $risk['value_num'] ?? null,
+                    $risk['limit_num'] ?? null,
+                    $risk['pct_of_limit'] ?? null
+                );
+            $pct = $risk['pct_of_limit'] ?? null;
+            if ($status === 'vermelho'
+                || (!$trustedStatus && self::isFiniteNumber($pct) && (float) $pct > 80.0)
+            ) {
+                return 'vermelho';
+            }
+            if ($status === 'amarelo'
+                || (!$trustedStatus && self::isFiniteNumber($pct) && (float) $pct >= 50.0)
+            ) {
+                $worst = 'amarelo';
+            }
+        }
+
+        return $worst;
     }
 
     private static function isFiniteNumber(mixed $value): bool

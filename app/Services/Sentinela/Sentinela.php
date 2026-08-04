@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\Sentinela;
 
 use App\Database;
+use App\Services\Agents\SentinelaRiskStatusPolicy;
 use App\Services\MercadoLivreClient;
 use App\Services\Pregao\PregaoEmitService;
 use PDO;
@@ -145,21 +146,7 @@ final class Sentinela
      */
     public function evaluateSemaforo(array $risks): string
     {
-        $worst = 'verde';
-        foreach ($risks as $r) {
-            $status = (string) ($r['status'] ?? 'nd');
-            if ($status === 'nd') {
-                continue;
-            }
-            $pct = $r['pct_of_limit'] ?? null;
-            if ($status === 'vermelho' || ($pct !== null && (float) $pct > 80.0)) {
-                return 'vermelho';
-            }
-            if ($status === 'amarelo' || ($pct !== null && (float) $pct >= 50.0)) {
-                $worst = 'amarelo';
-            }
-        }
-        return $worst;
+        return SentinelaRiskStatusPolicy::aggregateStatus($risks);
     }
 
     /**

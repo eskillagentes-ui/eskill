@@ -71,4 +71,17 @@ class SentinelaVetoTest extends TestCase
         ];
         $this->assertSame('vermelho', $s->evaluateSemaforo($risks));
     }
+
+    public function testPctArredondadoNoLimiarPreservaStatusAbsolutoConfiavel(): void
+    {
+        $risks = [[
+            'risk_key' => 'reclamacoes',
+            'value_num' => 0.9999,
+            'limit_num' => 2.0,
+            'pct_of_limit' => 50.0,
+            'status' => 'verde',
+        ]];
+
+        self::assertSame('verde', $this->service()->evaluateSemaforo($risks));
+    }
 }

@@ -243,6 +243,27 @@ final class LegacyAgentAdaptersTest extends TestCase
             'ok' => true, 'semaforo' => 'verde', 'risks' => $pctYellow, 'monitored' => 10,
         ]];
 
+        $negativeValue = $green;
+        $negativeValue[7]['value_num'] = -1.0;
+        yield 'value negativo' => [[
+            'ok' => true, 'semaforo' => 'verde', 'risks' => $negativeValue, 'monitored' => 10,
+        ]];
+
+        $negativeLimit = $green;
+        $negativeLimit[7]['limit_num'] = -2.0;
+        yield 'limit negativo' => [[
+            'ok' => true, 'semaforo' => 'verde', 'risks' => $negativeLimit, 'monitored' => 10,
+        ]];
+
+        $ndWithValue = $green;
+        $ndWithValue[7]['status'] = 'nd';
+        $ndWithValue[7]['value_num'] = 1.0;
+        $ndWithValue[7]['pct_of_limit'] = null;
+        $ndWithValue[7]['collected_at'] = null;
+        yield 'nd com valor observado' => [[
+            'ok' => true, 'semaforo' => 'verde', 'risks' => $ndWithValue, 'monitored' => 9,
+        ]];
+
         yield 'monitored nao reconcilia grade' => [[
             'ok' => true, 'semaforo' => 'verde', 'risks' => $green, 'monitored' => 9,
         ]];
