@@ -26,6 +26,20 @@ function restoreEnv(): void {
   }
 }
 
+function listSpecFiles(directory: string): string[] {
+  const files: string[] = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const target = path.join(directory, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...listSpecFiles(target));
+    } else if (/\.spec\.(?:ts|js)$/.test(entry.name)) {
+      files.push(target);
+    }
+  }
+
+  return files;
+}
+
 test.describe('Mutation guard contract @readonly', () => {
   test.describe.configure({ mode: 'serial' });
 
@@ -123,13 +137,13 @@ test.describe('Mutation guard contract @readonly', () => {
 
   test('@readonly todos os specs usam a fixture central', () => {
     const e2eDir = path.resolve(__dirname);
-    const specs = fs.readdirSync(e2eDir).filter((file) => /\.spec\.(?:ts|js)$/.test(file));
+    const specs = listSpecFiles(e2eDir);
     const directImport = 'from ' + "'@playwright/test'";
     const directRequire = 'require(' + "'@playwright/test'" + ')';
 
     for (const file of specs) {
-      const source = fs.readFileSync(path.join(e2eDir, file), 'utf8');
-      expect(source, file).toContain('./helpers/mutation-guard');
+      const source = fs.readFileSync(file, 'utf8');
+      expect(source, file).toContain('helpers/mutation-guard');
       expect(source, file).not.toContain(directImport);
       expect(source, file).not.toContain(directRequire);
     }

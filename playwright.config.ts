@@ -23,8 +23,8 @@ assertSafePlaywrightTarget(BASE_URL);
 const e2eReadonly = process.env.E2E_READONLY === '1';
 const mutationAllowed = process.env.E2E_ALLOW_MUTATION === 'true';
 const READONLY_SPEC_ALLOWLIST = [
-  '**/mutation-guard.spec.ts',
-  '**/pregao-overflow.spec.ts',
+  'mutation-guard.spec.ts',
+  'pregao-overflow.spec.ts',
 ];
 const testMatch = e2eReadonly || !mutationAllowed ? READONLY_SPEC_ALLOWLIST : undefined;
 

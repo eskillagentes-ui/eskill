@@ -50,6 +50,9 @@ final class OrchestratorAgent implements AgentInterface
         foreach ($this->agents as $index => $agent) {
             try {
                 $agentName = $agent->name();
+                if (preg_match('/^[a-z][a-z0-9_-]{0,63}$/', $agentName) !== 1) {
+                    throw new InvalidArgumentException('invalid agent name');
+                }
             } catch (Throwable) {
                 $agentName = 'unknown-agent-' . $index;
                 $order[] = $agentName;

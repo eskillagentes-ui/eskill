@@ -105,6 +105,42 @@ class OrchestratorAgentTest extends TestCase
         $this->assertSame(['unknown-agent-0', 'seguinte'], $result->data()['order']);
     }
 
+    public function testRejeitaNameWhitespaceSemExecutarAgenteEContinua(): void
+    {
+        $state = (object) ['runCalled' => false];
+        $invalid = new class ($state) implements AgentInterface {
+            public function __construct(private object $state)
+            {
+            }
+
+            public function name(): string
+            {
+                return " \t\n";
+            }
+
+            public function run(AgentContext $context): AgentResult
+            {
+                $this->state->runCalled = true;
+                return AgentResult::success('invalid', 'unexpected');
+            }
+        };
+        $next = $this->agent('seguinte', static fn (AgentContext $context): AgentResult =>
+            AgentResult::success('seguinte', 'ok')
+        );
+
+        $result = (new OrchestratorAgent([$invalid, $next], new AgentPolicy()))->run(
+            new AgentContext(10, 'local', 'corr-invalid-name', false)
+        );
+        /** @var list<AgentResult> $results */
+        $results = $result->data()['results'];
+
+        $this->assertFalse($state->runCalled);
+        $this->assertSame('failed', $result->status());
+        $this->assertSame('unknown-agent-0', $results[0]->agent());
+        $this->assertSame('agent_name_exception', $results[0]->reason());
+        $this->assertSame('success', $results[1]->status());
+    }
+
     public function testPreservaCorrelationIdNoAgregado(): void
     {
         $seen = [];
