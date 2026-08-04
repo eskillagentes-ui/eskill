@@ -278,6 +278,37 @@ final class AgentRuntimeFactoryTest extends TestCase
         self::assertFalse($context->metadata()['sentinela_snapshot']['payload']['ok']);
     }
 
+    /** @dataProvider legitimateConfiguredSentinelaThresholds */
+    public function testSentinelaAceitaThresholdRealConfigurado(
+        string $riskKey,
+        float $value,
+        float $limit,
+        float $pct
+    ): void {
+        $gateway = new AgentRuntimeReadGatewayFake();
+        foreach ($gateway->sentinela['risks'] as &$risk) {
+            if ($risk['risk_key'] !== $riskKey) {
+                continue;
+            }
+            $risk['value_num'] = $value;
+            $risk['limit_num'] = $limit;
+            $risk['pct_of_limit'] = $pct;
+            $risk['status'] = 'amarelo';
+        }
+        unset($risk);
+        $gateway->sentinela['semaforo'] = 'amarelo';
+
+        $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-real-threshold-' . $riskKey);
+
+        self::assertTrue($context->metadata()['sentinela_snapshot']['payload']['ok']);
+    }
+
+    public function legitimateConfiguredSentinelaThresholds(): iterable
+    {
+        yield 'atrasos 7 de 15' => ['atrasos', 7.0, 15.0, 46.67];
+        yield 'cancelamentos 1 de 2.5' => ['cancelamentos', 1.0, 2.5, 40.0];
+    }
+
     public function testAdsRejeitaSkuVazioMalformadoSemIgnorarLinha(): void
     {
         $gateway = new AgentRuntimeReadGatewayFake();

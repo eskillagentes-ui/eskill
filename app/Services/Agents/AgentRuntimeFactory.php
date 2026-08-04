@@ -421,7 +421,11 @@ final class AgentRuntimeFactory
             || !is_string($risk['status'])
             || !in_array($risk['status'], ['verde', 'amarelo', 'vermelho', 'nd'], true)
             || !is_string($risk['source']) || trim($risk['source']) === ''
-            || !$this->riskStatusMatchesPct($risk['status'], $risk['pct_of_limit'])
+            || !SentinelaRiskStatusPolicy::isConsistent(
+                $risk['risk_key'],
+                $risk['status'],
+                $risk['pct_of_limit']
+            )
         ) {
             return null;
         }
@@ -776,21 +780,6 @@ final class AgentRuntimeFactory
             }
         }
         return $worst;
-    }
-
-    private function riskStatusMatchesPct(string $status, mixed $pct): bool
-    {
-        if ($pct === null) {
-            return true;
-        }
-        if (!$this->isFiniteNumber($pct) || (float) $pct < 0) {
-            return false;
-        }
-        $expected = (float) $pct >= 80.0
-            ? 'vermelho'
-            : ((float) $pct >= 50.0 ? 'amarelo' : 'verde');
-
-        return $status === $expected;
     }
 
     private function approximatelyEqual(float $left, float $right, float $epsilon = 0.000001): bool
