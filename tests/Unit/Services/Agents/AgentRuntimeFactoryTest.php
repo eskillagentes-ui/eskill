@@ -256,11 +256,44 @@ final class AgentRuntimeFactoryTest extends TestCase
         }
     }
 
+    public function testSentinelaRejeitaStatusIndividualIncoerenteMesmoComSemaforoAgregadoCorreto(): void
+    {
+        $gateway = new AgentRuntimeReadGatewayFake();
+        $gateway->sentinela['risks'][0]['pct_of_limit'] = 81.0;
+        $gateway->sentinela['risks'][0]['status'] = 'verde';
+        $gateway->sentinela['semaforo'] = 'vermelho';
+
+        $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-risk-status-pct');
+
+        self::assertFalse($context->metadata()['sentinela_snapshot']['payload']['ok']);
+    }
+
+    public function testSentinelaRejeitaCampoExtraAntesDeProjetarRisco(): void
+    {
+        $gateway = new AgentRuntimeReadGatewayFake();
+        $gateway->sentinela['risks'][0]['unexpected_capability'] = ['datetime', 'createFromFormat'];
+
+        $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-risk-extra');
+
+        self::assertFalse($context->metadata()['sentinela_snapshot']['payload']['ok']);
+    }
+
     public function testAdsRejeitaSkuVazioMalformadoSemIgnorarLinha(): void
     {
         $gateway = new AgentRuntimeReadGatewayFake();
         $gateway->ads['skus'][] = [];
         $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-ads-malformed');
+        self::assertFalse($context->metadata()['collector_snapshot']['payload']['ok']);
+        self::assertArrayNotHasKey('optimizer_observation_snapshot', $context->metadata());
+    }
+
+    public function testAdsRejeitaHealthForaDoRangeNormalizado(): void
+    {
+        $gateway = new AgentRuntimeReadGatewayFake();
+        $gateway->ads['skus'][0]['health'] = 99.0;
+
+        $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-ads-health');
+
         self::assertFalse($context->metadata()['collector_snapshot']['payload']['ok']);
         self::assertArrayNotHasKey('optimizer_observation_snapshot', $context->metadata());
     }

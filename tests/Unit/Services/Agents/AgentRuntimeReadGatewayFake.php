@@ -46,7 +46,7 @@ final class AgentRuntimeReadGatewayFake implements AgentRuntimeReadGatewayInterf
                 'acos' => 20.0, 'roas_real' => 5.0, 'roas_objetivo' => 3.0,
                 'roas_breakeven' => 2.0, 'roas_escala' => 4.0,
                 'margem_liquida_pct' => 50.0, 'has_custo' => true,
-                'health' => 95.0, 'semaforo' => 'verde',
+                'health' => 0.95, 'semaforo' => 'verde',
             ]],
         ];
         $now = new \DateTimeImmutable('now', new \DateTimeZone(date_default_timezone_get()));

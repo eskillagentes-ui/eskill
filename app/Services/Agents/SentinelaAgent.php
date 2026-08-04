@@ -170,6 +170,9 @@ final class SentinelaAgent extends LegacyReadOnlyAgentAdapter
         if (!is_string($risk['status']) || !in_array($risk['status'], self::RISK_STATUSES, true)) {
             return false;
         }
+        if (!$this->riskStatusMatchesPct($risk['status'], $risk['pct_of_limit'])) {
+            return false;
+        }
         if ($risk['reason'] !== null && !is_string($risk['reason'])) {
             return false;
         }
@@ -186,6 +189,21 @@ final class SentinelaAgent extends LegacyReadOnlyAgentAdapter
         }
 
         return true;
+    }
+
+    private function riskStatusMatchesPct(string $status, mixed $pct): bool
+    {
+        if ($pct === null) {
+            return true;
+        }
+        if ((!is_int($pct) && !is_float($pct)) || !is_finite((float) $pct) || (float) $pct < 0) {
+            return false;
+        }
+        $expected = (float) $pct >= 80.0
+            ? 'vermelho'
+            : ((float) $pct >= 50.0 ? 'amarelo' : 'verde');
+
+        return $status === $expected;
     }
 
     /** @param array<array-key, mixed> $meta */

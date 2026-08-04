@@ -15,6 +15,15 @@ final class AgentRuntimeCliTest extends TestCase
         $this->script = dirname(__DIR__, 4) . '/bin/agent-runtime.php';
     }
 
+    public function testPhpunitXmlNaoRepeteArquivosExplicitos(): void
+    {
+        $xml = file_get_contents(dirname(__DIR__, 4) . '/phpunit.xml');
+        self::assertIsString($xml);
+        preg_match_all('/<file>([^<]+)<\/file>/', $xml, $matches);
+
+        self::assertSame(array_values(array_unique($matches[1])), $matches[1]);
+    }
+
     public function testFonteCliExpoeSomenteResumoEProibeWritesOuPayloads(): void
     {
         self::assertFileExists($this->script);

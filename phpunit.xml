@@ -207,10 +207,9 @@
             <file>tests/Unit/Services/MercadoLivre/CategoryDTOsTest.php</file>
             <file>tests/Unit/Helpers/MercadoLivreHelperTest.php</file>
             <file>tests/Unit/Helpers/EnvValidatorTest.php</file>
-            <!-- Batch 10: CacheStrategy, NormalizesMLItems, MLStatisticsHelper tests -->
+            <!-- Batch 10: CacheStrategy + NormalizesMLItems tests -->
             <file>tests/Unit/Services/AI/Core/CacheStrategyTest.php</file>
             <file>tests/Unit/Traits/NormalizesMLItemsTest.php</file>
-            <file>tests/Unit/Helpers/MLStatisticsHelperTest.php</file>
             <!-- ML-BLG-051: Observabilidade ML -->
             <file>tests/Unit/Services/MercadoLivre/MlObservabilityServiceTest.php</file>
             <!-- ML-BLG-060: Trilha de Auditoria ML -->

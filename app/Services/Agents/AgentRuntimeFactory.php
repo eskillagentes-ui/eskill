@@ -413,7 +413,7 @@ final class AgentRuntimeFactory
     /** @return array<string, mixed>|null */
     private function normalizeRisk(mixed $risk): ?array
     {
-        if (!is_array($risk) || !$this->hasKeys($risk, self::RISK_FIELDS)) {
+        if (!is_array($risk) || !$this->hasExactKeys($risk, self::RISK_FIELDS)) {
             return null;
         }
         if (!is_string($risk['risk_key']) || !in_array($risk['risk_key'], self::RISK_KEYS, true)
@@ -421,6 +421,7 @@ final class AgentRuntimeFactory
             || !is_string($risk['status'])
             || !in_array($risk['status'], ['verde', 'amarelo', 'vermelho', 'nd'], true)
             || !is_string($risk['source']) || trim($risk['source']) === ''
+            || !$this->riskStatusMatchesPct($risk['status'], $risk['pct_of_limit'])
         ) {
             return null;
         }
@@ -527,7 +528,7 @@ final class AgentRuntimeFactory
                 return false;
             }
         }
-        if (($sku['health'] !== null && ((float) $sku['health'] < 0 || (float) $sku['health'] > 100))
+        if (($sku['health'] !== null && ((float) $sku['health'] < 0 || (float) $sku['health'] > 1))
             || ($sku['margem_liquida_pct'] !== null && (float) $sku['margem_liquida_pct'] > 100)
             || ((float) $sku['gasto'] === 0.0 && $sku['roas_real'] !== null)
         ) {
@@ -775,6 +776,21 @@ final class AgentRuntimeFactory
             }
         }
         return $worst;
+    }
+
+    private function riskStatusMatchesPct(string $status, mixed $pct): bool
+    {
+        if ($pct === null) {
+            return true;
+        }
+        if (!$this->isFiniteNumber($pct) || (float) $pct < 0) {
+            return false;
+        }
+        $expected = (float) $pct >= 80.0
+            ? 'vermelho'
+            : ((float) $pct >= 50.0 ? 'amarelo' : 'verde');
+
+        return $status === $expected;
     }
 
     private function approximatelyEqual(float $left, float $right, float $epsilon = 0.000001): bool
