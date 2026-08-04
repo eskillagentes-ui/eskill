@@ -34,6 +34,9 @@
             <file>tests/Unit/Services/Agents/AgentRuntimeFactoryTest.php</file>
             <file>tests/Unit/Services/Agents/AgentRuntimeReadGatewayTest.php</file>
             <file>tests/Unit/Services/Agents/AgentRuntimeCliTest.php</file>
+            <file>tests/Unit/Services/Agents/AgentRuntimeWorkerTest.php</file>
+            <file>tests/Unit/Services/Agents/AgentRuntimeOperationsTest.php</file>
+            <file>tests/Unit/Services/Agents/AgentRuntimeWorkerCliTest.php</file>
             <file>tests/Unit/Services/Agents/PureSnapshotTest.php</file>
             <file>tests/Unit/Services/Agents/CriadorAgentTest.php</file>
             <file>tests/Unit/Services/Agents/LegacyAgentAdaptersTest.php</file>

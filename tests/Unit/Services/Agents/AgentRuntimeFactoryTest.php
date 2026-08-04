@@ -38,6 +38,41 @@ final class AgentRuntimeFactoryTest extends TestCase
         }
     }
 
+    public function testRosterMonitorExcluiAgentesSobDemanda(): void
+    {
+        $factory = new AgentRuntimeFactory(new AgentRuntimeReadGatewayFake());
+
+        self::assertSame(
+            ['sentinela', 'coletor', 'financeiro', 'otimizador'],
+            array_map(static fn ($agent): string => $agent->name(), $factory->createRoster('monitor'))
+        );
+    }
+
+    /** @dataProvider explicitRuntimeRosters */
+    public function testRostersExplicitosPossuemSomentePapeisSolicitados(string $mode, array $expected): void
+    {
+        $factory = new AgentRuntimeFactory(new AgentRuntimeReadGatewayFake());
+
+        self::assertSame(
+            $expected,
+            array_map(static fn ($agent): string => $agent->name(), $factory->createRoster($mode))
+        );
+    }
+
+    public function explicitRuntimeRosters(): iterable
+    {
+        yield 'creator' => ['creator', ['criador']];
+        yield 'qa' => ['qa', ['qa']];
+        yield 'all' => ['all', ['sentinela', 'coletor', 'financeiro', 'otimizador', 'criador', 'qa']];
+    }
+
+    public function testRosterInvalidoFalhaFechado(): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+
+        (new AgentRuntimeFactory(new AgentRuntimeReadGatewayFake()))->createRoster('unknown');
+    }
+
     public function testFactoryAceitaNoMaximoGatewayEstreito(): void
     {
         $constructor = (new ReflectionClass(AgentRuntimeFactory::class))->getConstructor();

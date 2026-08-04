@@ -17,6 +17,7 @@ final class AgentRuntimeFactory
 {
     private const ALLOWED_OPTIONS = ['environment', 'creator_request'];
     private const ENVIRONMENTS = ['local', 'staging', 'production'];
+    private const RUNTIME_MODES = ['monitor', 'creator', 'qa', 'all'];
     private const RISK_KEYS = [
         'reputacao', 'reclamacoes', 'atrasos', 'cancelamentos', 'moderacao',
         'catalogo', 'chargeback', 'oauth', 'rate_limit', 'nf_pendente',
@@ -106,21 +107,29 @@ final class AgentRuntimeFactory
     }
 
     /** @return list<AgentInterface> */
-    public function createRoster(): array
+    public function createRoster(string $mode = 'all'): array
     {
-        return [
-            new SentinelaAgent(),
-            new CollectorAgent(),
-            new FinanceiroAgent(),
-            new OtimizadorAgent(),
-            new CriadorAgent(),
-            new QaAgent(),
-        ];
+        if (!in_array($mode, self::RUNTIME_MODES, true)) {
+            throw new InvalidArgumentException('invalid runtime mode');
+        }
+
+        return match ($mode) {
+            'monitor' => [
+                new SentinelaAgent(), new CollectorAgent(),
+                new FinanceiroAgent(), new OtimizadorAgent(),
+            ],
+            'creator' => [new CriadorAgent()],
+            'qa' => [new QaAgent()],
+            'all' => [
+                new SentinelaAgent(), new CollectorAgent(), new FinanceiroAgent(),
+                new OtimizadorAgent(), new CriadorAgent(), new QaAgent(),
+            ],
+        };
     }
 
-    public function createOrchestrator(): OrchestratorAgent
+    public function createOrchestrator(string $mode = 'all'): OrchestratorAgent
     {
-        return new OrchestratorAgent($this->createRoster(), new AgentPolicy());
+        return new OrchestratorAgent($this->createRoster($mode), new AgentPolicy());
     }
 
     /** @param array<string, mixed> $options */

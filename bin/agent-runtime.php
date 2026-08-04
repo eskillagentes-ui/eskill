@@ -6,7 +6,7 @@ declare(strict_types=1);
 use App\Services\Agents\AgentResult;
 use App\Services\Agents\AgentRuntimeFactory;
 
-const AGENT_RUNTIME_USAGE = 'usage: php bin/agent-runtime.php --account-id=ID --correlation=ID --environment=local|staging|production [--creator=MLB123]';
+const AGENT_RUNTIME_USAGE = 'usage: php bin/agent-runtime.php --account-id=ID --correlation=ID --environment=local|staging|production [--mode=monitor|creator|qa|all] [--creator=MLB123] (default: monitor)';
 
 /** @return never */
 function agentRuntimeInvalidArguments(): void
@@ -26,7 +26,7 @@ function agentRuntimeParseArguments(array $arguments): array
         }
         if (!is_string($argument)
             || preg_match('/^--([a-z-]+)=(.*)$/D', $argument, $matches) !== 1
-            || !in_array($matches[1], ['account-id', 'correlation', 'environment', 'creator'], true)
+            || !in_array($matches[1], ['account-id', 'correlation', 'environment', 'mode', 'creator'], true)
             || array_key_exists($matches[1], $options)
         ) {
             agentRuntimeInvalidArguments();
@@ -48,8 +48,11 @@ function agentRuntimeParseArguments(array $arguments): array
         || (string) (int) $options['account-id'] !== $options['account-id']
         || preg_match('/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/D', $options['correlation']) !== 1
         || !in_array($options['environment'], ['local', 'staging', 'production'], true)
+        || (isset($options['mode']) && !in_array($options['mode'], ['monitor', 'creator', 'qa', 'all'], true))
         || (isset($options['creator'])
             && preg_match('/^MLB[1-9][0-9]*$/D', $options['creator']) !== 1)
+        || (($options['mode'] ?? 'monitor') === 'creator' && !isset($options['creator']))
+        || (isset($options['creator']) && !in_array(($options['mode'] ?? 'monitor'), ['creator', 'all'], true))
     ) {
         agentRuntimeInvalidArguments();
     }
@@ -85,7 +88,7 @@ try {
         $options['correlation'],
         $contextOptions
     );
-    $aggregate = $factory->createOrchestrator()->run($context);
+    $aggregate = $factory->createOrchestrator($options['mode'] ?? 'monitor')->run($context);
 
     foreach ($aggregate->data()['results'] as $agentResult) {
         $line = json_encode(agentRuntimeSummary($agentResult), JSON_UNESCAPED_SLASHES);

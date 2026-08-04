@@ -40,6 +40,16 @@ final class AgentRuntimeCliTest extends TestCase
         }
     }
 
+    public function testHelpDocumentaModoMonitorComoDefault(): void
+    {
+        $command = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($this->script) . ' --help';
+        exec($command . ' 2>&1', $lines, $exitCode);
+
+        self::assertSame(0, $exitCode);
+        self::assertStringContainsString('--mode=monitor|creator|qa|all', implode("\n", $lines));
+        self::assertStringContainsString('default: monitor', implode("\n", $lines));
+    }
+
     /** @dataProvider invalidArguments */
     public function testInputInvalidoFalhaAntesDeQualquerAcessoExterno(array $arguments): void
     {
@@ -71,6 +81,9 @@ final class AgentRuntimeCliTest extends TestCase
         ]];
         yield 'argumento desconhecido' => [[
             '--account-id=10', '--correlation=corr-1', '--environment=local', '--write=true',
+        ]];
+        yield 'modo desconhecido' => [[
+            '--account-id=10', '--correlation=corr-1', '--environment=local', '--mode=unknown',
         ]];
     }
 }
