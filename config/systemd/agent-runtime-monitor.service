@@ -2,8 +2,7 @@
 Description=Eskill read-only agent monitor runtime
 After=network-online.target mysql.service
 Wants=network-online.target
-StartLimitIntervalSec=300
-StartLimitBurst=5
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
@@ -12,7 +11,7 @@ Group=eskill
 WorkingDirectory=/home/eskill/htdocs/eskill.com.br
 ExecStart=/usr/bin/php /home/eskill/htdocs/eskill.com.br/bin/agent-runtime-worker.php --loop --interval=300 --environment=production --max-attempts=2
 Restart=always
-RestartSec=10
+RestartSec=30
 KillSignal=SIGTERM
 TimeoutStopSec=20
 UMask=0027

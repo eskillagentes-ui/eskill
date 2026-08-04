@@ -75,7 +75,8 @@ final class AgentRuntimeWorkerCliTest extends TestCase
         self::assertIsString($source);
         foreach ([
             '--loop', '--interval=300', '--environment=production', '--max-attempts=2',
-            'User=eskill', 'Group=eskill', 'Restart=always', 'RestartSec=10',
+            'User=eskill', 'Group=eskill', 'Restart=always', 'RestartSec=30',
+            'StartLimitIntervalSec=0',
             'NoNewPrivileges=true', 'PrivateTmp=true', 'ProtectSystem=strict',
             'ReadWritePaths=/home/eskill/htdocs/eskill.com.br/storage',
             'StandardOutput=journal', 'WantedBy=multi-user.target',
