@@ -4,8 +4,6 @@ declare(strict_types=1);
 
 namespace App\Services\Agents;
 
-use App\Services\Sentinela\Sentinela;
-
 /** Transforma o snapshot read-only do Sentinela. */
 final class SentinelaAgent extends LegacyReadOnlyAgentAdapter
 {
@@ -20,6 +18,12 @@ final class SentinelaAgent extends LegacyReadOnlyAgentAdapter
 
     /** @var list<string> */
     private const RISK_STATUSES = ['verde', 'amarelo', 'vermelho', 'nd'];
+
+    /** @var list<string> */
+    private const RISK_KEYS = [
+        'reputacao', 'reclamacoes', 'atrasos', 'cancelamentos', 'moderacao',
+        'catalogo', 'chargeback', 'oauth', 'rate_limit', 'nf_pendente', 'queda_vendas',
+    ];
 
     public function name(): string
     {
@@ -49,8 +53,9 @@ final class SentinelaAgent extends LegacyReadOnlyAgentAdapter
             || !$this->isRiskList($payload['risks'])
             || !array_key_exists('monitored', $payload)
             || !is_int($payload['monitored'])
-            || $payload['monitored'] <= 0
-            || !$this->hasCoherentRiskGrid($payload['semaforo'], $payload['risks'])
+            || $payload['monitored'] < 1
+            || $payload['monitored'] > 10
+            || !$this->hasCoherentRiskGrid($payload['semaforo'], $payload['risks'], $payload['monitored'])
         ) {
             return $this->failed('invalid_legacy_payload');
         }
@@ -66,31 +71,49 @@ final class SentinelaAgent extends LegacyReadOnlyAgentAdapter
     }
 
     /** @param list<array<string, mixed>> $risks */
-    private function hasCoherentRiskGrid(string $semaforo, array $risks): bool
+    private function hasCoherentRiskGrid(string $semaforo, array $risks, int $monitored): bool
     {
-        if ($risks === []) {
-            return $semaforo === 'verde';
-        }
-
         $seen = [];
-        $statuses = [];
+        $collected = 0;
         foreach ($risks as $risk) {
             $key = $risk['risk_key'];
             if (isset($seen[$key])) {
                 return false;
             }
             $seen[$key] = true;
-            $statuses[] = $risk['status'];
+            if ($key !== 'nf_pendente'
+                && ($risk['status'] !== 'nd' || $risk['collected_at'] !== null)
+            ) {
+                $collected++;
+            }
         }
-        if (count(array_unique($statuses)) === 1 && $statuses[0] === 'nd') {
-            return false;
+        $expectedKeys = self::RISK_KEYS;
+        $actualKeys = array_keys($seen);
+        sort($expectedKeys);
+        sort($actualKeys);
+
+        return $actualKeys === $expectedKeys
+            && $monitored === $collected
+            && $semaforo === $this->evaluateSemaforo($risks);
+    }
+
+    /** @param list<array<string, mixed>> $risks */
+    private function evaluateSemaforo(array $risks): string
+    {
+        $worst = 'verde';
+        foreach ($risks as $risk) {
+            if ($risk['status'] === 'nd') {
+                continue;
+            }
+            $pct = $risk['pct_of_limit'];
+            if ($risk['status'] === 'vermelho' || ($pct !== null && (float) $pct > 80.0)) {
+                return 'vermelho';
+            }
+            if ($risk['status'] === 'amarelo' || ($pct !== null && (float) $pct >= 50.0)) {
+                $worst = 'amarelo';
+            }
         }
-
-        $expected = in_array('vermelho', $statuses, true)
-            ? 'vermelho'
-            : (in_array('amarelo', $statuses, true) ? 'amarelo' : 'verde');
-
-        return $semaforo === $expected;
+        return $worst;
     }
 
     /** @param array<array-key, mixed> $value */
@@ -121,7 +144,7 @@ final class SentinelaAgent extends LegacyReadOnlyAgentAdapter
             return false;
         }
         if (!is_string($risk['risk_key'])
-            || !in_array($risk['risk_key'], Sentinela::RISK_KEYS, true)
+            || !in_array($risk['risk_key'], self::RISK_KEYS, true)
         ) {
             return false;
         }
@@ -137,7 +160,11 @@ final class SentinelaAgent extends LegacyReadOnlyAgentAdapter
         if ($risk['limit_num'] !== null && !is_int($risk['limit_num']) && !is_float($risk['limit_num'])) {
             return false;
         }
-        if ($risk['pct_of_limit'] !== null && !is_int($risk['pct_of_limit']) && !is_float($risk['pct_of_limit'])) {
+        if ($risk['pct_of_limit'] !== null
+            && ((!is_int($risk['pct_of_limit']) && !is_float($risk['pct_of_limit']))
+                || !is_finite((float) $risk['pct_of_limit'])
+                || (float) $risk['pct_of_limit'] < 0)
+        ) {
             return false;
         }
         if (!is_string($risk['status']) || !in_array($risk['status'], self::RISK_STATUSES, true)) {

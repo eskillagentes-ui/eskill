@@ -128,6 +128,36 @@ final class PureSnapshotTest extends TestCase
         PureSnapshot::normalize(['AuditNeverLoadedProbe', 'run']);
     }
 
+    public function testRejeitaCallableLowercaseAmbiguoSemConsultarClasses(): void
+    {
+        $this->expectException(\InvalidArgumentException::class);
+        PureSnapshot::normalize(['datetime', 'createFromFormat']);
+    }
+
+    public function testDecisaoDeArrayCallableNaoConsultaNemAutocarregaClasses(): void
+    {
+        $path = __DIR__ . '/../../../../app/Services/Agents/PureSnapshot.php';
+        $source = file_get_contents($path);
+        self::assertIsString($source);
+        foreach (['class_exists(', 'interface_exists(', 'trait_exists(', 'enum_exists('] as $lookup) {
+            self::assertStringNotContainsString($lookup, $source);
+        }
+
+        $autoloadCalls = 0;
+        $loader = static function (string $class) use (&$autoloadCalls): void {
+            $autoloadCalls++;
+        };
+        spl_autoload_register($loader);
+        try {
+            PureSnapshot::normalize(['lowercaseneverloaded', 'run']);
+            self::fail('par ambíguo deveria ser rejeitado');
+        } catch (\InvalidArgumentException) {
+            self::assertSame(0, $autoloadCalls);
+        } finally {
+            spl_autoload_unregister($loader);
+        }
+    }
+
     public function testAgentResultRejeitaClosureEmData(): void
     {
         $this->expectException(\InvalidArgumentException::class);

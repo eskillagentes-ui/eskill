@@ -176,6 +176,111 @@ final class AgentRuntimeFactoryTest extends TestCase
         }
     }
 
+    public function testCustoDecimalStringComProvenanceExataEhAceito(): void
+    {
+        $gateway = new AgentRuntimeReadGatewayFake();
+        $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-cost-decimal');
+        $item = $context->metadata()['optimizer_cost_snapshot']['payload']['items']['MLB1'];
+        self::assertTrue($item['validated']);
+        self::assertFalse($item['suspicious']);
+        self::assertSame(10.0, $item['cost']);
+    }
+
+    /** @dataProvider invalidCostProvenance */
+    public function testCustoComProvenanceOuDecimalInvalidoFalhaFechado(array $row): void
+    {
+        $gateway = new AgentRuntimeReadGatewayFake();
+        $gateway->skuCost = $row;
+        $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-cost-invalid');
+        $item = $context->metadata()['optimizer_cost_snapshot']['payload']['items']['MLB1'];
+        self::assertFalse($item['validated']);
+        self::assertTrue($item['suspicious']);
+        self::assertSame(0.0, $item['cost']);
+    }
+
+    public function invalidCostProvenance(): iterable
+    {
+        yield 'outra conta' => [['account_id' => '11', 'mlb_id' => 'MLB1', 'custo_produto' => '10.00']];
+        yield 'outro MLB' => [['account_id' => '10', 'mlb_id' => 'MLB2', 'custo_produto' => '10.00']];
+        yield 'expoente' => [['account_id' => '10', 'mlb_id' => 'MLB1', 'custo_produto' => '1e2']];
+        yield 'decimal nao canonico' => [['account_id' => '10', 'mlb_id' => 'MLB1', 'custo_produto' => '01.00']];
+    }
+
+    /** @dataProvider invalidCreatorProvenance */
+    public function testFonteCriadorExigeProvenanceExataENaoDuplicada(array $row): void
+    {
+        $gateway = new AgentRuntimeReadGatewayFake();
+        $gateway->itemResult = $row;
+        $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-source-provenance', [
+            'creator_request' => ['source_mlb_id' => 'MLB404'],
+        ]);
+        $payload = $context->metadata()['creator_source_snapshot']['payload'];
+        self::assertFalse($payload['valid']);
+        self::assertTrue($payload['duplicate']);
+    }
+
+    public function invalidCreatorProvenance(): iterable
+    {
+        $base = [
+            'account_id' => 10, 'mlb_id' => 'MLB404', 'seller_id' => '123456',
+            'title' => 'Fonte real', 'duplicate' => false,
+        ];
+        yield 'outra conta' => [array_replace($base, ['account_id' => 11])];
+        yield 'outro MLB' => [array_replace($base, ['mlb_id' => 'MLB405'])];
+        yield 'seller invalido' => [array_replace($base, ['seller_id' => 'seller-123'])];
+        yield 'duplicado' => [array_replace($base, ['duplicate' => true])];
+    }
+
+    public function testSentinelaRejeitaSubsetPctIncoerenteEMonitoredDivergente(): void
+    {
+        $cases = [];
+        $gateway = new AgentRuntimeReadGatewayFake();
+        $subset = $gateway->sentinela;
+        array_pop($subset['risks']);
+        $subset['monitored'] = 9;
+        $cases[] = $subset;
+
+        $pct = $gateway->sentinela;
+        $pct['risks'][0]['pct_of_limit'] = 81.0;
+        $cases[] = $pct;
+
+        $monitored = $gateway->sentinela;
+        $monitored['monitored'] = 9;
+        $cases[] = $monitored;
+
+        foreach ($cases as $index => $dashboard) {
+            $probe = new AgentRuntimeReadGatewayFake();
+            $probe->sentinela = $dashboard;
+            $context = (new AgentRuntimeFactory($probe))->buildContext(10, 'corr-sentinela-' . $index);
+            self::assertFalse($context->metadata()['sentinela_snapshot']['payload']['ok']);
+        }
+    }
+
+    public function testAdsRejeitaSkuVazioMalformadoSemIgnorarLinha(): void
+    {
+        $gateway = new AgentRuntimeReadGatewayFake();
+        $gateway->ads['skus'][] = [];
+        $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-ads-malformed');
+        self::assertFalse($context->metadata()['collector_snapshot']['payload']['ok']);
+        self::assertArrayNotHasKey('optimizer_observation_snapshot', $context->metadata());
+    }
+
+    public function testFinanceiroRejeitaMetricsDivergentesDoMesAtual(): void
+    {
+        $gateway = new AgentRuntimeReadGatewayFake();
+        $gateway->financialMetrics['gross_revenue'] = 0.01;
+        $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-fin-mismatch');
+        self::assertFalse($context->metadata()['financeiro_snapshot']['payload']['ok']);
+    }
+
+    public function testFinanceiroRejeitaDataInvalidaMesmoQuandoStrtotimeAceita(): void
+    {
+        $gateway = new AgentRuntimeReadGatewayFake();
+        $gateway->financialSummary['today']['period']['start'] = '2026-02-30';
+        $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-fin-date');
+        self::assertFalse($context->metadata()['financeiro_snapshot']['payload']['ok']);
+    }
+
     public function testFonteCriadorIndisponivelPermaneceBloqueada(): void
     {
         $gateway = new AgentRuntimeReadGatewayFake();
@@ -189,6 +294,34 @@ final class AgentRuntimeFactoryTest extends TestCase
         self::assertFalse($context->mlWriteAutomation());
     }
 
+    public function testFonteCriadorRejeitaTituloCallableAntesDoEnvelope(): void
+    {
+        $gateway = new AgentRuntimeReadGatewayFake();
+        $gateway->itemResult = [
+            'account_id' => 10,
+            'mlb_id' => 'MLB404',
+            'seller_id' => '123456',
+            'title' => 'strlen',
+            'duplicate' => false,
+        ];
+        $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-title-callable', [
+            'creator_request' => ['source_mlb_id' => 'MLB404'],
+        ]);
+
+        self::assertFalse($context->metadata()['creator_source_snapshot']['payload']['valid']);
+    }
+
+    public function testSentinelaRejeitaMetaComCallableArraySemQuebrarBuildContext(): void
+    {
+        $gateway = new AgentRuntimeReadGatewayFake();
+        $gateway->sentinela['risks'][0]['meta'] = [
+            'capability' => ['datetime', 'createFromFormat'],
+        ];
+        $context = (new AgentRuntimeFactory($gateway))->buildContext(10, 'corr-meta-callable');
+
+        self::assertFalse($context->metadata()['sentinela_snapshot']['payload']['ok']);
+    }
+
     public function testOrchestratorDaFactoryExecutaSemEstado(): void
     {
         $this->setQaPassed();
@@ -199,7 +332,7 @@ final class AgentRuntimeFactoryTest extends TestCase
         $result = $factory->createOrchestrator()->run($context);
         self::assertSame(
             ['sentinela', 'coletor', 'financeiro', 'otimizador', 'criador', 'qa'],
-            $result->data()['order']
+            array_map(static fn ($item): string => $item->agent(), $result->data()['results'])
         );
         self::assertSame('success', $result->status());
         self::assertFalse($result->stateChanged());

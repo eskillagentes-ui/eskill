@@ -35,10 +35,10 @@ final class AgentRosterIntegrationTest extends TestCase
                 'avg_margin' => 0.0,
             ],
         ];
-        $risk = $this->validRisk('oauth', 'verde');
+        $risks = $this->validRiskGrid();
         $context = $this->context([
             'sentinela_snapshot' => $this->envelope([
-                'ok' => true, 'semaforo' => 'verde', 'risks' => [$risk], 'monitored' => 1,
+                'ok' => true, 'semaforo' => 'verde', 'risks' => $risks, 'monitored' => 10,
             ]),
             'collector_snapshot' => $this->envelope([
                 'ok' => true, 'available' => true, 'cached' => true, 'stale' => false, 'api_calls' => 0,
@@ -71,7 +71,7 @@ final class AgentRosterIntegrationTest extends TestCase
         $result = $orchestrator->run($context);
         $this->assertSame(
             ['sentinela', 'coletor', 'financeiro', 'otimizador', 'criador', 'qa'],
-            $result->data()['order']
+            array_map(static fn ($item): string => $item->agent(), $result->data()['results'])
         );
         $this->assertCount(6, $result->data()['results']);
         foreach ($result->data()['results'] as $agentResult) {
@@ -89,8 +89,8 @@ final class AgentRosterIntegrationTest extends TestCase
             'sentinela_snapshot' => $this->envelope([
                 'ok' => true,
                 'semaforo' => 'verde',
-                'risks' => [$this->validRisk('oauth', 'verde')],
-                'monitored' => 1,
+                'risks' => $this->validRiskGrid(),
+                'monitored' => 10,
             ]),
             // collector ausente → failed
             'financeiro_snapshot' => $this->envelope([
@@ -105,7 +105,7 @@ final class AgentRosterIntegrationTest extends TestCase
             new FinanceiroAgent(),
         ], new AgentPolicy());
         $result = $orchestrator->run($context);
-        $this->assertSame(['sentinela', 'coletor', 'financeiro'], $result->data()['order']);
+        $this->assertSame(['sentinela', 'coletor', 'financeiro'], array_map(static fn ($item): string => $item->agent(), $result->data()['results']));
         $this->assertSame('success', $result->data()['results'][0]->status());
         $this->assertSame('failed', $result->data()['results'][1]->status());
         $this->assertSame('success', $result->data()['results'][2]->status());

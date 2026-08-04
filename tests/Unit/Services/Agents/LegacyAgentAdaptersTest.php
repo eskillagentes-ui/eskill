@@ -60,10 +60,11 @@ final class LegacyAgentAdaptersTest extends TestCase
         ];
         $metrics = \App\Services\Agents\AgentRuntimeFactory::emptyMetrics();
 
+        $risks = $this->validRiskGrid('oauth', 'amarelo');
         yield 'sentinela' => [SentinelaAgent::class, 'sentinela_snapshot', [
-            'ok' => true, 'semaforo' => 'amarelo', 'risks' => [$risk], 'monitored' => 10,
+            'ok' => true, 'semaforo' => 'amarelo', 'risks' => $risks, 'monitored' => 10,
         ], [
-            'semaforo' => 'amarelo', 'risks' => [$risk], 'monitored' => 10,
+            'semaforo' => 'amarelo', 'risks' => $risks, 'monitored' => 10,
         ]];
         yield 'collector' => [CollectorAgent::class, 'collector_snapshot', [
             'ok' => true, 'available' => true, 'cached' => false, 'stale' => false, 'api_calls' => 4,
@@ -218,17 +219,33 @@ final class LegacyAgentAdaptersTest extends TestCase
 
     public function invalidSentinelaSemantics(): iterable
     {
-        $green = $this->validRisk('oauth', 'verde');
-        $yellow = $this->validRisk('rate_limit', 'amarelo');
-        $red = $this->validRisk('chargeback', 'vermelho');
-        $nd = $this->validRisk('catalogo', 'nd');
-        yield 'monitored zero' => [['ok' => true, 'semaforo' => 'verde', 'risks' => [], 'monitored' => 0]];
-        yield 'risk key duplicate' => [['ok' => true, 'semaforo' => 'verde', 'risks' => [$green, $green], 'monitored' => 2]];
-        yield 'grade toda nd' => [['ok' => true, 'semaforo' => 'verde', 'risks' => [$nd], 'monitored' => 1]];
-        yield 'vermelho exige semaforo vermelho' => [['ok' => true, 'semaforo' => 'amarelo', 'risks' => [$green, $red], 'monitored' => 2]];
-        yield 'amarelo exige semaforo amarelo' => [['ok' => true, 'semaforo' => 'verde', 'risks' => [$green, $yellow], 'monitored' => 2]];
-        yield 'somente verdes exige semaforo verde' => [['ok' => true, 'semaforo' => 'amarelo', 'risks' => [$green], 'monitored' => 1]];
-        yield 'grade vazia so pode verde' => [['ok' => true, 'semaforo' => 'amarelo', 'risks' => [], 'monitored' => 1]];
+        $green = $this->validRiskGrid();
+
+        $duplicate = $green;
+        $duplicate[10] = $duplicate[0];
+        yield 'risk key duplicate' => [[
+            'ok' => true, 'semaforo' => 'verde', 'risks' => $duplicate, 'monitored' => 10,
+        ]];
+
+        yield 'grade incompleta' => [[
+            'ok' => true, 'semaforo' => 'verde', 'risks' => array_slice($green, 0, 10), 'monitored' => 9,
+        ]];
+
+        $pctRed = $green;
+        $pctRed[0]['pct_of_limit'] = 81.0;
+        yield 'pct vermelho domina status verde' => [[
+            'ok' => true, 'semaforo' => 'verde', 'risks' => $pctRed, 'monitored' => 10,
+        ]];
+
+        $pctYellow = $green;
+        $pctYellow[0]['pct_of_limit'] = 50.0;
+        yield 'pct amarelo domina status verde' => [[
+            'ok' => true, 'semaforo' => 'verde', 'risks' => $pctYellow, 'monitored' => 10,
+        ]];
+
+        yield 'monitored nao reconcilia grade' => [[
+            'ok' => true, 'semaforo' => 'verde', 'risks' => $green, 'monitored' => 9,
+        ]];
     }
 
 }

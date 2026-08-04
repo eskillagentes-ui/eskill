@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services\Agents;
 
+use DateTimeImmutable;
+use DateTimeZone;
 use InvalidArgumentException;
 use Throwable;
 
@@ -33,6 +35,11 @@ final class AgentRuntimeFactory
     private const METRICS_KEYS = [
         'total_orders', 'gross_revenue', 'net_profit', 'avg_ticket',
         'avg_margin', 'cost_rate', 'roi',
+    ];
+    private const ADS_SKU_FIELDS = [
+        'mlb_id', 'gasto', 'impressoes', 'cliques', 'cpc', 'vendas_atribuidas',
+        'acos', 'roas_real', 'roas_objetivo', 'roas_breakeven', 'roas_escala',
+        'margem_liquida_pct', 'has_custo', 'health', 'semaforo',
     ];
 
     private AgentRuntimeReadGatewayInterface $gateway;
@@ -212,11 +219,15 @@ final class AgentRuntimeFactory
         ];
 
         try {
+            $period = new DateTimeImmutable('now', new DateTimeZone(date_default_timezone_get()));
+            $start = $period->format('Y-m-01');
+            $end = $period->format('Y-m-t 23:59:59');
             $summary = $this->gateway->financialDashboardSummary($accountId);
-            $start = date('Y-m-01');
-            $end = date('Y-m-t 23:59:59');
             $metrics = $this->gateway->financialMetrics($accountId, $start, $end);
-            if ($this->isValidFinancialSummary($summary) && $this->isValidMetrics($metrics)) {
+            if ($this->isValidFinancialSummary($summary, $start, $end)
+                && $this->isValidMetrics($metrics)
+                && $this->metricsMatchCurrentMonth($metrics, $summary['current_month'])
+            ) {
                 $payload = [
                     'ok' => true,
                     'resumo' => [
@@ -241,12 +252,25 @@ final class AgentRuntimeFactory
         $payload = ['valid' => false, 'duplicate' => true, 'item' => ['id' => $mlbId]];
         try {
             $source = $this->gateway->item($accountId, $mlbId);
-            if (!isset($source['error']) && ($source['id'] ?? null) === $mlbId) {
-                $item = ['id' => $mlbId];
-                if (isset($source['title']) && is_string($source['title']) && trim($source['title']) !== '') {
-                    $item['title'] = trim($source['title']);
+            if ($this->hasExactKeys($source, [
+                'account_id', 'mlb_id', 'seller_id', 'title', 'duplicate',
+            ])
+                && $this->matchesAccountId($source['account_id'], $accountId)
+                && $source['mlb_id'] === $mlbId
+                && self::canonicalPositiveDigits($source['seller_id']) !== null
+                && is_string($source['title'])
+                && trim($source['title']) !== ''
+                && $source['duplicate'] === false
+            ) {
+                $title = PureSnapshot::normalize(trim($source['title']));
+                if (!is_string($title)) {
+                    throw new InvalidArgumentException('invalid creator title snapshot');
                 }
-                $payload = ['valid' => true, 'duplicate' => false, 'item' => $item];
+                $payload = [
+                    'valid' => true,
+                    'duplicate' => false,
+                    'item' => ['id' => $mlbId, 'title' => $title],
+                ];
             }
         } catch (Throwable $error) {
             $this->logReadFailure('creator-source', $accountId, $error);
@@ -296,7 +320,10 @@ final class AgentRuntimeFactory
             try {
                 $row = $this->gateway->skuCostByMlb($accountId, $mlbId);
                 $rawCost = is_array($row) ? ($row['custo_produto'] ?? null) : null;
-                $cost = $this->isFiniteNumber($rawCost) && (float) $rawCost > 0
+                $cost = is_array($row)
+                    && $this->matchesAccountId($row['account_id'] ?? null, $accountId)
+                    && ($row['mlb_id'] ?? null) === $mlbId
+                    && $this->isPositiveCanonicalDecimal($rawCost)
                     ? (float) $rawCost
                     : 0.0;
                 $items[$mlbId] = [
@@ -347,23 +374,32 @@ final class AgentRuntimeFactory
 
         $risks = [];
         $keys = [];
-        $statuses = [];
         foreach ($dashboard['risks'] as $risk) {
             $normalized = $this->normalizeRisk($risk);
             if ($normalized === null || isset($keys[$normalized['risk_key']])) {
                 return null;
             }
             $keys[$normalized['risk_key']] = true;
-            $statuses[] = $normalized['status'];
             $risks[] = $normalized;
         }
-        if ($risks !== [] && count(array_unique($statuses)) === 1 && $statuses[0] === 'nd') {
+        $expectedKeys = self::RISK_KEYS;
+        $actualKeys = array_keys($keys);
+        sort($expectedKeys);
+        sort($actualKeys);
+        if ($actualKeys !== $expectedKeys) {
             return null;
         }
-        $expected = in_array('vermelho', $statuses, true)
-            ? 'vermelho'
-            : (in_array('amarelo', $statuses, true) ? 'amarelo' : 'verde');
-        if ($dashboard['semaforo'] !== $expected) {
+        $monitored = 0;
+        foreach ($risks as $risk) {
+            if ($risk['risk_key'] !== 'nf_pendente'
+                && ($risk['status'] !== 'nd' || $risk['collected_at'] !== null)
+            ) {
+                $monitored++;
+            }
+        }
+        if ($dashboard['monitored'] !== $monitored
+            || $dashboard['semaforo'] !== $this->evaluateSemaforo($risks)
+        ) {
             return null;
         }
 
@@ -412,6 +448,13 @@ final class AgentRuntimeFactory
                 $normalized[$field] = (float) $normalized[$field];
             }
         }
+        if (is_array($normalized['meta'])) {
+            try {
+                $normalized['meta'] = PureSnapshot::normalizeArray($normalized['meta']);
+            } catch (InvalidArgumentException) {
+                return null;
+            }
+        }
         return $normalized;
     }
 
@@ -441,16 +484,98 @@ final class AgentRuntimeFactory
                 $active++;
             }
         }
+        $seenMlbs = [];
         foreach ($dashboard['skus'] as $sku) {
-            if (!is_array($sku)) {
+            if (!$this->isValidAdsSku($sku)) {
                 return false;
             }
+            if (isset($seenMlbs[$sku['mlb_id']])) {
+                return false;
+            }
+            $seenMlbs[$sku['mlb_id']] = true;
         }
         return $active === $dashboard['active_campaigns'];
     }
 
+    private function isValidAdsSku(mixed $sku): bool
+    {
+        if (!is_array($sku) || !$this->hasExactKeys($sku, self::ADS_SKU_FIELDS)
+            || !is_string($sku['mlb_id'])
+            || preg_match('/^MLB[1-9][0-9]*$/D', $sku['mlb_id']) !== 1
+            || !$this->isFiniteNumber($sku['gasto']) || (float) $sku['gasto'] < 0
+            || !is_int($sku['impressoes']) || $sku['impressoes'] < 0
+            || !is_int($sku['cliques']) || $sku['cliques'] < 0 || $sku['cliques'] > $sku['impressoes']
+            || !is_int($sku['vendas_atribuidas']) || $sku['vendas_atribuidas'] < 0
+            || !is_bool($sku['has_custo'])
+            || !is_string($sku['semaforo'])
+            || !in_array($sku['semaforo'], ['verde', 'amarelo', 'vermelho', 'nd'], true)
+        ) {
+            return false;
+        }
+        foreach (['cpc', 'acos', 'roas_real', 'roas_objetivo', 'roas_breakeven', 'roas_escala', 'margem_liquida_pct', 'health'] as $field) {
+            if ($sku[$field] !== null && !$this->isFiniteNumber($sku[$field])) {
+                return false;
+            }
+        }
+        foreach (['cpc', 'acos', 'roas_real'] as $field) {
+            if ($sku[$field] !== null && (float) $sku[$field] < 0) {
+                return false;
+            }
+        }
+        foreach (['roas_objetivo', 'roas_breakeven', 'roas_escala'] as $field) {
+            if ($sku[$field] !== null && (float) $sku[$field] <= 0) {
+                return false;
+            }
+        }
+        if (($sku['health'] !== null && ((float) $sku['health'] < 0 || (float) $sku['health'] > 100))
+            || ($sku['margem_liquida_pct'] !== null && (float) $sku['margem_liquida_pct'] > 100)
+            || ((float) $sku['gasto'] === 0.0 && $sku['roas_real'] !== null)
+        ) {
+            return false;
+        }
+
+        $trio = [$sku['roas_breakeven'], $sku['roas_objetivo'], $sku['roas_escala']];
+        if ($sku['has_custo'] === false
+            && ($sku['margem_liquida_pct'] !== null || $trio !== [null, null, null])
+        ) {
+            return false;
+        }
+        if ($sku['margem_liquida_pct'] === null || (float) $sku['margem_liquida_pct'] <= 0) {
+            if ($trio !== [null, null, null]) {
+                return false;
+            }
+        } elseif (in_array(null, $trio, true)
+            || !$this->approximatelyEqual((float) $sku['roas_breakeven'], 100.0 / (float) $sku['margem_liquida_pct'], 0.00011)
+            || !$this->approximatelyEqual((float) $sku['roas_objetivo'], (float) $sku['roas_breakeven'] * 1.5, 0.00011)
+            || !$this->approximatelyEqual((float) $sku['roas_escala'], (float) $sku['roas_breakeven'] * 2.0, 0.00011)
+        ) {
+            return false;
+        }
+
+        return $sku['semaforo'] === $this->adsSemaforo(
+            $sku['roas_real'] === null ? null : (float) $sku['roas_real'],
+            $sku['roas_objetivo'] === null ? null : (float) $sku['roas_objetivo'],
+            $sku['roas_breakeven'] === null ? null : (float) $sku['roas_breakeven']
+        );
+    }
+
+    private function adsSemaforo(?float $real, ?float $objective, ?float $breakeven): string
+    {
+        if ($real === null) {
+            return 'nd';
+        }
+        if ($objective !== null && $real >= $objective) {
+            return 'verde';
+        }
+        $floor = $breakeven ?? ($objective !== null ? $objective / 1.5 : null);
+        if ($floor !== null && $real >= $floor) {
+            return 'amarelo';
+        }
+        return $floor !== null ? 'vermelho' : 'nd';
+    }
+
     /** @param array<string, mixed> $summary */
-    private function isValidFinancialSummary(array $summary): bool
+    private function isValidFinancialSummary(array $summary, string $currentStart, string $currentEnd): bool
     {
         if (!$this->hasExactKeys($summary, ['today', 'current_month', 'previous_month', 'variations'])) {
             return false;
@@ -459,6 +584,11 @@ final class AgentRuntimeFactory
             if (!$this->isValidPnL($summary[$period])) {
                 return false;
             }
+        }
+        if ($summary['current_month']['period']['start'] !== $currentStart
+            || $summary['current_month']['period']['end'] !== $currentEnd
+        ) {
+            return false;
         }
         if (!is_array($summary['variations'])
             || !$this->hasExactKeys($summary['variations'], self::VARIATION_KEYS)
@@ -497,9 +627,50 @@ final class AgentRuntimeFactory
         ) {
             return false;
         }
-        $start = strtotime($pnl['period']['start']);
-        $end = strtotime($pnl['period']['end']);
-        return $start !== false && $end !== false && $start <= $end;
+        $start = $this->parseStrictDate($pnl['period']['start']);
+        $end = $this->parseStrictDate($pnl['period']['end']);
+        return $start !== null && $end !== null && $start <= $end;
+    }
+
+    private function parseStrictDate(string $value): ?DateTimeImmutable
+    {
+        $roundTrip = null;
+        if (preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/D', $value) === 1) {
+            $format = '!Y-m-d';
+            $roundTrip = 'Y-m-d';
+        } elseif (preg_match('/^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}$/D', $value) === 1) {
+            $format = '!Y-m-d H:i:s';
+            $roundTrip = 'Y-m-d H:i:s';
+        } else {
+            return null;
+        }
+        $date = DateTimeImmutable::createFromFormat(
+            $format,
+            $value,
+            new DateTimeZone(date_default_timezone_get())
+        );
+        $errors = DateTimeImmutable::getLastErrors();
+        if ($date === false
+            || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))
+            || $date->format($roundTrip) !== $value
+        ) {
+            return null;
+        }
+        return $date;
+    }
+
+    /** @param array<string, mixed> $metrics @param array<string, mixed> $currentMonth */
+    private function metricsMatchCurrentMonth(array $metrics, array $currentMonth): bool
+    {
+        if ($metrics['total_orders'] !== $currentMonth['total_orders']) {
+            return false;
+        }
+        foreach (['gross_revenue', 'net_profit', 'avg_margin'] as $field) {
+            if (!$this->approximatelyEqual((float) $metrics[$field], (float) $currentMonth[$field])) {
+                return false;
+            }
+        }
+        return true;
     }
 
     /** @param array<string, mixed> $metrics */
@@ -556,6 +727,59 @@ final class AgentRuntimeFactory
     private function isFiniteNumber(mixed $value): bool
     {
         return (is_int($value) || is_float($value)) && is_finite((float) $value);
+    }
+
+    private function isPositiveCanonicalDecimal(mixed $value): bool
+    {
+        if ($this->isFiniteNumber($value)) {
+            return (float) $value > 0;
+        }
+        return is_string($value)
+            && preg_match('/^(?:0|[1-9][0-9]*)(?:\.[0-9]+)?$/D', $value) === 1
+            && is_finite((float) $value)
+            && (float) $value > 0;
+    }
+
+    private function matchesAccountId(mixed $value, int $accountId): bool
+    {
+        return $value === $accountId
+            || (is_string($value)
+                && preg_match('/^[1-9][0-9]*$/D', $value) === 1
+                && $value === (string) $accountId);
+    }
+
+    private static function canonicalPositiveDigits(mixed $value): ?string
+    {
+        if (is_int($value)) {
+            return $value > 0 ? (string) $value : null;
+        }
+        return is_string($value) && preg_match('/^[1-9][0-9]*$/D', $value) === 1
+            ? $value
+            : null;
+    }
+
+    /** @param list<array<string, mixed>> $risks */
+    private function evaluateSemaforo(array $risks): string
+    {
+        $worst = 'verde';
+        foreach ($risks as $risk) {
+            if ($risk['status'] === 'nd') {
+                continue;
+            }
+            $pct = $risk['pct_of_limit'];
+            if ($risk['status'] === 'vermelho' || ($pct !== null && (float) $pct > 80.0)) {
+                return 'vermelho';
+            }
+            if ($risk['status'] === 'amarelo' || ($pct !== null && (float) $pct >= 50.0)) {
+                $worst = 'amarelo';
+            }
+        }
+        return $worst;
+    }
+
+    private function approximatelyEqual(float $left, float $right, float $epsilon = 0.000001): bool
+    {
+        return abs($left - $right) <= $epsilon * max(1.0, abs($left), abs($right));
     }
 
     /** @param array<array-key, mixed> $value */

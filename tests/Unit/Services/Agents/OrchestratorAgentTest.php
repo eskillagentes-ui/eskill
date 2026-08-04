@@ -45,7 +45,7 @@ class OrchestratorAgentTest extends TestCase
 
         $this->assertSame(['beta', 'alpha'], $order);
         $this->assertSame('success', $result->status());
-        $this->assertSame(['beta', 'alpha'], $result->data()['order']);
+        $this->assertArrayNotHasKey('order', $result->data());
         $this->assertCount(2, $result->data()['results']);
         $this->assertSame('beta', $result->data()['results'][0]->agent());
         $this->assertSame('alpha', $result->data()['results'][1]->agent());
@@ -102,7 +102,11 @@ class OrchestratorAgentTest extends TestCase
         $this->assertSame('agent_name_exception', $results[0]->reason());
         $this->assertStringNotContainsString('segredo', $results[0]->reason());
         $this->assertSame('success', $results[1]->status());
-        $this->assertSame(['unknown-agent-0', 'seguinte'], $result->data()['order']);
+        $this->assertSame(['unknown-agent-0', 'seguinte'], array_map(
+            static fn (AgentResult $item): string => $item->agent(),
+            $results
+        ));
+        $this->assertArrayNotHasKey('order', $result->data());
     }
 
     public function testRejeitaNameWhitespaceSemExecutarAgenteEContinua(): void

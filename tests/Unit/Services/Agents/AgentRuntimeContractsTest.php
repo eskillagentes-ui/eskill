@@ -122,7 +122,7 @@ class AgentRuntimeContractsTest extends TestCase
         $result = $orch->run(new AgentContext(10, 'local', 'corr-ord', false));
 
         $this->assertSame(['primeiro', 'segundo', 'terceiro'], $seen);
-        $this->assertSame(['primeiro', 'segundo', 'terceiro'], $result->data()['order']);
+        $this->assertSame(['primeiro', 'segundo', 'terceiro'], array_map(static fn ($item): string => $item->agent(), $result->data()['results']));
     }
 
     /**

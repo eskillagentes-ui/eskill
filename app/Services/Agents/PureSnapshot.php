@@ -111,16 +111,9 @@ final class PureSnapshot
 
     private static function isClassReference(string $value): bool
     {
-        if (!self::isClassName($value)) {
-            return false;
-        }
-        $normalized = ltrim($value, chr(92));
-        if (str_contains($normalized, chr(92))) {
-            return true;
-        }
-
-        // Decisão puramente sintática: não consulta nem autocarrega símbolos.
-        return preg_match('/[A-Z_\x80-\xff]/', $normalized) === 1;
+        // Nomes de classe PHP são case-insensitive. Sem schema ou consulta de
+        // símbolos, qualquer identificador simples neste par é ambíguo.
+        return self::isClassName($value);
     }
 
     private static function isClassName(string $value): bool

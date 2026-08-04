@@ -41,7 +41,6 @@ final class OrchestratorAgent implements AgentInterface
     public function run(AgentContext $context): AgentResult
     {
         $results = [];
-        $order = [];
         $emittedOps = [];
         $stateChanged = false;
         $hasBlocked = false;
@@ -55,13 +54,10 @@ final class OrchestratorAgent implements AgentInterface
                 }
             } catch (Throwable) {
                 $agentName = 'unknown-agent-' . $index;
-                $order[] = $agentName;
                 $results[] = AgentResult::failed($agentName, 'agent_name_exception');
                 $hasFailed = true;
                 continue;
             }
-
-            $order[] = $agentName;
 
             try {
                 $agentResult = $agent->run($context);
@@ -93,7 +89,6 @@ final class OrchestratorAgent implements AgentInterface
         $data = [
             'correlationId' => $context->correlationId(),
             'results' => $results,
-            'order' => $order,
             'mlWriteAutomation' => $context->mlWriteAutomation(),
         ];
 

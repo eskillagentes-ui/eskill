@@ -34,19 +34,44 @@ trait AgentSnapshotFixtures
     /** @return array<string, mixed> */
     protected function validRisk(string $key = 'oauth', string $status = 'amarelo'): array
     {
+        $pct = match ($status) {
+            'vermelho' => 81.0,
+            'amarelo' => 50.0,
+            'nd' => null,
+            default => 10.0,
+        };
+
         return [
             'risk_key' => $key,
             'label' => $key,
-            'value_num' => 1.0,
-            'value_text' => 'ok',
-            'limit_num' => 2.0,
-            'pct_of_limit' => 50.0,
+            'value_num' => $status === 'nd' ? null : 1.0,
+            'value_text' => $status === 'nd' ? null : 'ok',
+            'limit_num' => $status === 'nd' ? null : 10.0,
+            'pct_of_limit' => $pct,
             'status' => $status,
             'reason' => 'test',
             'source' => 'unit',
             'meta' => null,
-            'collected_at' => '2026-08-03 12:00:00',
+            'collected_at' => $status === 'nd' ? null : '2026-08-03 12:00:00',
         ];
+    }
+
+    /** @return list<array<string, mixed>> */
+    protected function validRiskGrid(string $overriddenKey = '', string $status = 'verde'): array
+    {
+        $keys = [
+            'reputacao', 'reclamacoes', 'atrasos', 'cancelamentos', 'moderacao',
+            'catalogo', 'chargeback', 'oauth', 'rate_limit', 'nf_pendente', 'queda_vendas',
+        ];
+        $risks = [];
+        foreach ($keys as $key) {
+            $riskStatus = $key === 'nf_pendente' ? 'nd' : 'verde';
+            if ($key === $overriddenKey) {
+                $riskStatus = $status;
+            }
+            $risks[] = $this->validRisk($key, $riskStatus);
+        }
+        return $risks;
     }
 
     /** @return array<string, mixed> */
