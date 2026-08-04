@@ -20,12 +20,15 @@ final class AgentRuntimeAccountSource implements AgentRuntimeAccountSourceInterf
     public function activeAccountIds(): array
     {
         $statement = $this->db->prepare(
-            'SELECT id FROM ml_accounts WHERE status = :status ORDER BY id ASC LIMIT 200'
+            'SELECT id FROM ml_accounts WHERE status = :status ORDER BY id ASC LIMIT 201'
         );
         $statement->execute(['status' => 'active']);
         $rows = $statement->fetchAll(PDO::FETCH_COLUMN);
         if (!is_array($rows)) {
             throw new UnexpectedValueException('invalid account source');
+        }
+        if (count($rows) > 200) {
+            throw new UnexpectedValueException('account source limit exceeded');
         }
 
         $ids = [];

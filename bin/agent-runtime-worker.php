@@ -98,7 +98,7 @@ function agentWorkerHeartbeat(string $path, string $cycleId, array $records, str
     }
 
     $temporary = $path . '.tmp.' . getmypid();
-    if (file_put_contents($temporary, $json . "\n", LOCK_EX) === false || !rename($temporary, $path)) {
+    if (@file_put_contents($temporary, $json . "\n", LOCK_EX) === false || !@rename($temporary, $path)) {
         @unlink($temporary);
         throw new RuntimeException('heartbeat_write_failed');
     }

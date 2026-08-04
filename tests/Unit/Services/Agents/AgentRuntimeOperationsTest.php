@@ -10,6 +10,7 @@ use App\Services\Agents\AgentRuntimeFactory;
 use InvalidArgumentException;
 use PDO;
 use PHPUnit\Framework\TestCase;
+use UnexpectedValueException;
 
 /**
  * @covers \App\Services\Agents\AgentRuntimeAccountSource
@@ -25,6 +26,22 @@ final class AgentRuntimeOperationsTest extends TestCase
         $pdo->exec("INSERT INTO ml_accounts (id, status) VALUES (20, 'active'), (10, 'active'), (30, 'connected'), (40, NULL)");
 
         self::assertSame([10, 20], (new AgentRuntimeAccountSource($pdo))->activeAccountIds());
+    }
+
+    public function testFonteFalhaFechadaQuandoExistemMaisDeDuzentasContasAtivas(): void
+    {
+        $pdo = new PDO('sqlite::memory:');
+        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $pdo->exec('CREATE TABLE ml_accounts (id INTEGER PRIMARY KEY, status TEXT NULL)');
+        $statement = $pdo->prepare("INSERT INTO ml_accounts (id, status) VALUES (:id, 'active')");
+        for ($id = 1; $id <= 201; $id++) {
+            $statement->execute(['id' => $id]);
+        }
+
+        $this->expectException(UnexpectedValueException::class);
+        $this->expectExceptionMessage('account source limit exceeded');
+
+        (new AgentRuntimeAccountSource($pdo))->activeAccountIds();
     }
 
     public function testFonteProductionContemSomenteSelectParametrizadoOuConstante(): void
