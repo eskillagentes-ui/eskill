@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Agents;
 
+use InvalidArgumentException;
 use Throwable;
 
 /**
@@ -24,6 +25,10 @@ final class OrchestratorAgent implements AgentInterface
      */
     public function __construct(array $agents, AgentPolicy $policy)
     {
+        if ($agents === []) {
+            throw new InvalidArgumentException('agents must not be empty');
+        }
+
         $this->agents = array_values($agents);
         $this->policy = $policy;
     }

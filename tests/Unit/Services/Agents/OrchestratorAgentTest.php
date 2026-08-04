@@ -9,6 +9,7 @@ use App\Services\Agents\AgentInterface;
 use App\Services\Agents\AgentPolicy;
 use App\Services\Agents\AgentResult;
 use App\Services\Agents\OrchestratorAgent;
+use InvalidArgumentException;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 
@@ -19,7 +20,10 @@ class OrchestratorAgentTest extends TestCase
 {
     public function testNameRetornaOrquestrador(): void
     {
-        $orch = new OrchestratorAgent([], new AgentPolicy());
+        $orch = new OrchestratorAgent([
+            $this->agent('noop', static fn (AgentContext $context): AgentResult =>
+                AgentResult::success('noop')),
+        ], new AgentPolicy());
         $this->assertSame('orquestrador', $orch->name());
     }
 
@@ -195,17 +199,12 @@ class OrchestratorAgentTest extends TestCase
         $this->assertSame([], $result->emittedOps());
     }
 
-    public function testListaVaziaRetornaSuccessSemResultados(): void
+    public function testListaVaziaEhRejeitadaParaEvitarFalsoVerde(): void
     {
-        $orch = new OrchestratorAgent([], new AgentPolicy());
-        $result = $orch->run(new AgentContext(1, 'local', 'corr-empty', false));
+        $this->expectException(InvalidArgumentException::class);
+        $this->expectExceptionMessage('agents must not be empty');
 
-        $this->assertSame('success', $result->status());
-        $this->assertSame('orquestrador', $result->agent());
-        $this->assertSame([], $result->data()['results']);
-        $this->assertSame([], $result->data()['order']);
-        $this->assertSame('corr-empty', $result->data()['correlationId']);
-        $this->assertFalse($result->stateChanged());
+        new OrchestratorAgent([], new AgentPolicy());
     }
 
     /**

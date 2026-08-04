@@ -113,6 +113,14 @@ test.describe('Mutation guard contract @readonly', () => {
       .rejects.toThrow(/mutações bloqueadas/);
   });
 
+  test('@readonly page.request usa o mesmo guard de host e mutação', async ({ page }) => {
+    delete process.env.E2E_ALLOW_MUTATION;
+    process.env.PLAYWRIGHT_BASE_URL = 'http://127.0.0.1:8080';
+
+    await expect(page.request.get('https://eskill.com.br/login')).rejects.toThrow(/request E2E/);
+    await expect(page.request.post('/login')).rejects.toThrow(/mutações bloqueadas/);
+  });
+
   test('@readonly todos os specs usam a fixture central', () => {
     const e2eDir = path.resolve(__dirname);
     const specs = fs.readdirSync(e2eDir).filter((file) => /\.spec\.(?:ts|js)$/.test(file));

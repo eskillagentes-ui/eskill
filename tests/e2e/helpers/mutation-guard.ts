@@ -1,4 +1,4 @@
-import { test as base } from '@playwright/test';
+import { test as base, type APIResponse } from '@playwright/test';
 
 const SAFE_BASE_HOSTS = new Set([
   '127.0.0.1',
@@ -98,46 +98,79 @@ export function requireMutationAllowed(suiteName: string): void {
   }
 }
 
-export const test = base.extend<{ safeApiNetwork: void; safeNetwork: void }>({
-  safeApiNetwork: [async ({ request }, use) => {
-    const requestMethods = request as unknown as Record<GuardedApiMethod, ApiCall>;
-    const originals = new Map<GuardedApiMethod, ApiCall>();
-    const baseUrl = process.env.PLAYWRIGHT_BASE_URL
-      ?? `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? '8080'}`;
+function installApiRequestGuard(request: unknown): () => void {
+  const requestMethods = request as Record<GuardedApiMethod, ApiCall>;
+  const originals = new Map<GuardedApiMethod, ApiCall>();
+  const baseUrl = process.env.PLAYWRIGHT_BASE_URL
+    ?? `http://127.0.0.1:${process.env.PLAYWRIGHT_PORT ?? '8080'}`;
 
-    for (const methodName of GUARDED_API_METHODS) {
-      const original = requestMethods[methodName].bind(request);
-      originals.set(methodName, original);
-      requestMethods[methodName] = async (url, options = {}) => {
-        const effectiveUrl = new URL(url, baseUrl).toString();
-        const method = methodName === 'fetch'
-          ? String(options.method ?? 'GET')
-          : methodName.toUpperCase();
-        assertMutationRequestAllowed(method, effectiveUrl);
+  for (const methodName of GUARDED_API_METHODS) {
+    const original = requestMethods[methodName].bind(request);
+    originals.set(methodName, original);
+    requestMethods[methodName] = async (url, options = {}) => {
+      const effectiveUrl = new URL(url, baseUrl).toString();
+      const method = methodName === 'fetch'
+        ? String(options.method ?? 'GET')
+        : methodName.toUpperCase();
+      assertMutationRequestAllowed(method, effectiveUrl);
 
-        return original(url, { ...options, maxRedirects: 0 });
-      };
-    }
+      return original(url, { ...options, maxRedirects: 0 });
+    };
+  }
 
-    await use();
+  return () => {
     for (const [methodName, original] of originals) {
       requestMethods[methodName] = original;
     }
+  };
+}
+
+export const test = base.extend<{ safeApiNetwork: void; safeNetwork: void }>({
+  safeApiNetwork: [async ({ request }, use) => {
+    const restore = installApiRequestGuard(request);
+    await use();
+    restore();
   }, { auto: true }],
   safeNetwork: [async ({ context }, use) => {
+    const restoreContextRequest = installApiRequestGuard(context.request);
     await context.route('**/*', async (route) => {
       const request = route.request();
+      let response: APIResponse;
       try {
         assertMutationRequestAllowed(request.method(), request.url());
-        await route.continue();
+        response = await route.fetch({ maxRedirects: 0 });
+        const status = response.status();
+        const location = response.headers()['location'];
+        if (status >= 300 && status < 400 && location) {
+          const redirectUrl = new URL(location, request.url()).toString();
+          const redirectMethod = status === 307 || status === 308 ? request.method() : 'GET';
+          assertMutationRequestAllowed(redirectMethod, redirectUrl);
+        }
       } catch (error) {
-        await route.abort('blockedbyclient');
+        try {
+          await route.abort('blockedbyclient');
+        } catch (abortError) {
+          if (!(abortError instanceof Error)
+              || !abortError.message.includes('Route is already handled')) {
+            throw abortError;
+          }
+        }
         throw error;
+      }
+
+      try {
+        await route.fulfill({ response });
+      } catch (fulfillError) {
+        if (!(fulfillError instanceof Error)
+            || !fulfillError.message.includes('Route is already handled')) {
+          throw fulfillError;
+        }
       }
     });
 
     await use();
-    await context.unroute('**/*');
+    await context.unrouteAll({ behavior: 'ignoreErrors' });
+    restoreContextRequest();
   }, { auto: true }],
 });
 
