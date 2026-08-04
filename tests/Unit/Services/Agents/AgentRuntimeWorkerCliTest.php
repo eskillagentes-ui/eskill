@@ -9,13 +9,15 @@ use PHPUnit\Framework\TestCase;
 final class AgentRuntimeWorkerCliTest extends TestCase
 {
     private string $script;
-    private string $supervisor;
+    private string $systemd;
+    private string $legacySupervisor;
 
     protected function setUp(): void
     {
         $root = dirname(__DIR__, 4);
         $this->script = $root . '/bin/agent-runtime-worker.php';
-        $this->supervisor = $root . '/config/supervisor/agent-runtime-worker.conf';
+        $this->systemd = $root . '/config/systemd/agent-runtime-monitor.service';
+        $this->legacySupervisor = $root . '/config/supervisor/agent-runtime-worker.conf';
     }
 
     public function testHelpFuncionaAntesDeAutoloadOuBanco(): void
@@ -65,15 +67,18 @@ final class AgentRuntimeWorkerCliTest extends TestCase
         }
     }
 
-    public function testSupervisorMantemWorkerMonitorComRestartELogsLimitados(): void
+    public function testSystemdMantemWorkerMonitorComRestartEHardening(): void
     {
-        self::assertFileExists($this->supervisor);
-        $source = file_get_contents($this->supervisor);
+        self::assertFileDoesNotExist($this->legacySupervisor);
+        self::assertFileExists($this->systemd);
+        $source = file_get_contents($this->systemd);
         self::assertIsString($source);
         foreach ([
             '--loop', '--interval=300', '--environment=production', '--max-attempts=2',
-            'autostart=true', 'autorestart=true', 'user=eskill',
-            'stdout_logfile_maxbytes=', 'stdout_logfile_backups=', 'stopasgroup=true',
+            'User=eskill', 'Group=eskill', 'Restart=always', 'RestartSec=10',
+            'NoNewPrivileges=true', 'PrivateTmp=true', 'ProtectSystem=strict',
+            'ReadWritePaths=/home/eskill/htdocs/eskill.com.br/storage',
+            'StandardOutput=journal', 'WantedBy=multi-user.target',
         ] as $required) {
             self::assertStringContainsString($required, $source);
         }
