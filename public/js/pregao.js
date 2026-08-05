@@ -484,6 +484,19 @@
         const video = $('qaVideo');
         const live = $('qaLive');
 
+        if (qa.executed === false) {
+            // Nenhum qa.status real registrado — nada de resultado/mídia artificial.
+            live.textContent = 'NÃO EXECUTADO';
+            if (idle) {
+                idle.hidden = false;
+                idle.textContent = 'QA não executado — nenhum resultado real registrado.';
+            }
+            if (stream) stream.hidden = true;
+            if (video) video.hidden = true;
+            $('qalog').textContent = '▶ não executado';
+            return;
+        }
+
         if (qa.running) live.textContent = 'AO VIVO';
         else live.textContent = qa.result ? String(qa.result).toUpperCase() : 'STANDBY';
 

@@ -743,7 +743,36 @@ test('mantém o cache-busting do cliente corrigido', () => {
     const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
     assert.match(source, /iconNode\.textContent = String\(icon\)/, 'ícone do feed deve usar textContent');
     assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
-    assert.match(view, /\/js\/pregao\.js\?v=40/, 'view deve invalidar o cache do cliente corrigido');
+    assert.match(view, /\/js\/pregao\.js\?v=41/, 'view deve invalidar o cache do cliente corrigido');
+});
+
+test('QA sem status real aparece como não executado, sem mídia artificial', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        qa: {
+            executed: false, running: false, suite: null, test: null,
+            result: null, video_url: null, stream_url: null, log: []
+        }
+    });
+    assert.strictEqual(element('qaLive').textContent, 'NÃO EXECUTADO');
+    assert.strictEqual(element('qalog').textContent, '▶ não executado');
+    assert.match(element('qaIdle').textContent, /não executado/);
+    assert.strictEqual(element('qaIdle').hidden, false, 'placeholder deve continuar visível');
+    assert.strictEqual(element('qaStream').hidden, true, 'nenhum stream artificial');
+    assert.strictEqual(element('qaVideo').hidden, true, 'nenhum vídeo artificial');
+
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        qa: {
+            executed: true, running: false, suite: 'smoke', test: 'login',
+            result: 'passed', video_url: null, stream_url: null, log: []
+        }
+    });
+    assert.strictEqual(element('qaLive').textContent, 'PASSED', 'resultado real deve continuar sendo exibido');
 });
 
 test('semáforos são nomeados como Saúde da conta e Sentinela operacional', async () => {

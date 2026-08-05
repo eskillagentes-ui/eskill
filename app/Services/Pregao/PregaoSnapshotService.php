@@ -395,7 +395,9 @@ final class PregaoSnapshotService
         $stmt->execute(['qa.status', $accountId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$row) {
+            // Sem qa.status real: declara "não executado" — nunca inventa resultado/log.
             return [
+                'executed' => false,
                 'running' => false,
                 'suite' => null,
                 'test' => null,
@@ -426,6 +428,7 @@ final class PregaoSnapshotService
             ];
         }
 
+        // 'executed' é decidido aqui (evento real persistido), nunca pelo payload.
         return array_merge([
             'running' => false,
             'suite' => null,
@@ -434,7 +437,7 @@ final class PregaoSnapshotService
             'video_url' => null,
             'stream_url' => null,
             'log' => $log,
-        ], $payload, ['log' => $log]);
+        ], $payload, ['log' => $log, 'executed' => true]);
     }
 
     /**
