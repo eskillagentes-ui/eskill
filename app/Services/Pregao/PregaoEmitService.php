@@ -174,6 +174,34 @@ final class PregaoEmitService
     }
 
     /**
+     * Única capability de emissão qa.status. O emissor genérico acima permanece bloqueado.
+     *
+     * @param array<string, mixed> $payload
+     * @return array{v:int,type:string,ts:string,payload:array<string,mixed>,source:string,account_id:int}
+     */
+    public function emitTrustedQaStatus(array $payload, int $accountId, PregaoQaProof $proof): array
+    {
+        if ($accountId <= 0 || !$proof->verifyStatus($payload, $accountId)) {
+            throw new \InvalidArgumentException('Prova qa.status inválida');
+        }
+        $event = [
+            'v' => self::VERSION,
+            'type' => 'qa.status',
+            'ts' => $this->nowIso(),
+            'payload' => $payload,
+            'source' => 'live',
+            'account_id' => $accountId,
+        ];
+        $persisted = $this->persist($event);
+        $this->persistSideEffects($event);
+        $published = $this->publish($event);
+        if (!$persisted && !$published) {
+            throw new \RuntimeException('Falha ao entregar qa.status');
+        }
+        return $event;
+    }
+
+    /**
      * @param array<string, mixed>|string|null $raw
      * @return array{running:bool,suite:string,test:string,result:string,video_url:?string,stream_url:?string}|null
      */

@@ -179,6 +179,14 @@ if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
 
+// Sessões efêmeras criadas pelo worker não podem alcançar nenhuma capability mutante.
+if (!empty($_SESSION['qa_read_only'])) {
+    \App\Security\PregaoQaReadOnlyGuard::enforce(
+        (string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'),
+        (string) ($_SERVER['REQUEST_URI'] ?? '/')
+    );
+}
+
 // Garantir que token CSRF existe na sessão e não está expirado (1 hora)
 if (
     empty($_SESSION['csrf_token']) || !isset($_SESSION['csrf_token_time']) ||

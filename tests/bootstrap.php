@@ -4,6 +4,20 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
+// O vendor compartilhado pode ter sido gerado em outro worktree. Prependemos o
+// PSR-4 local para que PHPUnit sempre exerça a fonte deste checkout autoritativo.
+spl_autoload_register(static function (string $class): void {
+    $prefix = 'App\\';
+    if (strncmp($class, $prefix, strlen($prefix)) !== 0) {
+        return;
+    }
+    $relative = substr($class, strlen($prefix));
+    $file = __DIR__ . '/../app/' . str_replace('\\', '/', $relative) . '.php';
+    if (is_file($file)) {
+        require_once $file;
+    }
+}, true, true);
+
 // Load helpers
 require_once __DIR__ . '/../app/Helpers/LogHelper.php';
 require_once __DIR__ . '/../app/Helpers/CacheHelper.php';
