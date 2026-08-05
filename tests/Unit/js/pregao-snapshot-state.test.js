@@ -743,7 +743,42 @@ test('mantém o cache-busting do cliente corrigido', () => {
     const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
     assert.match(source, /iconNode\.textContent = String\(icon\)/, 'ícone do feed deve usar textContent');
     assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
-    assert.match(view, /\/js\/pregao\.js\?v=38/, 'view deve invalidar o cache do cliente corrigido');
+    assert.match(view, /\/js\/pregao\.js\?v=39/, 'view deve invalidar o cache do cliente corrigido');
+});
+
+test('fonte disponível sem observed_at mostra horário indisponível, nunca zero', async () => {
+    const listEl = element('dataSources');
+    const before = listEl.children.length;
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        observability: {
+            read_only: true,
+            consolidated_at: '2026-08-04T12:00:00-03:00',
+            age_seconds: 0,
+            items: [
+                {
+                    key: 'sales', label: 'Vendas e receita', available: true,
+                    source: 'ml_orders', observed_at: null, reason: null, count: null
+                },
+                {
+                    key: 'health', label: 'Saúde dos anúncios', available: true,
+                    source: 'account_health_history', observed_at: '2026-08-04T11:59:00-03:00',
+                    reason: null, count: null
+                }
+            ]
+        }
+    });
+
+    const cards = listEl.children.slice(before);
+    assert.strictEqual(cards.length, 2, 'as duas fontes devem virar cards');
+    const salesDetail = cards[0].children[1].textContent;
+    assert.match(salesDetail, /horário indisponível/, 'timestamp ausente deve ser explícito');
+    assert.doesNotMatch(salesDetail, /1969|1970|00\/00|31\/12/, 'timestamp ausente nunca vira época zero');
+    const healthDetail = cards[1].children[1].textContent;
+    assert.doesNotMatch(healthDetail, /horário indisponível/, 'timestamp real deve continuar sendo exibido');
+    assert.match(healthDetail, /\d{2}\/\d{2},? \d{2}:\d{2}/, 'timestamp real deve aparecer formatado');
 });
 
 test('view expõe fontes, freshness e transporte read-only', () => {

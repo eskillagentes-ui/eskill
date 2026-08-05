@@ -222,5 +222,5 @@
     };
 </script>
 <script src="/js/pregao-chart-layout.js?v=1"></script>
-<script src="/js/pregao.js?v=38" defer></script>
+<script src="/js/pregao.js?v=39" defer></script>
 <script src="/js/pregao-events.js?v=1" defer></script>

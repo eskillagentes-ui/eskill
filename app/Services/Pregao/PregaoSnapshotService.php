@@ -647,7 +647,7 @@ final class PregaoSnapshotService
     private function mysqlToIso(string $mysqlTs): ?string
     {
         $timezone = new \DateTimeZone('America/Sao_Paulo');
-        foreach (['Y-m-d H:i:s', 'Y-m-d H:i:s.u'] as $format) {
+        foreach (['Y-m-d H:i:s', 'Y-m-d H:i:s.v', 'Y-m-d H:i:s.u'] as $format) {
             $parsed = \DateTimeImmutable::createFromFormat('!' . $format, $mysqlTs, $timezone);
             $errors = \DateTimeImmutable::getLastErrors();
             if ($parsed !== false
@@ -668,7 +668,7 @@ final class PregaoSnapshotService
     {
         $storageTimezone = new \DateTimeZone('UTC');
         $displayTimezone = new \DateTimeZone('America/Sao_Paulo');
-        foreach (['Y-m-d H:i:s', 'Y-m-d H:i:s.u'] as $format) {
+        foreach (['Y-m-d H:i:s', 'Y-m-d H:i:s.v', 'Y-m-d H:i:s.u'] as $format) {
             $parsed = \DateTimeImmutable::createFromFormat('!' . $format, $mysqlTs, $storageTimezone);
             $errors = \DateTimeImmutable::getLastErrors();
             if ($parsed !== false

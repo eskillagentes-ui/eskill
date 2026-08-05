@@ -259,11 +259,13 @@ final class PregaoMetricsCollector
                    semaforo_status = VALUES(semaforo_status)'
             )->execute([$accountId, $cor, $claimsPct, $delayPct, $cancelPct, $semaforo]);
 
+            $collectedAt = time();
             $meta['available']['Fr'] = true;
             $meta['metrics']['reputacao'] = [
                 'available' => true,
                 'source' => 'seller_reputation',
                 'level_id' => $levelId,
+                'collected_at' => $collectedAt,
             ];
 
             $this->emitter->emit('metric.update', [
@@ -437,13 +439,16 @@ final class PregaoMetricsCollector
                 default => 'green',
             };
 
+            $collectedAt = time();
             $meta['metrics']['perguntas_hoje'] = [
                 'available' => true,
                 'source' => (string) $q['source'],
+                'collected_at' => $collectedAt,
             ];
             $meta['metrics']['perguntas_7d'] = [
                 'available' => true,
                 'source' => (string) $q['source'],
+                'collected_at' => $collectedAt,
                 'window' => '7d',
                 'recebidas' => $recebidas,
                 'respondidas' => $respondidas,
@@ -692,10 +697,23 @@ final class PregaoMetricsCollector
                    recalculated_at = CURRENT_TIMESTAMP'
             )->execute([$accountId, $vendasBaseline]);
 
+            $collectedAt = time();
             $meta['available']['Fv'] = true;
-            $meta['metrics']['vendas_hoje'] = ['available' => true, 'source' => 'ml_orders'];
-            $meta['metrics']['receita_hoje'] = ['available' => true, 'source' => 'ml_orders'];
-            $meta['metrics']['ticket_medio'] = ['available' => true, 'source' => 'ml_orders'];
+            $meta['metrics']['vendas_hoje'] = [
+                'available' => true,
+                'source' => 'ml_orders',
+                'collected_at' => $collectedAt,
+            ];
+            $meta['metrics']['receita_hoje'] = [
+                'available' => true,
+                'source' => 'ml_orders',
+                'collected_at' => $collectedAt,
+            ];
+            $meta['metrics']['ticket_medio'] = [
+                'available' => true,
+                'source' => 'ml_orders',
+                'collected_at' => $collectedAt,
+            ];
 
             foreach (
                 [
@@ -780,15 +798,18 @@ final class PregaoMetricsCollector
                 )->execute([$accountId, $baseline]);
             }
 
+            $collectedAt = time();
             $meta['available']['Fe'] = true;
             $meta['metrics']['visitas_7d'] = [
                 'available' => true,
                 'source' => 'items_visits',
+                'collected_at' => $collectedAt,
                 'window' => '7d',
             ];
             $meta['metrics']['exposicao'] = [
                 'available' => true,
                 'source' => 'items_visits',
+                'collected_at' => $collectedAt,
                 'visitas_7d' => $visits7,
                 'visitas_baseline' => $baseline,
             ];
