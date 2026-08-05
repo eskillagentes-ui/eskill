@@ -322,9 +322,13 @@ test('rollover diário avança monotonicamente sem corromper candle anterior', a
     });
 
     sandbox.window.__pregaoTest.handleEvent({
-        type: 'index.candle', payload: { date: '2026-08-04', o: 200, h: 215, l: 195, c: 210 }
+        type: 'index.candle',
+        ts: '2026-08-04T00:00:00-03:00',
+        payload: { date: '2026-08-04', o: 200, h: 215, l: 195, c: 210 }
     });
-    sandbox.window.__pregaoTest.handleEvent({ type: 'index.tick', payload: { value: 220 } });
+    sandbox.window.__pregaoTest.handleEvent({
+        type: 'index.tick', ts: '2026-08-04T00:01:00-03:00', payload: { value: 220 }
+    });
     sandbox.window.__pregaoTest.handleEvent({
         type: 'index.candle', payload: { date: '2026-08-02', o: 50, h: 55, l: 45, c: 52 }
     });
