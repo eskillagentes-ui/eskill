@@ -674,30 +674,6 @@ class JobService
             throw new \Exception('Agent code is required');
         }
 
-        $statusStmt = $this->db->prepare(
-            "SELECT status FROM ai_agents WHERE code = :code LIMIT 1"
-        );
-        $statusStmt->execute([':code' => $agentCode]);
-        $status = $statusStmt->fetchColumn();
-
-        if ($status !== 'active') {
-            $statusLabel = $status === false ? 'not_found' : (string)$status;
-            $message = "agent {$agentCode} está com status={$statusLabel}, execução ignorada";
-            log_warning($message, [
-                'service' => 'JobService',
-                'agent_code' => $agentCode,
-                'status' => $statusLabel,
-            ]);
-
-            return [
-                'success' => false,
-                'skipped' => true,
-                'error' => $message,
-                'agent' => $agentCode,
-                'status' => $statusLabel,
-            ];
-        }
-
         $service = new AutonomousAgentService($accountId);
         return $service->runAgent($agentCode);
     }

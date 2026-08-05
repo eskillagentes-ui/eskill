@@ -78,6 +78,30 @@ class AutonomousAgentService
                 return ['success' => false, 'error' => "Agent class not found: {$agentCode}"];
             }
 
+            $statusStmt = $this->db->prepare(
+                "SELECT status FROM ai_agents WHERE code = :code LIMIT 1"
+            );
+            $statusStmt->execute([':code' => $agentCode]);
+            $status = $statusStmt->fetchColumn();
+
+            if ($status !== 'active') {
+                $statusLabel = $status === false ? 'not_found' : (string)$status;
+                $message = "agent {$agentCode} está com status={$statusLabel}, execução ignorada";
+                log_warning($message, [
+                    'service' => 'AutonomousAgentService',
+                    'agent_code' => $agentCode,
+                    'status' => $statusLabel,
+                ]);
+
+                return [
+                    'success' => false,
+                    'skipped' => true,
+                    'error' => $message,
+                    'agent' => $agentCode,
+                    'status' => $statusLabel,
+                ];
+            }
+
             $agent = new $agentClass();
 
             if (method_exists($agent, 'execute')) {
