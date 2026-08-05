@@ -899,11 +899,11 @@ final class PregaoMetricsCollector
                 $prev = $prevStmt->fetchColumn();
                 $delta = $prev !== false && $prev !== null ? ((int) $prev - $pos) : null;
 
-                $this->emitter->emit('keyword.rank', array_filter([
+                $this->emitter->emit('keyword.rank', [
                     'kw' => $kw,
                     'pos' => $pos,
                     'delta' => $delta,
-                ], static fn ($v) => $v !== null), $accountId, 'live');
+                ], $accountId, 'live');
 
                 $positions[] = $pos;
                 usleep(200000);
@@ -974,12 +974,12 @@ final class PregaoMetricsCollector
             $sql = $hasSource
                 ? "SELECT COUNT(*) FROM pregao_events
                    WHERE type = 'op'
-                     AND (account_id = ? OR account_id IS NULL)
+                     AND account_id = ?
                      AND source = 'live'
                      AND ts >= (NOW() - INTERVAL 1 HOUR)"
                 : "SELECT COUNT(*) FROM pregao_events
                    WHERE type = 'op'
-                     AND (account_id = ? OR account_id IS NULL)
+                     AND account_id = ?
                      AND ts >= (NOW() - INTERVAL 1 HOUR)";
             $stmt = $this->db->prepare($sql);
             $stmt->execute([$accountId]);

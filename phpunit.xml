@@ -33,6 +33,9 @@
 <!--            <file>tests/Unit/Services/Agents/CriadorAgentTest.php</file>-->
 <!--            <file>tests/Unit/Services/Agents/LegacyAgentAdaptersTest.php</file>-->
 <!--            <file>tests/Unit/Services/Agents/OrchestratorAgentTest.php</file>-->
+            <file>tests/Unit/Services/Agents/AgentRuntimeWorkerTest.php</file>
+            <file>tests/Unit/Services/Agents/AgentRuntimeWorkerCliTest.php</file>
+            <file>tests/Unit/Services/Agents/PregaoAgentRuntimeReporterTest.php</file>
             <file>tests/Unit/Services/Agents/OtimizadorAgentTest.php</file>
             <file>tests/Unit/Services/Agents/QaAgentTest.php</file>
             <file>tests/Unit/Services/Agents/QaMergeGateIntegrationTest.php</file>
@@ -42,12 +45,18 @@
             <exclude>tests/Unit/CloneRetryStrategyServiceTest.php</exclude>
             <exclude>tests/Unit/QueueServiceTest.php</exclude>
             <!-- Testes estruturais puros (sem DB) — incluidos de volta no Unit suite -->
+            <file>tests/Unit/Controllers/PregaoControllerAccountScopeContractTest.php</file>
             <file>tests/Unit/Controllers/DashboardControllerTest.php</file>
             <file>tests/Unit/Controllers/ItemControllerTest.php</file>
             <file>tests/Unit/Controllers/TokenDashboardControllerTest.php</file>
             <file>tests/Unit/Controllers/MobileAuthControllerTest.php</file>
             <file>tests/Unit/Controllers/AuthControllerTest.php</file>
             <file>tests/Unit/Services/DashboardServiceTest.php</file>
+            <file>tests/Unit/Services/Pregao/PregaoAccountAuthorizerTest.php</file>
+            <file>tests/Unit/Services/Pregao/PregaoAgentStatusServiceTest.php</file>
+            <file>tests/Unit/Services/Pregao/PregaoEmitServiceTest.php</file>
+            <file>tests/Unit/Services/Pregao/PregaoMetricsCollectorAgentActionsContractTest.php</file>
+            <file>tests/Unit/Services/Pregao/PregaoSnapshotDailyIndexTest.php</file>
             <file>tests/Unit/Services/TwoFactorServiceTest.php</file>
             <file>tests/Unit/Controllers/SeoKeywordsControllerTest.php</file>
             <file>tests/Unit/Services/KeywordResearchServiceTest.php</file>

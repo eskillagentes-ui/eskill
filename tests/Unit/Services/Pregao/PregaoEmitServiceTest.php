@@ -21,6 +21,136 @@ class PregaoEmitServiceTest extends TestCase
         $service->emit('foo.bar', []);
     }
 
+    public function testAgentStatusFazParteDoContratoCanonico(): void
+    {
+        $this->assertContains('agent.status', PregaoEmitService::VALID_TYPES);
+    }
+
+    public function testTodoEventoTenantExigeContaPositiva(): void
+    {
+        $service = new PregaoEmitService($this->createMock(PDO::class), $this->createMock(Redis::class));
+
+        $this->expectException(\InvalidArgumentException::class);
+        $service->emit('op', ['msg' => 'sem conta']);
+    }
+
+    public function testKeywordRankRejeitaPayloadNaoTipadoAntesDeIo(): void
+    {
+        $service = new PregaoEmitService($this->createMock(PDO::class), $this->createMock(Redis::class));
+        $invalidPayloads = [
+            ['kw' => 'bagageiro', 'pos' => '7', 'delta' => null],
+            ['kw' => 'bagageiro', 'pos' => 7, 'delta' => '<svg onload=alert(1)>'],
+            ['kw' => '', 'pos' => 7, 'delta' => 1],
+            ['kw' => 'bagageiro', 'pos' => 0, 'delta' => 1],
+            ['kw' => 'bagageiro', 'pos' => 7, 'delta' => null, 'extra' => true],
+        ];
+
+        foreach ($invalidPayloads as $payload) {
+            try {
+                $service->emit('keyword.rank', $payload, 1335);
+                self::fail('keyword.rank inválido deveria ser rejeitado');
+            } catch (\InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testFalhaDeConexaoRedisNaoExpoeMensagemBrutaNoLog(): void
+    {
+        $source = file_get_contents(
+            dirname(__DIR__, 4) . '/app/Services/Pregao/PregaoEmitService.php'
+        );
+        self::assertIsString($source);
+        self::assertStringNotContainsString('getMessage()', $source);
+        self::assertStringContainsString("['reason' => 'redis_connection_failed']", $source);
+    }
+
+    public function testAgentStatusExigeContaPositiva(): void
+    {
+        $service = new PregaoEmitService($this->createMock(PDO::class), $this->createMock(Redis::class));
+
+        $this->expectException(\InvalidArgumentException::class);
+        $service->emit('agent.status', $this->validAgentStatusPayload());
+    }
+
+    public function testAgentStatusRejeitaCampoExtra(): void
+    {
+        $service = new PregaoEmitService($this->createMock(PDO::class), $this->createMock(Redis::class));
+        $payload = $this->validAgentStatusPayload();
+        $payload['data'] = ['raw' => 'redacted'];
+
+        $this->expectException(\InvalidArgumentException::class);
+        $service->emit('agent.status', $payload, 1335);
+    }
+
+    public function testAgentStatusRejeitaReasonArbitrario(): void
+    {
+        $service = new PregaoEmitService($this->createMock(PDO::class), $this->createMock(Redis::class));
+        $payload = $this->validAgentStatusPayload();
+        $payload['reason'] = 'token_secret_value';
+
+        $this->expectException(\InvalidArgumentException::class);
+        $service->emit('agent.status', $payload, 1335);
+    }
+
+    public function testAgentStatusRejeitaStatusSuccessComReasonDeFalha(): void
+    {
+        $service = new PregaoEmitService($this->createMock(PDO::class), $this->createMock(Redis::class));
+        $payload = $this->validAgentStatusPayload();
+        $payload['status'] = 'success';
+        $payload['reason'] = 'read_only_violation';
+
+        $this->expectException(\InvalidArgumentException::class);
+        $service->emit('agent.status', $payload, 1335);
+    }
+
+    public function testAgentStatusRejeitaCorrelacaoDeOutraConta(): void
+    {
+        $service = new PregaoEmitService($this->createMock(PDO::class), $this->createMock(Redis::class));
+        $payload = $this->validAgentStatusPayload();
+        $payload['correlation_id'] = 'agent24x7-20260804T120000Z-0123abcd:9999';
+
+        $this->expectException(\InvalidArgumentException::class);
+        $service->emit('agent.status', $payload, 1335);
+    }
+
+    public function testAgentStatusFalhaQuandoDbERedisNaoEntregam(): void
+    {
+        $pdo = $this->createMock(PDO::class);
+        $pdo->method('query')->willThrowException(new \RuntimeException('db-secret'));
+        $pdo->method('prepare')->willThrowException(new \RuntimeException('db-secret'));
+
+        $redis = $this->createMock(Redis::class);
+        $redis->method('publish')->willThrowException(new \RuntimeException('redis-secret'));
+
+        $service = new PregaoEmitService($pdo, $redis);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Falha ao entregar agent.status');
+        $service->emit('agent.status', $this->validAgentStatusPayload(), 1335);
+    }
+
+    public function testAgentStatusAceitaReasonsHttpNao2xxDoProdutor(): void
+    {
+        $pdo = $this->createMock(PDO::class);
+        $stmt = $this->createMock(\PDOStatement::class);
+        $stmt->method('execute')->willReturn(true);
+        $infoStmt = $this->createMock(\PDOStatement::class);
+        $infoStmt->method('fetchColumn')->willReturn(1);
+        $pdo->method('prepare')->willReturn($stmt);
+        $pdo->method('query')->willReturn($infoStmt);
+        $redis = $this->createMock(Redis::class);
+        $redis->method('lPush')->willReturn(1);
+
+        $service = new PregaoEmitService($pdo, $redis);
+        foreach (['legacy_http_101', 'legacy_http_302'] as $reason) {
+            $payload = $this->validAgentStatusPayload();
+            $payload['status'] = 'failed';
+            $payload['reason'] = $reason;
+            self::assertSame('agent.status', $service->emit('agent.status', $payload, 1335)['type']);
+        }
+    }
+
     public function testEmitMontaEnvelopeCanonico(): void
     {
         $pdo = $this->createMock(PDO::class);
@@ -303,5 +433,21 @@ class PregaoEmitServiceTest extends TestCase
         $this->assertNotNull($hb1);
         $this->assertTrue($hb1['payload']['heartbeat'] ?? false);
         $this->assertNull($hb2, 'segundo stateKey do mesmo robô na mesma hora não deve emitir outro heartbeat');
+    }
+
+    /**
+     * @return array{agent:string,status:string,reason:string,correlation_id:string,attempts:int,state_changed:bool,ml_write_automation:bool}
+     */
+    private function validAgentStatusPayload(): array
+    {
+        return [
+            'agent' => 'sentinela',
+            'status' => 'success',
+            'reason' => 'legacy_read_complete',
+            'correlation_id' => 'agent24x7-20260804T120000Z-0123abcd:1335',
+            'attempts' => 1,
+            'state_changed' => false,
+            'ml_write_automation' => false,
+        ];
     }
 }

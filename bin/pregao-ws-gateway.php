@@ -3,6 +3,8 @@
 
 declare(strict_types=1);
 
+use App\Services\Pregao\PregaoStreamService;
+
 /**
  * Gateway WebSocket do Pregão.
  *
@@ -26,8 +28,6 @@ require dirname(__DIR__) . '/vendor/autoload.php';
 
 $dotenv = Dotenv\Dotenv::createImmutable(dirname(__DIR__));
 $dotenv->safeLoad();
-
-use App\Services\Pregao\PregaoStreamService;
 
 $host = getenv('PREGAO_WS_HOST') ?: '127.0.0.1';
 $port = (int) (getenv('PREGAO_WS_PORT') ?: 8091);
@@ -121,10 +121,12 @@ function pregao_ws_send($sock, string $payload): void
 function pregao_ws_broadcast(array &$clients, string $json): void
 {
     $event = json_decode($json, true);
-    $eventAccount = is_array($event) && isset($event['account_id']) ? (int) $event['account_id'] : null;
+    if (!is_array($event)) {
+        return;
+    }
 
     foreach ($clients as $id => $client) {
-        if ($eventAccount !== null && $client['account_id'] !== $eventAccount) {
+        if (!PregaoStreamService::isEventAllowedForAccount($event, $client['account_id'])) {
             continue;
         }
         try {
@@ -190,7 +192,7 @@ while (true) {
         pregao_ws_broadcast($clients, $item[1]);
         // Drain burst
         while (true) {
-            $more = $fan->lPop('pregao:fanout');
+            $more = $fan->rPop('pregao:fanout');
             if (!is_string($more) || $more === '') {
                 break;
             }

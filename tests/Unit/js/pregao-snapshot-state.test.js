@@ -13,7 +13,7 @@ const bootMarker = '    /* ---------- BOOT ---------- */';
 const bootOffset = source.indexOf(bootMarker);
 assert.ok(bootOffset > 0, 'bloco BOOT do Pregão deve existir');
 source = source.slice(0, bootOffset)
-    + "    window.__pregaoTest = { loadSnapshot: loadSnapshot, handleEvent: handleEvent, state: function () { return { candles: candles, cur: cur, open0: open0 }; } };\n})();\n";
+    + "    let __testEventMs = Date.now(); window.__pregaoTest = { loadSnapshot: loadSnapshot, handleEvent: function (event) { __testEventMs += 1000; handleEvent({ v: 2, ts: new Date(__testEventMs).toISOString(), source: 'live', account_id: accountId, ...event }); }, refreshAgentFreshness: refreshAgentFreshness, resetState: function () { candles = []; currentDate = null; open0 = null; cur = { o: null, c: null, h: null, l: null }; indexWatermarkMs = null; candleWatermarks.clear(); }, state: function () { return { candles: candles, cur: cur, open0: open0, currentDate: currentDate, indexWatermarkMs: indexWatermarkMs }; } };\n})();\n";
 
 const elements = new Map();
 const context2d = new Proxy({}, {
@@ -40,7 +40,8 @@ function element(id) {
             clientHeight: 380,
             width: 600,
             height: 380,
-            appendChild() {},
+            children: [],
+            appendChild(child) { this.children.push(child); },
             setAttribute() {},
             getContext() { return context2d; }
         });
@@ -57,17 +58,19 @@ function snapshotData(data) {
         ranks: [],
         rank_tracker_enabled: false,
         qa: null,
+        agents: null,
         operations: [],
         ...data
     };
 }
 
 const sandbox = {
-    window: { PREGAO_BOOT: { snapshotUrl: '/snapshot' } },
+    window: { PREGAO_BOOT: { snapshotUrl: '/snapshot', accountId: 1335 } },
     document: {
         documentElement: {},
         getElementById: element,
-        createElement: () => element('created-' + elements.size)
+        createElement: () => element('created-' + elements.size),
+        createTextNode: (text) => ({ textContent: String(text) })
     },
     matchMedia: () => ({ matches: false }),
     addEventListener() {},
@@ -98,14 +101,28 @@ const sandbox = {
 sandbox.globalThis = sandbox;
 vm.runInNewContext(source, sandbox, { filename: sourcePath });
 
-async function runSnapshot(data) {
+async function runSnapshot(data, preserveState, keepMissingWatermarks) {
+    if (preserveState !== true) sandbox.window.__pregaoTest.resetState();
     ['px', 'chg', 'fOpen', 'fHigh', 'fLow'].forEach((id) => {
         const el = element(id);
         el.textContent = '';
         el.className = '';
         el.style = {};
     });
-    nextSnapshot = { success: true, data: snapshotData(data) };
+    const snapshotInput = keepMissingWatermarks === true ? data : {
+        ...data,
+        index: data.index ? {
+            updated_at: Object.prototype.hasOwnProperty.call(data.index, 'updated_at')
+                ? data.index.updated_at : data.server_ts,
+            ...data.index
+        } : data.index,
+        candles: (data.candles || []).map((candle) => ({
+            updated_at: Object.prototype.hasOwnProperty.call(candle, 'updated_at')
+                ? candle.updated_at : data.server_ts,
+            ...candle
+        }))
+    };
+    nextSnapshot = { success: true, data: snapshotData(snapshotInput) };
     await sandbox.window.__pregaoTest.loadSnapshot();
     return {
         state: sandbox.window.__pregaoTest.state(),
@@ -228,7 +245,7 @@ test('exibe preço live sem inventar OHLC ou variação diária', async () => {
     assert.strictEqual(liveWithoutDailyOpen.header.low, 'n/d', 'mínima diária ausente deve falhar fechada');
 });
 
-test('tick live sem OHLC diário atualiza só o preço exibido', async () => {
+test('tick live sem OHLC diário preserva histórico sem inventar candle atual', async () => {
     await runSnapshot({
         server_ts: '2026-08-03T12:00:00-03:00',
         index: { value: 1100, open: null, change_pct: null },
@@ -239,11 +256,13 @@ test('tick live sem OHLC diário atualiza só o preço exibido', async () => {
 
     const state = sandbox.window.__pregaoTest.state();
     assert.strictEqual(state.cur.c, 1200, 'tick deve atualizar o preço live');
-    assert.strictEqual(state.candles.length, 1, 'tick sem OHLC diário não deve criar candle');
-    assert.strictEqual(state.candles[0].c, 850, 'tick sem candle atual não deve sobrescrever o último histórico');
-    assert.strictEqual(state.cur.o, null, 'tick não deve inventar abertura diária');
-    assert.strictEqual(state.cur.h, null, 'tick não deve inventar máxima diária');
-    assert.strictEqual(state.cur.l, null, 'tick não deve inventar mínima diária');
+    assert.strictEqual(state.candles.length, 1, 'tick não deve criar candle sem OHLC diário confiável');
+    assert.strictEqual(state.candles[0].c, 850, 'tick não deve sobrescrever o histórico');
+    assert.deepStrictEqual(
+        { o: state.cur.o, h: state.cur.h, l: state.cur.l, c: state.cur.c },
+        { o: null, h: null, l: null, c: 1200 },
+        'tick deve atualizar somente o preço live'
+    );
     assert.deepStrictEqual(
         {
             price: element('px').textContent,
@@ -266,7 +285,11 @@ test('tick atualiza o candle da data atual, não o último por posição', async
         ]
     });
 
-    sandbox.window.__pregaoTest.handleEvent({ type: 'index.tick', payload: { value: 950 } });
+    sandbox.window.__pregaoTest.handleEvent({
+        type: 'index.tick',
+        ts: '2026-08-03T12:05:00-03:00',
+        payload: { value: 950 }
+    });
 
     const state = sandbox.window.__pregaoTest.state();
     const current = state.candles.find((candle) => candle.date === '2026-08-03');
@@ -274,8 +297,227 @@ test('tick atualiza o candle da data atual, não o último por posição', async
     assert.strictEqual(current.c, 950, 'tick deve atualizar o fechamento do candle atual por data');
     assert.strictEqual(current.h, 950, 'tick deve atualizar a máxima do candle atual');
     assert.strictEqual(current.l, 875, 'tick deve preservar a mínima do candle atual');
-    assert.strictEqual(historical.c, 850, 'tick não deve sobrescrever o último candle apenas por posição');
+    assert.strictEqual(historical.c, 850, 'tick não deve sobrescrever o último candle histórico por posição');
     assert.strictEqual(state.cur.date, '2026-08-03', 'estado atual deve continuar associado à data do snapshot');
+
+    for (const invalidValue of [null, '1200', true]) {
+        sandbox.window.__pregaoTest.handleEvent({
+            type: 'index.tick', payload: { value: invalidValue }
+        });
+    }
+    const afterInvalidTicks = sandbox.window.__pregaoTest.state();
+    assert.strictEqual(afterInvalidTicks.cur.c, 950, 'tick não numérico não pode sintetizar preço');
+    assert.strictEqual(
+        afterInvalidTicks.candles.find((candle) => candle.date === '2026-08-03').c,
+        950,
+        'tick não numérico não pode alterar candle'
+    );
+});
+
+test('rollover diário avança monotonicamente sem corromper candle anterior', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-03T23:59:00-03:00',
+        index: { value: 110, open: 100, change_pct: 10 },
+        candles: [{ date: '2026-08-03', o: 100, h: 115, l: 95, c: 110 }]
+    });
+
+    sandbox.window.__pregaoTest.handleEvent({
+        type: 'index.candle', payload: { date: '2026-08-04', o: 200, h: 215, l: 195, c: 210 }
+    });
+    sandbox.window.__pregaoTest.handleEvent({ type: 'index.tick', payload: { value: 220 } });
+    sandbox.window.__pregaoTest.handleEvent({
+        type: 'index.candle', payload: { date: '2026-08-02', o: 50, h: 55, l: 45, c: 52 }
+    });
+    sandbox.window.__pregaoTest.handleEvent({
+        type: 'index.candle', payload: { date: '2026-08-06', o: null, h: null, l: null, c: null }
+    });
+
+    const state = sandbox.window.__pregaoTest.state();
+    assert.strictEqual(state.currentDate, '2026-08-04');
+    assert.strictEqual(state.candles.find((candle) => candle.date === '2026-08-03').c, 110);
+    assert.strictEqual(state.candles.find((candle) => candle.date === '2026-08-04').c, 220);
+    assert.strictEqual(state.candles.some((candle) => candle.date === '2026-08-06'), false);
+    assert.deepStrictEqual(
+        Array.from(state.candles, (candle) => candle.date),
+        ['2026-08-02', '2026-08-03', '2026-08-04'],
+        'candles atrasados devem permanecer ordenados por data'
+    );
+});
+
+test('snapshot antigo após realtime não regride preço nem candle', async () => {
+    const snapshot = {
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: 100, open: 90, updated_at: '2026-08-04T12:00:00-03:00' },
+        candles: [
+            { date: '2026-08-04', o: 90, h: 105, l: 85, c: 100, updated_at: '2026-08-04T12:00:00-03:00' }
+        ]
+    };
+    await runSnapshot(snapshot);
+    sandbox.window.__pregaoTest.handleEvent({
+        type: 'index.tick',
+        account_id: 9999,
+        ts: '2026-08-04T12:04:00-03:00',
+        payload: { value: 777 }
+    });
+    assert.strictEqual(sandbox.window.__pregaoTest.state().cur.c, 100, 'evento de outra conta deve ser ignorado');
+    sandbox.window.__pregaoTest.handleEvent({
+        type: 'index.tick',
+        ts: '2026-08-04T12:05:00-03:00',
+        payload: { value: 120 }
+    });
+    const reconnected = await runSnapshot({
+        ...snapshot,
+        server_ts: '2026-08-04T12:10:00-03:00',
+        index: { value: 100, open: 90 },
+        candles: [{ date: '2026-08-04', o: 90, h: 105, l: 85, c: 100 }]
+    }, true, true);
+
+    assert.strictEqual(reconnected.state.cur.c, 120);
+    assert.strictEqual(reconnected.state.candles[0].c, 120);
+});
+
+test('candle anterior ao último tick não regride fechamento atual', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: 100, open: 90, updated_at: '2026-08-04T12:00:00-03:00' },
+        candles: []
+    });
+    sandbox.window.__pregaoTest.handleEvent({
+        type: 'index.tick',
+        ts: '2026-08-04T12:05:00-03:00',
+        payload: { value: 120 }
+    });
+    sandbox.window.__pregaoTest.handleEvent({
+        type: 'index.candle',
+        ts: '2026-08-04T12:04:00-03:00',
+        payload: { date: '2026-08-04', o: 90, h: 110, l: 85, c: 100 }
+    });
+
+    const state = sandbox.window.__pregaoTest.state();
+    assert.strictEqual(state.cur.c, 120);
+    assert.strictEqual(state.candles.find((candle) => candle.date === '2026-08-04').c, 120);
+});
+
+test('tick pós-meia-noite avança o dia antes de candle atrasado do rollover', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-03T23:59:00-03:00',
+        index: { value: 110, open: 100, updated_at: '2026-08-03T23:59:00-03:00' },
+        candles: [{
+            date: '2026-08-03', o: 100, h: 115, l: 95, c: 110,
+            updated_at: '2026-08-03T23:59:00-03:00'
+        }]
+    });
+    sandbox.window.__pregaoTest.handleEvent({
+        type: 'index.tick',
+        ts: '2026-08-04T00:05:00-03:00',
+        payload: { value: 120 }
+    });
+    sandbox.window.__pregaoTest.handleEvent({
+        type: 'index.candle',
+        ts: '2026-08-04T00:04:00-03:00',
+        payload: { date: '2026-08-04', o: 100, h: 115, l: 95, c: 100 }
+    });
+
+    const state = sandbox.window.__pregaoTest.state();
+    assert.strictEqual(state.currentDate, '2026-08-04');
+    assert.strictEqual(state.cur.c, 120);
+    assert.strictEqual(state.candles.find((candle) => candle.date === '2026-08-03').c, 110);
+    assert.strictEqual(state.candles.find((candle) => candle.date === '2026-08-04').c, 120);
+});
+
+test('snapshot reconectado não regride candle após tick do novo dia', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-03T23:59:00-03:00',
+        index: { value: 110, open: 100, updated_at: '2026-08-03T23:59:00-03:00' },
+        candles: [{
+            date: '2026-08-03', o: 100, h: 115, l: 95, c: 110,
+            updated_at: '2026-08-03T23:59:00-03:00'
+        }]
+    });
+    sandbox.window.__pregaoTest.handleEvent({
+        type: 'index.tick',
+        ts: '2026-08-04T00:05:00-03:00',
+        payload: { value: 120 }
+    });
+    const reconnected = await runSnapshot({
+        server_ts: '2026-08-04T00:04:00-03:00',
+        index: { value: 100, open: 100, updated_at: '2026-08-04T00:04:00-03:00' },
+        candles: [{
+            date: '2026-08-04', o: 100, h: 115, l: 95, c: 100,
+            updated_at: '2026-08-04T00:04:00-03:00'
+        }]
+    }, true);
+
+    const candle = reconnected.state.candles.find((item) => item.date === '2026-08-04');
+    assert.strictEqual(reconnected.state.cur.c, 120);
+    assert.strictEqual(candle.c, 120);
+    assert.strictEqual(candle.h, 120);
+    assert.strictEqual(candle.l, 95);
+});
+
+test('primeiro snapshot sem watermarks próprios falha fechado', async () => {
+    const rejected = await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: 120, open: 100 },
+        candles: [{ date: '2026-08-04', o: 100, h: 125, l: 95, c: 120 }]
+    }, false, true);
+
+    assert.strictEqual(rejected.state.cur.c, null);
+    assert.strictEqual(rejected.state.candles.length, 0);
+});
+
+test('snapshot com watermarks futuros falha fechado para índice e candles', async () => {
+    const rejected = await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: 777, open: 700, updated_at: '2099-01-01T00:00:00-03:00' },
+        candles: [{
+            date: '2026-08-04', o: 700, h: 800, l: 650, c: 777,
+            updated_at: '2099-01-01T00:00:00-03:00'
+        }]
+    });
+
+    assert.strictEqual(rejected.state.cur.c, null);
+    assert.strictEqual(rejected.state.candles.length, 0);
+});
+
+test('snapshot rejeita números coercíveis e keyword.rank malicioso', async () => {
+    const tape = element('tape');
+    tape.children = [];
+    tape.innerHTML = '';
+    const result = await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: '1200', open: '90', change_pct: false, high: '9999', low: true },
+        candles: [{ date: '2026-08-04', o: 90, h: 105, l: 85, c: 100 }],
+        rank_tracker_enabled: true,
+        ranks: [{ kw: 'bagageiro', pos: '<img src=x onerror=alert(1)>', delta: '<svg onload=alert(1)>' }]
+    });
+    assert.strictEqual(result.state.cur.c, 100);
+    assert.strictEqual(result.state.cur.h, 105);
+    assert.strictEqual(result.state.cur.l, 85);
+
+    assert.doesNotMatch(tape.innerHTML, /<img|<svg/i, 'rank hostil do snapshot não deve alcançar HTML');
+    const before = tape.children.length;
+    sandbox.window.__pregaoTest.handleEvent({
+        type: 'keyword.rank',
+        payload: { kw: 'bagageiro', pos: '<img src=x onerror=alert(1)>', delta: 1 }
+    });
+    assert.strictEqual(tape.children.length, before, 'rank com posição não numérica deve ser rejeitado');
+});
+
+test('evento sale nunca altera preço ou candles', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: []
+    });
+    const before = sandbox.window.__pregaoTest.state();
+
+    sandbox.window.__pregaoTest.handleEvent({ type: 'sale', payload: { order_id: 'safe-read-only' } });
+
+    const after = sandbox.window.__pregaoTest.state();
+    assert.deepStrictEqual(after.cur, before.cur);
+    assert.deepStrictEqual(after.candles, before.candles);
+    assert.strictEqual(element('px').textContent, 'n/d');
 });
 
 test('prefere abertura e variação diárias válidas informadas pelo índice', async () => {
@@ -292,7 +534,210 @@ test('prefere abertura e variação diárias válidas informadas pelo índice', 
     assert.strictEqual(liveWithDailyFields.header.low, 'n/d');
 });
 
+test('renderiza agentes 24/7 e atualiza status por evento realtime', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-04T12:05:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        agents: {
+            summary: { overall: 'attention', total: 5, reporting: 2, healthy: 1, attention: 1, stale: 1 },
+            items: [
+                {
+                    agent: 'sentinela', status: 'success', reason: 'legacy_read_complete', correlation_id: 'agent24x7-20260804T150000Z-aaaaaaaa:1335',
+                    attempts: 1, state_changed: false, ml_write_automation: false,
+                    updated_at: '2026-08-04T12:00:00-03:00', stale: false
+                },
+                {
+                    agent: 'financeiro', status: 'failed', reason: 'financeiro_unavailable', correlation_id: 'agent24x7-20260804T144000Z-bbbbbbbb:1335',
+                    attempts: 1, state_changed: false, ml_write_automation: false,
+                    updated_at: '2026-08-04T11:40:00-03:00', stale: true
+                }
+            ]
+        }
+    });
+
+    assert.strictEqual(element('agentStatus-sentinela').textContent, 'OK');
+    assert.strictEqual(element('agentStatus-financeiro').textContent, 'ATRASADO');
+    assert.match(element('agentsSummary').textContent, /2\/5 reportando/);
+    assert.match(element('agentCard-financeiro').className, /is-attention/);
+
+    const acceptedTs = new Date().toISOString();
+    const olderTs = new Date(Date.parse(acceptedTs) - 60 * 1000).toISOString();
+    const mutableTs = new Date(Date.parse(acceptedTs) + 30 * 1000).toISOString();
+    const semanticTs = new Date(Date.parse(acceptedTs) + 45 * 1000).toISOString();
+    sandbox.window.__pregaoTest.handleEvent({
+        v: 2,
+        type: 'agent.status',
+        ts: acceptedTs,
+        source: 'live',
+        account_id: 1335,
+        payload: {
+            agent: 'financeiro', status: 'success', reason: 'legacy_read_complete', correlation_id: 'agent24x7-20260804T150530Z-cccccccc:1335',
+            attempts: 1, state_changed: false, ml_write_automation: false
+        }
+    });
+
+    assert.strictEqual(element('agentStatus-financeiro').textContent, 'OK');
+    assert.doesNotMatch(element('agentCard-financeiro').className, /is-attention/);
+    const acceptedAgentTime = element('agentTime-financeiro').textContent;
+
+    sandbox.window.__pregaoTest.handleEvent({
+        v: 2,
+        type: 'agent.status',
+        ts: olderTs,
+        source: 'live',
+        account_id: 1335,
+        payload: {
+            agent: 'financeiro', status: 'failed', reason: 'financeiro_unavailable', correlation_id: 'agent24x7-20260804T150400Z-dddddddd:1335',
+            attempts: 1, state_changed: false, ml_write_automation: false
+        }
+    });
+    assert.strictEqual(element('agentStatus-financeiro').textContent, 'OK', 'evento antigo não pode sobrescrever o novo');
+    assert.strictEqual(element('agentReason-financeiro').textContent, 'legacy read complete');
+
+    sandbox.window.__pregaoTest.handleEvent({
+        v: 2,
+        type: 'agent.status',
+        ts: mutableTs,
+        source: 'live',
+        account_id: 1335,
+        payload: {
+            agent: 'financeiro', status: 'success', reason: 'legacy_read_complete',
+            correlation_id: 'agent24x7-20260804T150600Z-eeeeeeee:1335', attempts: 1,
+            state_changed: true, ml_write_automation: false
+        }
+    });
+    assert.strictEqual(element('agentReason-financeiro').textContent, 'legacy read complete', 'evento mutante deve ser ignorado');
+    assert.strictEqual(element('agentTime-financeiro').textContent, acceptedAgentTime);
+
+    sandbox.window.__pregaoTest.handleEvent({
+        v: 2,
+        type: 'agent.status',
+        ts: semanticTs,
+        source: 'live',
+        account_id: 1335,
+        payload: {
+            agent: 'financeiro', status: 'success', reason: 'read_only_violation',
+            correlation_id: 'agent24x7-20260804T150630Z-ffffffff:1335', attempts: 1,
+            state_changed: false, ml_write_automation: false
+        }
+    });
+    assert.strictEqual(element('agentTime-financeiro').textContent, acceptedAgentTime, 'status/reason incoerentes devem ser ignorados');
+
+    sandbox.window.__pregaoTest.handleEvent({
+        v: 2,
+        type: 'agent.status',
+        ts: '2099-01-01T00:00:00Z',
+        source: 'live',
+        account_id: 1335,
+        payload: {
+            agent: 'financeiro', status: 'failed', reason: 'financeiro_unavailable',
+            correlation_id: 'agent24x7-20990101T000000Z-12345678:1335', attempts: 1,
+            state_changed: false, ml_write_automation: false
+        }
+    });
+    assert.strictEqual(element('agentTime-financeiro').textContent, acceptedAgentTime, 'timestamp futuro deve ser ignorado');
+
+    sandbox.window.__pregaoTest.handleEvent({
+        v: 2,
+        type: 'agent.status',
+        ts: '2026-02-30T12:00:00Z',
+        source: 'live',
+        account_id: 1335,
+        payload: {
+            agent: 'collector', status: 'failed', reason: 'collector_unavailable',
+            correlation_id: 'agent24x7-20260230T120000Z-abcdef12:1335', attempts: 1,
+            state_changed: false, ml_write_automation: false
+        }
+    });
+    assert.strictEqual(element('agentStatus-collector').textContent, 'AGUARDANDO', 'data impossível deve ser ignorada');
+
+    const staleTs = new Date(Date.now() - 11 * 60 * 1000).toISOString();
+    sandbox.window.__pregaoTest.handleEvent({
+        v: 2,
+        type: 'agent.status',
+        ts: staleTs,
+        source: 'live',
+        account_id: 1335,
+        payload: {
+            agent: 'otimizador', status: 'failed', reason: 'invalid_optimizer_observation_snapshot',
+            correlation_id: 'agent24x7-20260804T120000Z-87654321:1335', attempts: 1,
+            state_changed: false, ml_write_automation: false
+        }
+    });
+    assert.strictEqual(element('agentStatus-otimizador').textContent, 'ATRASADO');
+
+    await runSnapshot({
+        server_ts: '2026-08-04T12:07:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        agents: {
+            items: [{
+                agent: 'financeiro', status: 'failed', reason: 'financeiro_unavailable',
+                correlation_id: 'agent24x7-20260804T150400Z-dddddddd:1335', attempts: 1,
+                state_changed: false, ml_write_automation: false,
+                updated_at: olderTs, stale: false
+            }]
+        }
+    });
+    assert.strictEqual(element('agentStatus-financeiro').textContent, 'OK', 'snapshot antigo não pode regredir realtime novo');
+    assert.strictEqual(element('agentTime-financeiro').textContent, acceptedAgentTime);
+
+    sandbox.window.__pregaoTest.refreshAgentFreshness(Date.parse(acceptedTs) + 11 * 60 * 1000);
+    assert.strictEqual(element('agentStatus-financeiro').textContent, 'ATRASADO');
+    assert.match(element('agentCard-financeiro').className, /is-attention/);
+});
+
+test('view expõe os cinco cards de agentes 24/7', () => {
+    const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
+    for (const agent of ['sentinela', 'collector', 'financeiro', 'otimizador', 'orquestrador']) {
+        assert.match(view, new RegExp('id="agentCard-' + agent + '"'));
+        assert.match(view, new RegExp('id="agentStatus-' + agent + '"'));
+    }
+    assert.match(view, /id="agentsSummary"/);
+});
+
+test('roster parcial de agentes nunca aparece saudável', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-04T12:05:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        agents: {
+            items: [{
+                agent: 'sentinela', status: 'success', reason: 'legacy_read_complete',
+                correlation_id: 'agent24x7-20260804T120000Z-0123abcd:1335', attempts: 1,
+                state_changed: false, ml_write_automation: false,
+                updated_at: '2026-08-04T12:00:00-03:00', stale: false
+            }]
+        }
+    });
+
+    assert.match(element('agentsSummary').className, /is-attention/);
+    assert.match(element('agentsSummary').textContent, /[1-9][0-9]* atenção/);
+});
+
+test('cinco agentes com correlações diferentes nunca aparecem saudáveis', async () => {
+    const agents = ['sentinela', 'collector', 'financeiro', 'otimizador', 'orquestrador'];
+    await runSnapshot({
+        server_ts: '2026-08-04T12:05:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        agents: {
+            items: agents.map((agent, index) => ({
+                agent, status: 'success', reason: agent === 'orquestrador' ? 'aggregated' : 'legacy_read_complete',
+                correlation_id: 'agent24x7-20260804T120000Z-' + (index === 0 ? 'aaaaaaaa' : 'bbbbbbbb') + ':1335',
+                attempts: 1, state_changed: false, ml_write_automation: false,
+                updated_at: '2026-08-04T12:00:00-03:00', stale: false
+            }))
+        }
+    });
+
+    assert.match(element('agentsSummary').className, /is-attention/);
+});
+
 test('mantém o cache-busting do cliente corrigido', () => {
     const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
-    assert.match(view, /\/js\/pregao\.js\?v=10/, 'view deve invalidar o cache do cliente corrigido');
+    assert.match(source, /iconNode\.textContent = String\(icon\)/, 'ícone do feed deve usar textContent');
+    assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
+    assert.match(view, /\/js\/pregao\.js\?v=36/, 'view deve invalidar o cache do cliente corrigido');
 });

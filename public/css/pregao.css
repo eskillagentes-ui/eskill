@@ -726,6 +726,100 @@ a.card.sn-card:hover {
     background: rgba(255, 230, 0, 0.12);
 }
 
+.agents-panel {
+    margin-top: 14px;
+}
+
+.agents-summary {
+    margin-left: auto;
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0;
+}
+
+.agents-summary.is-healthy {
+    color: var(--up);
+}
+
+.agents-summary.is-attention {
+    color: var(--down);
+}
+
+.agents-summary.is-waiting {
+    color: var(--mut);
+}
+
+.agents-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 10px;
+    padding: 12px;
+}
+
+.agent-card {
+    min-width: 0;
+    padding: 12px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    background: var(--panel2);
+    box-shadow: inset 3px 0 0 var(--mut2);
+}
+
+.agent-card.is-healthy {
+    border-color: rgba(22, 199, 132, 0.35);
+    box-shadow: inset 3px 0 0 var(--up);
+}
+
+.agent-card.is-attention {
+    border-color: rgba(234, 57, 67, 0.55);
+    box-shadow: inset 3px 0 0 var(--down);
+}
+
+.agent-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--txt);
+}
+
+.agent-card-head span {
+    font-family: var(--mono);
+    font-size: 9px;
+    color: var(--mut);
+    white-space: nowrap;
+}
+
+.agent-card.is-healthy .agent-card-head span {
+    color: var(--up);
+}
+
+.agent-card.is-attention .agent-card-head span {
+    color: var(--down);
+}
+
+.agent-reason,
+.agent-time,
+.agents-readonly {
+    color: var(--mut);
+    font-size: 10px;
+}
+
+.agent-reason {
+    margin-top: 9px;
+    color: var(--txt);
+}
+
+.agent-time {
+    margin-top: 4px;
+    font-family: var(--mono);
+}
+
+.agents-readonly {
+    padding: 0 12px 12px;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .tape-in {
         animation: none

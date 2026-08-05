@@ -13,7 +13,7 @@ use Throwable;
  * Emissor único do Pregão: persiste em pregao_events e publica no Redis Pub/Sub.
  *
  * Canal Redis: "pregao"
- * Envelope: { v, type, ts, payload, account_id? }
+ * Envelope tenant-bound: { v, type, ts, payload, account_id }
  */
 final class PregaoEmitService
 {
@@ -33,7 +33,55 @@ final class PregaoEmitService
         'sale',
         'keyword.rank',
         'qa.status',
+        'agent.status',
         'account.semaforo',
+    ];
+
+    /** @var list<string> */
+    private const AGENT_STATUS_KEYS = [
+        'agent',
+        'attempts',
+        'correlation_id',
+        'ml_write_automation',
+        'reason',
+        'state_changed',
+        'status',
+    ];
+
+    /** @var list<string> */
+    private const KEYWORD_RANK_KEYS = ['delta', 'kw', 'pos'];
+
+    /** @var list<string> */
+    private const AGENT_STATUS_AGENTS = [
+        'sentinela',
+        'collector',
+        'financeiro',
+        'otimizador',
+        'orquestrador',
+    ];
+
+    /** @var list<string> */
+    private const AGENT_STATUSES = ['success', 'skipped', 'blocked', 'failed'];
+
+    /** @var list<string> */
+    private const AGENT_STATUS_REASONS = [
+        'aggregated',
+        'agent_blocked',
+        'agent_exception',
+        'agent_failed',
+        'collector_unavailable',
+        'cost_validation_blocked',
+        'financeiro_unavailable',
+        'incomplete_legacy_payload',
+        'invalid_legacy_payload',
+        'invalid_optimizer_cost_snapshot',
+        'invalid_optimizer_observation_snapshot',
+        'legacy_error',
+        'legacy_read_complete',
+        'read_only_violation',
+        'recommendations_ready',
+        'runtime_exception',
+        'sentinela_unavailable',
     ];
 
     private ?PDO $db = null;
@@ -60,12 +108,20 @@ final class PregaoEmitService
      *
      * @param array<string, mixed> $payload
      * @param 'live'|'seed' $source
-     * @return array{v: int, type: string, ts: string, payload: array<string, mixed>, source: string, account_id?: int}
+     * @return array{v: int, type: string, ts: string, payload: array<string, mixed>, source: string, account_id: int}
      */
     public function emit(string $type, array $payload, ?int $accountId = null, string $source = 'live'): array
     {
         if (!in_array($type, self::VALID_TYPES, true)) {
             throw new \InvalidArgumentException("Tipo de evento pregao inválido: {$type}");
+        }
+        if ($accountId === null || $accountId <= 0) {
+            throw new \InvalidArgumentException('Conta do evento pregao inválida');
+        }
+        if ($type === 'agent.status') {
+            $this->assertAgentStatusPayload($payload, $accountId);
+        } elseif ($type === 'keyword.rank') {
+            $this->assertKeywordRankPayload($payload);
         }
 
         $source = $source === 'seed' ? 'seed' : 'live';
@@ -81,15 +137,75 @@ final class PregaoEmitService
             'payload' => $payload,
             'source' => $source,
         ];
-        if ($accountId !== null && $accountId > 0) {
-            $event['account_id'] = $accountId;
+        $event['account_id'] = $accountId;
+
+        $persisted = $this->persist($event);
+        $this->persistSideEffects($event);
+        $published = $this->publish($event);
+        if ($type === 'agent.status' && !$persisted && !$published) {
+            throw new \RuntimeException('Falha ao entregar agent.status');
         }
 
-        $this->persist($event);
-        $this->persistSideEffects($event);
-        $this->publish($event);
-
         return $event;
+    }
+
+    private function assertAgentStatusPayload(array $payload, ?int $accountId): void
+    {
+        $keys = array_keys($payload);
+        sort($keys, SORT_STRING);
+        if ($accountId === null
+            || $accountId <= 0
+            || $keys !== self::AGENT_STATUS_KEYS
+            || !is_string($payload['agent'])
+            || !in_array($payload['agent'], self::AGENT_STATUS_AGENTS, true)
+            || !is_string($payload['status'])
+            || !in_array($payload['status'], self::AGENT_STATUSES, true)
+            || !is_string($payload['reason'])
+            || !$this->isAgentStatusReason($payload['reason'])
+            || !PregaoAgentStatusService::isStatusReasonCoherent($payload['status'], $payload['reason'])
+            || !is_string($payload['correlation_id'])
+            || preg_match(
+                '/^agent24x7-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}:'
+                    . preg_quote((string) $accountId, '/') . '$/D',
+                $payload['correlation_id']
+            ) !== 1
+            || !is_int($payload['attempts'])
+            || $payload['attempts'] < 1
+            || $payload['attempts'] > 3
+            || $payload['state_changed'] !== false
+            || $payload['ml_write_automation'] !== false
+        ) {
+            throw new \InvalidArgumentException('Payload agent.status inválido');
+        }
+    }
+
+    private function isAgentStatusReason(string $reason): bool
+    {
+        return in_array($reason, self::AGENT_STATUS_REASONS, true)
+            || preg_match('/^legacy_http_[1345][0-9]{2}$/D', $reason) === 1;
+    }
+
+    /** @param array<string, mixed> $payload */
+    private function assertKeywordRankPayload(array $payload): void
+    {
+        if (!self::isKeywordRankPayloadValid($payload)) {
+            throw new \InvalidArgumentException('Payload keyword.rank inválido');
+        }
+    }
+
+    /** @param array<string, mixed> $payload */
+    public static function isKeywordRankPayloadValid(array $payload): bool
+    {
+        $keys = array_keys($payload);
+        sort($keys, SORT_STRING);
+        return $keys !== self::KEYWORD_RANK_KEYS
+            || !is_string($payload['kw'])
+            ? false
+            : trim($payload['kw']) !== ''
+                && mb_strlen($payload['kw']) <= 200
+                && is_int($payload['pos'])
+                && $payload['pos'] >= 1
+                && ($payload['delta'] === null || is_int($payload['delta']));
     }
 
     public function seedEnabled(): bool
@@ -160,8 +276,8 @@ final class PregaoEmitService
                 if (is_string($val) && $val !== '') {
                     return $val;
                 }
-            } catch (Throwable $e) {
-                log_warning('PregaoEmitService: falha ao ler last_state', ['error' => $e->getMessage()]);
+            } catch (Throwable) {
+                log_warning('PregaoEmitService: falha ao ler last_state', ['reason' => 'last_state_read_failed']);
             }
         }
 
@@ -177,8 +293,8 @@ final class PregaoEmitService
         }
         try {
             $redis->set($cacheKey, $fingerprint);
-        } catch (Throwable $e) {
-            log_warning('PregaoEmitService: falha ao gravar last_state', ['error' => $e->getMessage()]);
+        } catch (Throwable) {
+            log_warning('PregaoEmitService: falha ao gravar last_state', ['reason' => 'last_state_write_failed']);
         }
     }
 
@@ -192,8 +308,8 @@ final class PregaoEmitService
                 if (is_string($last) && $last !== '') {
                     return ($now - (int) $last) >= self::OP_HEARTBEAT_TTL_SECONDS;
                 }
-            } catch (Throwable $e) {
-                log_warning('PregaoEmitService: falha heartbeat Redis', ['error' => $e->getMessage()]);
+            } catch (Throwable) {
+                log_warning('PregaoEmitService: falha heartbeat Redis', ['reason' => 'heartbeat_read_failed']);
             }
         }
 
@@ -211,8 +327,8 @@ final class PregaoEmitService
         }
         try {
             $redis->set($hbKey, (string) $now, ['ex' => self::OP_HEARTBEAT_TTL_SECONDS * 2]);
-        } catch (Throwable $e) {
-            log_warning('PregaoEmitService: falha ao gravar heartbeat', ['error' => $e->getMessage()]);
+        } catch (Throwable) {
+            log_warning('PregaoEmitService: falha ao gravar heartbeat', ['reason' => 'heartbeat_write_failed']);
         }
     }
 
@@ -243,8 +359,8 @@ final class PregaoEmitService
                  VALUES (?, ?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE pos = VALUES(pos), delta = VALUES(delta)'
             )->execute([$accountId, $kw, $date, $pos, $delta]);
-        } catch (Throwable $e) {
-            log_warning('PregaoEmitService: falha ao persistir keyword.rank', ['error' => $e->getMessage()]);
+        } catch (Throwable) {
+            log_warning('PregaoEmitService: falha ao persistir keyword.rank', ['reason' => 'keyword_rank_persist_failed']);
         }
     }
 
@@ -349,10 +465,10 @@ final class PregaoEmitService
                     'ticket_medio' => (float) $row['ticket_medio'],
                 ];
             }
-        } catch (Throwable $e) {
+        } catch (Throwable) {
             log_warning('PregaoEmitService: falha ao atualizar métricas de venda', [
                 'account_id' => $accountId,
-                'error' => $e->getMessage(),
+                'reason' => 'sale_metrics_update_failed',
             ]);
         }
 
@@ -362,7 +478,7 @@ final class PregaoEmitService
     /**
      * @param array{v: int, type: string, ts: string, payload: array<string, mixed>, source?: string, account_id?: int} $event
      */
-    private function persist(array $event): void
+    private function persist(array $event): bool
     {
         try {
             $pdo = $this->pdo();
@@ -374,30 +490,31 @@ final class PregaoEmitService
                 $stmt = $pdo->prepare(
                     'INSERT INTO pregao_events (account_id, type, ts, payload, source) VALUES (?, ?, ?, ?, ?)'
                 );
-                $stmt->execute([
+                return $stmt->execute([
                     $event['account_id'] ?? null,
                     $event['type'],
                     $tsMysql,
                     $payloadJson,
                     $source,
                 ]);
-            } else {
-                $stmt = $pdo->prepare(
-                    'INSERT INTO pregao_events (account_id, type, ts, payload) VALUES (?, ?, ?, ?)'
-                );
-                $stmt->execute([
-                    $event['account_id'] ?? null,
-                    $event['type'],
-                    $tsMysql,
-                    $payloadJson,
-                ]);
             }
-        } catch (Throwable $e) {
+
+            $stmt = $pdo->prepare(
+                'INSERT INTO pregao_events (account_id, type, ts, payload) VALUES (?, ?, ?, ?)'
+            );
+            return $stmt->execute([
+                $event['account_id'] ?? null,
+                $event['type'],
+                $tsMysql,
+                $payloadJson,
+            ]);
+        } catch (Throwable) {
             // Persistência não deve derrubar o worker; o canal Redis ainda pode entregar.
             log_warning('PregaoEmitService: falha ao persistir evento', [
                 'type' => $event['type'],
-                'error' => $e->getMessage(),
+                'reason' => 'persist_exception',
             ]);
+            return false;
         }
     }
 
@@ -428,23 +545,25 @@ final class PregaoEmitService
     /**
      * @param array<string, mixed> $event
      */
-    private function publish(array $event): void
+    private function publish(array $event): bool
     {
         try {
             $redis = $this->redis();
             if ($redis === null) {
-                return;
+                return false;
             }
             $json = json_encode($event, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
             $redis->publish(self::CHANNEL, $json);
             // Fan-out para o gateway WS (polling LPOP) — lista limitada
-            $redis->lPush('pregao:fanout', $json);
+            $queued = $redis->lPush('pregao:fanout', $json);
             $redis->lTrim('pregao:fanout', 0, 999);
-        } catch (Throwable $e) {
+            return $queued !== false;
+        } catch (Throwable) {
             log_warning('PregaoEmitService: falha ao publicar no Redis', [
                 'type' => $event['type'] ?? null,
-                'error' => $e->getMessage(),
+                'reason' => 'publish_exception',
             ]);
+            return false;
         }
     }
 
@@ -479,8 +598,8 @@ final class PregaoEmitService
             $db = (int) ($_ENV['REDIS_DB'] ?? 0);
             $redis->select($db);
             $this->redis = $redis;
-        } catch (Throwable $e) {
-            log_warning('PregaoEmitService: Redis indisponível', ['error' => $e->getMessage()]);
+        } catch (Throwable) {
+            log_warning('PregaoEmitService: Redis indisponível', ['reason' => 'redis_connection_failed']);
             $this->redis = null;
         }
 
