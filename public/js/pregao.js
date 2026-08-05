@@ -495,13 +495,12 @@
     }
 
     function applyQa(qa) {
-        if (!qa) return;
         const idle = $('qaIdle');
         const stream = $('qaStream');
         const video = $('qaVideo');
         const live = $('qaLive');
 
-        if (qa.executed === false) {
+        if (!qa || typeof qa !== 'object' || Array.isArray(qa) || qa.executed !== true) {
             // Nenhum qa.status real registrado — nada de resultado/mídia artificial.
             live.textContent = 'NÃO EXECUTADO';
             if (idle) {

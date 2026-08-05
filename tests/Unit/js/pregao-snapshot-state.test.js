@@ -767,7 +767,7 @@ test('mantém o cache-busting do cliente corrigido', () => {
     const deploy = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/deploy.yml'), 'utf8');
     assert.match(source, /iconNode\.textContent = String\(icon\)/, 'ícone do feed deve usar textContent');
     assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
-    assert.match(view, /\/js\/pregao\.js\?v=43/, 'view deve invalidar o cache do cliente corrigido');
+    assert.match(view, /\/js\/pregao\.js\?v=44/, 'view deve invalidar o cache do cliente corrigido');
     assert.match(pkg.scripts['test:unit:js'], /pregao-chart-layout\.test\.js/, 'runner deve descobrir layout');
     assert.strictEqual(
         pkg.scripts.test,
@@ -834,9 +834,10 @@ test('QA limpa mídia anterior e rejeita URLs fora dos caminhos permitidos', asy
         server_ts: '2026-08-04T12:01:00-03:00',
         index: { value: null, open: null, change_pct: null },
         candles: [],
-        qa: { executed: false, running: false, result: null, video_url: null, stream_url: null, log: [] }
+        qa: null
     });
-    assert.strictEqual(element('qaStream').getAttribute('src'), null, 'src anterior deve ser removido');
+    assert.strictEqual(element('qaStream').getAttribute('src'), null, 'QA ausente deve remover src anterior');
+    assert.strictEqual(element('qaLive').textContent, 'NÃO EXECUTADO');
 
     await runSnapshot({
         server_ts: '2026-08-04T12:02:00-03:00',
