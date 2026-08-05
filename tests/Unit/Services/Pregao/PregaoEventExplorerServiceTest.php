@@ -201,14 +201,16 @@ final class PregaoEventExplorerServiceTest extends TestCase
     {
         $db = $this->makeDb();
         $this->insertEvent($db, 1335, 'op', '2026-08-04 10:00:00', [
-            'msg' => 'Authorization: Bearer TOP_SECRET_MARKER token=abc123 ' . str_repeat('x', 700),
+            'msg' => 'Authorization: Basic dXNlcjpwYXNz Bearer "TOP_SECRET_MARKER" '
+                . 'token="QA SECRET MARKER" ' . str_repeat('x', 700),
         ]);
 
         $result = $this->makeService($db)->list(1335);
         $message = $result['events'][0]['payload']['msg'];
 
         self::assertStringNotContainsString('TOP_SECRET_MARKER', $message);
-        self::assertStringNotContainsString('abc123', $message);
+        self::assertStringNotContainsString('dXNlcjpwYXNz', $message);
+        self::assertStringNotContainsString('QA SECRET MARKER', $message);
         self::assertLessThanOrEqual(500, strlen($message));
         self::assertStringContainsString('[REDACTED]', $message);
     }

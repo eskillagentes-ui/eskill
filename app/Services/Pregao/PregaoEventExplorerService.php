@@ -267,13 +267,20 @@ final class PregaoEventExplorerService
             return '[INVALID TEXT]';
         }
 
+        $secretValue = '(?:"[^"]*"|\'[^\']*\'|[^\s,;]+)';
         $redacted = preg_replace(
-            '/\bBearer\s+[A-Za-z0-9._~+\/=:-]+/iu',
-            'Bearer [REDACTED]',
+            '/\bAuthorization\s*:\s*(?:Basic|Bearer)\s+' . $secretValue . '/iu',
+            'Authorization: [REDACTED]',
             $value
         );
         $redacted = preg_replace(
-            '/\b(access[_-]?token|refresh[_-]?token|api[_-]?key|authorization|password|secret|token)\s*[:=]\s*[^\s,;]+/iu',
+            '/\b(?:Basic|Bearer)\s+' . $secretValue . '/iu',
+            '[REDACTED]',
+            $redacted ?? ''
+        );
+        $redacted = preg_replace(
+            '/\b(access[_-]?token|refresh[_-]?token|api[_-]?key|authorization|password|secret|token)\s*[:=]\s*'
+                . $secretValue . '/iu',
             '$1=[REDACTED]',
             $redacted ?? ''
         );
