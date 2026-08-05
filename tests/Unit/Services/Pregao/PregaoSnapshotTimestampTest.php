@@ -76,4 +76,22 @@ final class PregaoSnapshotTimestampTest extends TestCase
         );
         self::assertStringContainsString("\$metrics['updated_at_epoch']", $source);
     }
+
+    public function testSnapshotNaoRecorreAoTimestampTextualQuandoEpochMySqlExisteMasEInvalido(): void
+    {
+        $source = file_get_contents(
+            dirname(__DIR__, 4) . '/app/Services/Pregao/PregaoSnapshotService.php'
+        );
+        self::assertIsString($source);
+        $start = strpos($source, "'observability' =>");
+        $end = strpos($source, "'semaforo' =>", (int) $start);
+        self::assertIsInt($start);
+        self::assertIsInt($end);
+        $observability = substr($source, $start, $end - $start);
+
+        self::assertStringContainsString(
+            "array_key_exists('updated_at_epoch', \$metrics)",
+            $observability
+        );
+    }
 }

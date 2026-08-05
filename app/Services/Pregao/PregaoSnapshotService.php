@@ -125,8 +125,10 @@ final class PregaoSnapshotService
                 isset($metrics['updated_at']) ? (string) $metrics['updated_at'] : null,
                 $now,
                 $watchlist,
-                isset($metrics['updated_at_epoch']) && is_numeric($metrics['updated_at_epoch'])
-                    ? (int) $metrics['updated_at_epoch']
+                array_key_exists('updated_at_epoch', $metrics)
+                    ? (is_numeric($metrics['updated_at_epoch'])
+                        ? (int) $metrics['updated_at_epoch']
+                        : 0)
                     : null
             ),
             'semaforo' => $semaforo,
