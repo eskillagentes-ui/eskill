@@ -125,12 +125,12 @@ class PregaoController extends BaseController
 
             $service = new PregaoEventExplorerService();
             $data = $service->list($accountId, [
-                'type' => $this->request->get('type'),
-                'source' => $this->request->get('source'),
-                'from' => $this->request->get('from'),
-                'to' => $this->request->get('to'),
-                'page' => $this->request->get('page'),
-                'per_page' => $this->request->get('per_page'),
+                'type' => $this->request->getScalar('type'),
+                'source' => $this->request->getScalar('source'),
+                'from' => $this->request->getScalar('from'),
+                'to' => $this->request->getScalar('to'),
+                'page' => $this->request->getScalar('page'),
+                'per_page' => $this->request->getScalar('per_page'),
             ]);
             echo json_encode(
                 ['success' => true, 'data' => $data, 'meta' => ['read_only' => true]],
@@ -241,7 +241,7 @@ class PregaoController extends BaseController
 
     private function resolveAccountId(): ?int
     {
-        $fromQuery = $this->request->get('account_id');
+        $fromQuery = $this->request->getScalar('account_id');
         $requestedId = null;
         if ($fromQuery !== null) {
             if ((!is_int($fromQuery) && !is_string($fromQuery))

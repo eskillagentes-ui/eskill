@@ -63,6 +63,7 @@ final class PregaoControllerAccountScopeContractTest extends TestCase
             strpos($events, 'try {')
         );
         self::assertStringContainsString('catch (\\InvalidArgumentException)', $events);
+        self::assertStringContainsString("\$this->request->getScalar('page')", $events);
     }
 
     public function testTodosEndpointsConvertemAccountIdArrayEmBadRequest(): void
@@ -81,5 +82,6 @@ final class PregaoControllerAccountScopeContractTest extends TestCase
         $boundary = substr($source, (int) strpos($source, 'private function resolveAccountIdBoundary'));
         self::assertStringContainsString('catch (\\InvalidArgumentException)', $boundary);
         self::assertStringContainsString('http_response_code(400)', $boundary);
+        self::assertStringContainsString("\$this->request->getScalar('account_id')", $source);
     }
 }
