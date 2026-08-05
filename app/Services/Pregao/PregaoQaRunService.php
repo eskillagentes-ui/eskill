@@ -163,8 +163,8 @@ final class PregaoQaRunService
         return $this->redis->lRem(self::PENDING_KEY, $rawJob, 1) === 1;
     }
 
-    /** @param null|callable(array<string,mixed>,array<string,mixed>):bool $ensureTerminalEvidence */
-    public function recoverPending(?callable $ensureTerminalEvidence = null): int
+    /** @param null|callable(array<string,mixed>,array<string,mixed>):bool $ensureEvidence */
+    public function recoverPending(?callable $ensureEvidence = null): int
     {
         $jobs = $this->redis->lRange(self::PENDING_KEY, 0, -1);
         if (!is_array($jobs)) {
@@ -188,11 +188,11 @@ final class PregaoQaRunService
             $state = is_string($stateRaw) ? json_decode($stateRaw, true) : null;
             if (is_array($state) && in_array(($state['status'] ?? null), ['passed', 'failed', 'blocked'], true)) {
                 $terminalManifest = is_array($state['manifest'] ?? null) ? $state['manifest'] : null;
-                if ($ensureTerminalEvidence === null
+                if ($ensureEvidence === null
                     || !is_array($terminalManifest)
                     || !$this->proof->verifyManifest($terminalManifest)
                     || $terminalManifest['run_id'] !== $runId
-                    || $ensureTerminalEvidence($terminalManifest, $state) !== true
+                    || $ensureEvidence($terminalManifest, $state) !== true
                 ) {
                     continue;
                 }
@@ -206,13 +206,22 @@ final class PregaoQaRunService
                 continue;
             }
             $expires = strtotime((string) $manifest['expires_at']);
+            if (is_array($state)
+                && ($state['status'] ?? null) === 'running'
+                && is_int($state['sequence'] ?? null)
+                && $state['sequence'] > 0
+                && $ensureEvidence !== null
+                && $ensureEvidence($manifest, $state) !== true
+            ) {
+                continue;
+            }
             if ($expires === false || $expires < time()) {
                 $this->failPendingClosed($manifest);
                 $terminalRaw = $this->redis->get(self::stateKey($runId));
                 $terminal = is_string($terminalRaw) ? json_decode($terminalRaw, true) : null;
-                if ($ensureTerminalEvidence !== null
+                if ($ensureEvidence !== null
                     && is_array($terminal)
-                    && $ensureTerminalEvidence($manifest, $terminal) === true
+                    && $ensureEvidence($manifest, $terminal) === true
                 ) {
                     $this->releaseActive((int) $manifest['account_id'], $runId);
                     $this->redis->lRem(self::PENDING_KEY, $rawJob, 0);
@@ -409,9 +418,20 @@ LUA;
         return 'pregao:qa:state:' . $runId;
     }
 
-    public static function receiptKey(string $runId): string
+    public static function receiptKey(string $runId, int $sequence): string
     {
-        return 'pregao:qa:receipt:' . $runId;
+        if (preg_match(self::RUN_ID_PATTERN, $runId) !== 1
+            || $sequence < 1
+            || $sequence > count(PregaoQaWorkerProtocol::STEPS)
+        ) {
+            throw new \InvalidArgumentException('Receipt QA inválido');
+        }
+        return 'pregao:qa:receipt:' . $runId . ':' . $sequence;
+    }
+
+    public static function receiptPublishedKey(string $runId, int $sequence): string
+    {
+        return self::receiptKey($runId, $sequence) . ':published';
     }
 
     public static function latestReceiptKey(int $accountId): string
@@ -425,21 +445,8 @@ LUA;
     /** @param array<string,mixed> $status */
     public static function statusHash(array $status): string
     {
-        $normalize = static function (mixed $value) use (&$normalize): mixed {
-            if (!is_array($value)) {
-                return $value;
-            }
-            $keys = array_keys($value);
-            if ($keys !== range(0, count($value) - 1)) {
-                ksort($value, SORT_STRING);
-            }
-            foreach ($value as $key => $child) {
-                $value[$key] = $normalize($child);
-            }
-            return $value;
-        };
         return hash('sha256', json_encode(
-            $normalize($status),
+            self::canonicalize($status),
             JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
         ));
     }
@@ -478,7 +485,22 @@ LUA;
             'event_ts' => $eventTs,
             'status' => $status,
         ];
+        $latest = [
+            'run_id' => $manifest['run_id'],
+            'sequence' => $status['sequence'],
+            'event_id' => $eventId,
+            'payload_hash' => $payloadHash,
+            'status_signature' => $status['signature'],
+        ];
         $lua = <<<'LUA'
+local existing = redis.call('GET', KEYS[2])
+if existing then
+    local receiptOk, receipt = pcall(cjson.decode, existing)
+    if receiptOk and receipt.payload_hash == ARGV[8] and tonumber(receipt.event_id) == tonumber(ARGV[9]) then
+        return 2
+    end
+    return 0
+end
 local raw = redis.call('GET', KEYS[1])
 if not raw then return 0 end
 local ok, state = pcall(cjson.decode, raw)
@@ -492,25 +514,27 @@ if not ok or type(state) ~= 'table'
     or state.observed_at ~= ARGV[7] then
     return 0
 end
-local existing = redis.call('GET', KEYS[2])
-if existing then
-    local receiptOk, receipt = pcall(cjson.decode, existing)
-    if receiptOk and receipt.payload_hash == ARGV[8] and tonumber(receipt.event_id) == tonumber(ARGV[9]) then
-        return 2
+local latestRaw = redis.call('GET', KEYS[3])
+if latestRaw then
+    local latestOk, latest = pcall(cjson.decode, latestRaw)
+    if not latestOk or type(latest) ~= 'table' or tonumber(latest.event_id) == nil then
+        return 0
     end
-    return 0
+    if tonumber(latest.event_id) >= tonumber(ARGV[9]) then
+        return 0
+    end
 end
 state.receipt_hash = ARGV[8]
 state.receipt_event_id = tonumber(ARGV[9])
 redis.call('SETEX', KEYS[1], tonumber(ARGV[10]), cjson.encode(state))
 redis.call('SETEX', KEYS[2], tonumber(ARGV[10]), ARGV[11])
-redis.call('SETEX', KEYS[3], tonumber(ARGV[10]), ARGV[1])
+redis.call('SETEX', KEYS[3], tonumber(ARGV[10]), ARGV[12])
 return 1
 LUA;
         // Lua constante: dados entram somente por KEYS/ARGV; nenhuma entrada é interpolada no script.
         $confirmed = $this->redis->eval($lua, [
             self::stateKey($manifest['run_id']),
-            self::receiptKey($manifest['run_id']),
+            self::receiptKey($manifest['run_id'], (int) $status['sequence']),
             self::latestReceiptKey((int) $manifest['account_id']),
             $manifest['run_id'],
             (string) $manifest['account_id'],
@@ -523,6 +547,7 @@ LUA;
             (string) $eventId,
             (string) $ttl,
             json_encode($receipt, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+            json_encode($latest, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
         ], 3);
         return $confirmed === 1 || $confirmed === 2;
     }
@@ -547,16 +572,24 @@ LUA;
             && ($state['status'] ?? null) === ($protocol['result'] ?? null)
             && ($state['observed_at'] ?? null) === ($protocol['observed_at'] ?? null)
             && ($state['screenshot_url'] ?? null) === $expectedScreenshot
-            && ($state['cursor'] ?? null) === ($protocol['cursor'] ?? null);
+            && self::canonicalValuesEqual($state['cursor'] ?? null, $protocol['cursor'] ?? null);
     }
 
     /** @return array<string,mixed>|null */
     public function receiptForStatus(array $status, int $accountId): ?array
     {
-        if (!$this->isStatusAuthoritative($status, $accountId)) {
+        if ($accountId <= 0 || !$this->proof->verifyStatus($status, $accountId)) {
             return null;
         }
-        return $this->decodeStoredArray(self::receiptKey((string) $status['run_id']));
+        $runId = $status['run_id'] ?? null;
+        $sequence = $status['sequence'] ?? null;
+        if (!is_string($runId) || preg_match(self::RUN_ID_PATTERN, $runId) !== 1 || !is_int($sequence)) {
+            return null;
+        }
+        $receipt = $this->decodeStoredArray(self::receiptKey($runId, $sequence));
+        return $receipt !== null && $this->receiptMatchesEvidence($receipt, $status, $accountId)
+            ? $receipt
+            : null;
     }
 
     /** @param array<string,mixed> $status */
@@ -569,8 +602,14 @@ LUA;
         if (!is_string($runId) || preg_match(self::RUN_ID_PATTERN, $runId) !== 1) {
             return false;
         }
-        $receipt = $this->decodeStoredArray(self::receiptKey($runId));
-        return $receipt !== null && $this->receiptMatchesState($receipt, $status, $accountId);
+        $receipt = $this->receiptForStatus($status, $accountId);
+        $latest = $this->decodeStoredArray(self::latestReceiptKey($accountId));
+        return $receipt !== null
+            && $latest !== null
+            && ($latest['run_id'] ?? null) === $runId
+            && ($latest['sequence'] ?? null) === ($status['sequence'] ?? null)
+            && ($latest['event_id'] ?? null) === ($receipt['event_id'] ?? null)
+            && ($latest['payload_hash'] ?? null) === ($receipt['payload_hash'] ?? null);
     }
 
     /** @return array<string,mixed>|null */
@@ -579,15 +618,78 @@ LUA;
         if ($accountId <= 0) {
             return null;
         }
-        $runId = $this->redis->get(self::latestReceiptKey($accountId));
-        if (!is_string($runId) || preg_match(self::RUN_ID_PATTERN, $runId) !== 1) {
+        $latest = $this->decodeStoredArray(self::latestReceiptKey($accountId));
+        $runId = $latest['run_id'] ?? null;
+        $sequence = $latest['sequence'] ?? null;
+        if (!is_string($runId) || preg_match(self::RUN_ID_PATTERN, $runId) !== 1 || !is_int($sequence)) {
             return null;
         }
-        $receipt = $this->decodeStoredArray(self::receiptKey($runId));
+        $receipt = $this->decodeStoredArray(self::receiptKey($runId, $sequence));
         $status = is_array($receipt['status'] ?? null) ? $receipt['status'] : null;
-        return $receipt !== null && $status !== null && $this->receiptMatchesState($receipt, $status, $accountId)
+        return $receipt !== null && $status !== null && $this->isStatusAuthoritative($status, $accountId)
             ? $receipt
             : null;
+    }
+
+    /** @param array<string,mixed> $receipt @param array<string,mixed> $event */
+    public function publishEvidenceOnce(array $receipt, array $event): bool
+    {
+        $status = is_array($receipt['status'] ?? null) ? $receipt['status'] : null;
+        $accountId = $receipt['account_id'] ?? null;
+        $runId = $receipt['run_id'] ?? null;
+        $sequence = $receipt['sequence'] ?? null;
+        if (!is_array($status)
+            || !is_int($accountId)
+            || !is_string($runId)
+            || !is_int($sequence)
+            || !$this->receiptMatchesEvidence($receipt, $status, $accountId)
+            || ($event['type'] ?? null) !== 'qa.status'
+            || ($event['account_id'] ?? null) !== $accountId
+            || ($event['payload'] ?? null) !== $status
+            || ($event['ts'] ?? null) !== ($receipt['event_ts'] ?? null)
+        ) {
+            return false;
+        }
+        $ttl = in_array($status['result'], ['passed', 'failed', 'blocked'], true)
+            ? self::EVIDENCE_TTL_SECONDS
+            : self::RUN_TTL_SECONDS;
+        $lua = <<<'LUA'
+local receiptRaw = redis.call('GET', KEYS[1])
+local latestRaw = redis.call('GET', KEYS[2])
+if not receiptRaw or not latestRaw then return 0 end
+local receiptOk, stored = pcall(cjson.decode, receiptRaw)
+local latestOk, latest = pcall(cjson.decode, latestRaw)
+if not receiptOk or not latestOk
+    or stored.payload_hash ~= ARGV[1]
+    or tonumber(stored.event_id) ~= tonumber(ARGV[2])
+    or latest.run_id ~= ARGV[3]
+    or tonumber(latest.sequence) ~= tonumber(ARGV[4])
+    or tonumber(latest.event_id) ~= tonumber(ARGV[2])
+    or latest.payload_hash ~= ARGV[1] then
+    return 0
+end
+if redis.call('EXISTS', KEYS[3]) == 1 then return 2 end
+redis.call('SETEX', KEYS[3], tonumber(ARGV[5]), '1')
+redis.call('PUBLISH', ARGV[6], ARGV[7])
+redis.call('LPUSH', ARGV[8], ARGV[7])
+redis.call('LTRIM', ARGV[8], 0, 999)
+return 1
+LUA;
+        // Script constante: somente chaves e valores validados entram via KEYS/ARGV.
+        $published = $this->redis->eval($lua, [
+            self::receiptKey($runId, $sequence),
+            self::latestReceiptKey($accountId),
+            self::receiptPublishedKey($runId, $sequence),
+            $receipt['payload_hash'],
+            (string) $receipt['event_id'],
+            $runId,
+            (string) $sequence,
+            (string) $ttl,
+            PregaoEmitService::CHANNEL,
+            json_encode($event, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
+            'pregao:fanout',
+        ], 3);
+        return $published === 1 || $published === 2;
     }
 
     public static function lockKey(string $runId): string
@@ -1027,7 +1129,7 @@ LUA;
     }
 
     /** @param array<string,mixed> $receipt @param array<string,mixed> $status */
-    private function receiptMatchesState(array $receipt, array $status, int $accountId): bool
+    private function receiptMatchesEvidence(array $receipt, array $status, int $accountId): bool
     {
         $runId = $status['run_id'];
         $payloadHash = self::statusHash($status);
@@ -1046,20 +1148,6 @@ LUA;
         ) {
             return false;
         }
-        $state = $this->decodeStoredArray(self::stateKey($runId));
-        if ($state === null
-            || ($state['run_id'] ?? null) !== $runId
-            || ($state['account_id'] ?? null) !== $accountId
-            || ($state['manifest_hash'] ?? null) !== $status['manifest_hash']
-            || ($state['sequence'] ?? null) !== $status['sequence']
-            || ($state['step'] ?? null) !== $status['step']
-            || ($state['status'] ?? null) !== $status['result']
-            || ($state['observed_at'] ?? null) !== $status['observed_at']
-            || ($state['receipt_hash'] ?? null) !== $payloadHash
-            || ($state['receipt_event_id'] ?? null) !== $receipt['event_id']
-        ) {
-            return false;
-        }
         if ($status['result'] !== 'running') {
             return in_array($status['result'], ['passed', 'failed', 'blocked'], true);
         }
@@ -1067,6 +1155,27 @@ LUA;
         return $manifest !== null
             && $manifest['account_id'] === $accountId
             && $manifest['manifest_hash'] === $status['manifest_hash'];
+    }
+
+    private static function canonicalValuesEqual(mixed $left, mixed $right): bool
+    {
+        return json_encode(self::canonicalize($left), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)
+            === json_encode(self::canonicalize($right), JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    }
+
+    private static function canonicalize(mixed $value): mixed
+    {
+        if (!is_array($value)) {
+            return $value;
+        }
+        $keys = array_keys($value);
+        if ($keys !== range(0, count($value) - 1)) {
+            ksort($value, SORT_STRING);
+        }
+        foreach ($value as $key => $child) {
+            $value[$key] = self::canonicalize($child);
+        }
+        return $value;
     }
 
     /** @param array<string,mixed> $manifest */

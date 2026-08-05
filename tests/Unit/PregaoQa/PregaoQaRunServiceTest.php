@@ -501,7 +501,7 @@ final class PregaoQaRunServiceTest extends TestCase
                 self::logicalAnd(self::stringContains('receipt_event_id'), self::stringContains('SETEX')),
                 self::callback(static fn (array $args): bool => array_slice($args, 0, 3) === [
                     PregaoQaRunService::stateKey($runId),
-                    PregaoQaRunService::receiptKey($runId),
+                    PregaoQaRunService::receiptKey($runId, 1),
                     PregaoQaRunService::latestReceiptKey(1335),
                 ]),
                 3

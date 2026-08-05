@@ -37,9 +37,6 @@ final class PregaoQaStatusProducer
         ) {
             throw new \InvalidArgumentException('Manifesto QA inválido ou expirado');
         }
-        if (!$this->runs->protocolMatchesPersistedState($manifest, $protocol)) {
-            throw new \InvalidArgumentException('Protocolo QA sem progressão durável correspondente');
-        }
         $validated = $protocol;
         $frameUrl = $validated['screenshot'] === 'latest.png'
             ? '/qa/frame/' . $manifest['run_id']
@@ -61,23 +58,36 @@ final class PregaoQaStatusProducer
         ], $manifest['account_id']);
         $receipt = $this->runs->receiptForStatus($payload, (int) $manifest['account_id']);
         if ($receipt !== null) {
-            return $this->eventFromReceipt($payload, (int) $manifest['account_id'], $receipt);
+            $event = $this->eventFromReceipt($payload, (int) $manifest['account_id'], $receipt);
+            if ($this->runs->isStatusAuthoritative($payload, (int) $manifest['account_id'])
+                && !$this->runs->publishEvidenceOnce($receipt, $event)
+            ) {
+                throw new \RuntimeException('Falha ao publicar evidência QA autoritativa');
+            }
+            return $event;
         }
-        $emitted = $this->emitter->emitTrustedQaStatusWithReceipt(
+        if (!$this->runs->protocolMatchesPersistedState($manifest, $protocol)) {
+            throw new \InvalidArgumentException('Protocolo QA sem progressão durável correspondente');
+        }
+        $persisted = $this->emitter->persistTrustedQaStatus(
             $payload,
             (int) $manifest['account_id'],
             $this->proof
         );
-        if (!$this->runs->confirmEvidence($manifest, $payload, $emitted['event_id'], $emitted['event']['ts'])) {
+        if (!$this->runs->confirmEvidence($manifest, $payload, $persisted['event_id'], $persisted['event']['ts'])) {
             throw new \RuntimeException('Falha ao confirmar evidência QA');
         }
-        return $emitted['event'];
+        $receipt = $this->runs->receiptForStatus($payload, (int) $manifest['account_id']);
+        if ($receipt === null || !$this->runs->publishEvidenceOnce($receipt, $persisted['event'])) {
+            throw new \RuntimeException('Falha ao publicar evidência QA autoritativa');
+        }
+        return $persisted['event'];
     }
 
     /** @param array<string,mixed> $manifest @param array<string,mixed> $state */
     public function repairEvidence(array $manifest, array $state): bool
     {
-        if (!in_array($state['status'] ?? null, ['passed', 'failed', 'blocked'], true)) {
+        if (!in_array($state['status'] ?? null, ['running', 'passed', 'failed', 'blocked'], true)) {
             return false;
         }
         $screenshotUrl = $state['screenshot_url'] ?? null;

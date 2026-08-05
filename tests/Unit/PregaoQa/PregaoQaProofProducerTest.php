@@ -59,25 +59,24 @@ final class PregaoQaProofProducerTest extends TestCase
         $redis->method('get')->willReturnCallback(static function (string $key) use (&$store): string|false {
             return $store[$key] ?? false;
         });
-        $redis->method('eval')->willReturnCallback(static function (string $lua, array $args, int $keyCount) use (&$store): int {
+        $redis->method('eval')->willReturnCallback(static function (string $lua, array $args, int $keyCount) use (&$store, &$published): int {
             if ($keyCount !== 3) {
                 return 0;
             }
+            if (str_contains($lua, "redis.call('PUBLISH'")) {
+                $published = json_decode((string) $args[9], true, 512, JSON_THROW_ON_ERROR);
+                return 1;
+            }
             $receipt = json_decode((string) $args[13], true, 512, JSON_THROW_ON_ERROR);
+            $latest = json_decode((string) $args[14], true, 512, JSON_THROW_ON_ERROR);
             $state = json_decode((string) $store[$args[0]], true, 512, JSON_THROW_ON_ERROR);
             $state['receipt_hash'] = $receipt['payload_hash'];
             $state['receipt_event_id'] = $receipt['event_id'];
             $store[$args[0]] = json_encode($state, JSON_THROW_ON_ERROR);
             $store[$args[1]] = json_encode($receipt, JSON_THROW_ON_ERROR);
-            $store[$args[2]] = $receipt['run_id'];
+            $store[$args[2]] = json_encode($latest, JSON_THROW_ON_ERROR);
             return 1;
         });
-        $redis->method('publish')->willReturnCallback(static function (string $channel, string $json) use (&$published): int {
-            $published = json_decode($json, true);
-            return 1;
-        });
-        $redis->method('lPush')->willReturn(1);
-        $redis->method('lTrim')->willReturn(true);
         $runs = new PregaoQaRunService($redis, $proof);
 
         $producer = new PregaoQaStatusProducer(new PregaoEmitService($db, $redis), $proof, $runs);
@@ -168,26 +167,29 @@ final class PregaoQaProofProducerTest extends TestCase
         $redis->method('get')->willReturnCallback(static function (string $key) use (&$store): string|false {
             return $store[$key] ?? false;
         });
-        $redis->method('eval')->willReturnCallback(static function (string $lua, array $args, int $keyCount) use (&$store): int {
+        $publishCount = 0;
+        $redis->method('eval')->willReturnCallback(static function (string $lua, array $args, int $keyCount) use (&$store, &$publishCount): int {
             if ($keyCount !== 3) {
                 return 0;
             }
+            if (str_contains($lua, "redis.call('PUBLISH'")) {
+                if (isset($store[$args[2]])) {
+                    return 2;
+                }
+                $store[$args[2]] = '1';
+                $publishCount++;
+                return 1;
+            }
             $receipt = json_decode((string) $args[13], true, 512, JSON_THROW_ON_ERROR);
+            $latest = json_decode((string) $args[14], true, 512, JSON_THROW_ON_ERROR);
             $state = json_decode((string) $store[$args[0]], true, 512, JSON_THROW_ON_ERROR);
             $state['receipt_hash'] = $receipt['payload_hash'];
             $state['receipt_event_id'] = $receipt['event_id'];
             $store[$args[0]] = json_encode($state, JSON_THROW_ON_ERROR);
             $store[$args[1]] = json_encode($receipt, JSON_THROW_ON_ERROR);
-            $store[$args[2]] = $receipt['run_id'];
+            $store[$args[2]] = json_encode($latest, JSON_THROW_ON_ERROR);
             return 1;
         });
-        $publishCount = 0;
-        $redis->method('publish')->willReturnCallback(static function () use (&$publishCount): int {
-            $publishCount++;
-            return 1;
-        });
-        $redis->method('lPush')->willReturn(1);
-        $redis->method('lTrim')->willReturn(true);
         $db = new PDO('sqlite::memory:');
         $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         $db->exec('CREATE TABLE pregao_events (id INTEGER PRIMARY KEY AUTOINCREMENT, account_id INTEGER, type TEXT, ts TEXT, payload TEXT, source TEXT)');
@@ -209,8 +211,8 @@ final class PregaoQaProofProducerTest extends TestCase
             'started_at' => $manifest['created_at'],
             'manifest_hash' => $manifest['manifest_hash'],
         ], 1335);
-        // Simula crash depois de DB/publish e antes de confirmEvidence().
-        $beforeCrash = $emitter->emitTrustedQaStatusWithReceipt($signedStatus, 1335, $proof);
+        // Simula crash depois do DB e antes de confirmEvidence().
+        $beforeCrash = $emitter->persistTrustedQaStatus($signedStatus, 1335, $proof);
 
         $first = $producer->emit($manifest, $protocol);
         $second = $producer->emit($manifest, $protocol);
@@ -220,7 +222,7 @@ final class PregaoQaProofProducerTest extends TestCase
         self::assertSame(1, (int) $db->query("SELECT COUNT(*) FROM pregao_events WHERE type = 'qa.status'")->fetchColumn());
         self::assertSame(1, $publishCount);
         $receipt = json_decode(
-            $store[PregaoQaRunService::receiptKey($manifest['run_id'])],
+            $store[PregaoQaRunService::receiptKey($manifest['run_id'], 1)],
             true,
             512,
             JSON_THROW_ON_ERROR

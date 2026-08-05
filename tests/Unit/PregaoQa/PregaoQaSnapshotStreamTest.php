@@ -148,10 +148,16 @@ final class PregaoQaSnapshotStreamTest extends TestCase
             'receipt_event_id' => $authoritativeId,
         ];
         $redis = $this->createMock(Redis::class);
-        $redis->method('get')->willReturnCallback(static function (string $key) use ($manifest, $receipt, $state): string|false {
+        $redis->method('get')->willReturnCallback(static function (string $key) use ($manifest, $receipt, $state, $terminal, $authoritativeId): string|false {
             return match ($key) {
-                PregaoQaRunService::latestReceiptKey(1335) => $manifest['run_id'],
-                PregaoQaRunService::receiptKey($manifest['run_id']) => json_encode($receipt, JSON_THROW_ON_ERROR),
+                PregaoQaRunService::latestReceiptKey(1335) => json_encode([
+                    'run_id' => $manifest['run_id'],
+                    'sequence' => 5,
+                    'event_id' => $authoritativeId,
+                    'payload_hash' => $receipt['payload_hash'],
+                    'status_signature' => $terminal['signature'],
+                ], JSON_THROW_ON_ERROR),
+                PregaoQaRunService::receiptKey($manifest['run_id'], 5) => json_encode($receipt, JSON_THROW_ON_ERROR),
                 PregaoQaRunService::stateKey($manifest['run_id']) => json_encode($state, JSON_THROW_ON_ERROR),
                 default => false,
             };
