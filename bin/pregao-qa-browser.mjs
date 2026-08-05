@@ -14,26 +14,91 @@ export const QA_STEPS = Object.freeze([
 ]);
 const QA_RESULTS = new Set(['running', 'passed', 'failed', 'blocked']);
 const READONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+export class NetworkPolicyViolation extends Error {}
 
 function parseHttpUrl(rawValue, label) {
   let target;
   try {
     target = new URL(rawValue);
   } catch (error) {
-    throw new Error(`${label}: URL inválida`);
+    throw new NetworkPolicyViolation(`${label}: URL inválida`);
   }
-  if (!['http:', 'https:'].includes(target.protocol)) throw new Error(`${label}: protocolo bloqueado`);
-  if (target.username || target.password) throw new Error(`${label}: credenciais embutidas bloqueadas`);
+  if (!['http:', 'https:'].includes(target.protocol)) throw new NetworkPolicyViolation(`${label}: protocolo bloqueado`);
+  if (target.username || target.password) throw new NetworkPolicyViolation(`${label}: credenciais embutidas bloqueadas`);
   return target;
 }
 
 export function assertReadonlyRequest(method, rawUrl, baseUrl) {
   const target = parseHttpUrl(rawUrl, 'request');
-  if (target.origin !== baseUrl.origin) throw new Error('request fora de same-origin');
+  if (target.origin !== baseUrl.origin) throw new NetworkPolicyViolation('request fora de same-origin');
   const normalizedMethod = String(method).toUpperCase();
-  if (!READONLY_METHODS.has(normalizedMethod)) throw new Error(`método bloqueado: ${normalizedMethod}`);
+  if (!READONLY_METHODS.has(normalizedMethod)) throw new NetworkPolicyViolation(`método bloqueado: ${normalizedMethod}`);
   return target;
+}
+
+export function networkPolicyDecision(method, rawUrl, baseUrl) {
+  const target = parseHttpUrl(rawUrl, 'request');
+  const normalizedMethod = String(method).toUpperCase();
+  if (target.origin === baseUrl.origin) {
+    return { kind: 'same-origin', target: assertReadonlyRequest(normalizedMethod, target.href, baseUrl) };
+  }
+  if (normalizedMethod !== 'GET') throw new NetworkPolicyViolation(`método bloqueado: ${normalizedMethod}`);
+
+  const known = [
+    ['fonts.googleapis.com', /^\/css2$/, 'text/css; charset=utf-8', true],
+    ['cdn.jsdelivr.net', /^\/npm\/bootstrap-icons@1\.11\.0\/font\/bootstrap-icons\.css$/, 'text/css; charset=utf-8', true],
+    ['cdn.jsdelivr.net', /^\/npm\/bootstrap@5\.3\.0\/dist\/css\/bootstrap\.min\.css$/, 'text/css; charset=utf-8', true],
+    ['cdn.jsdelivr.net', /^\/npm\/chart\.js@4\.4\.7\/dist\/chart\.umd\.min\.js$/, 'application/javascript; charset=utf-8', true],
+    ['cdn.jsdelivr.net', /^\/npm\/bootstrap@5\.3\.0\/dist\/js\/bootstrap\.bundle\.min\.js$/, 'application/javascript; charset=utf-8', true],
+    ['ui-avatars.com', /^\/api\/$/, 'image/svg+xml; charset=utf-8', false],
+  ];
+  const match = known.find(([host, pathname]) => target.hostname === host && pathname.test(target.pathname));
+  if (!match) throw new NetworkPolicyViolation('egress externo inesperado');
+  const contentType = match[2];
+  return {
+    kind: 'intercept',
+    critical: match[3],
+    contentType,
+    body: contentType.startsWith('image/')
+      ? '<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'
+      : '/* dependência externa interceptada: egress desabilitado no QA read-only */',
+  };
+}
+
+export function assertReadonlyRedirect({ status, method, fromUrl, location, baseUrl }) {
+  if (!REDIRECT_STATUSES.has(status) || typeof location !== 'string' || location.length === 0) {
+    throw new NetworkPolicyViolation('redirect inválido');
+  }
+  const source = assertReadonlyRequest(method, fromUrl, baseUrl);
+  let target;
+  try {
+    target = new URL(location, source);
+  } catch (error) {
+    throw new NetworkPolicyViolation('redirect inválido');
+  }
+  assertReadonlyRequest(method, target.href, baseUrl);
+  return target;
+}
+
+export function auditUserAgent(runId) {
+  assertUuid(runId, 'run_id');
+  return `ESKILL-Pregao-QA-ReadOnly/1.0 (same-origin; run=${runId})`;
+}
+
+export function assertAccountScope(renderedAccountId, snapshotBody, expectedAccountId) {
+  if (!Number.isInteger(expectedAccountId) || expectedAccountId < 1) {
+    throw new Error('account_id esperado inválido');
+  }
+  if (String(renderedAccountId) !== String(expectedAccountId)) {
+    throw new Error('dashboard fora do escopo da conta');
+  }
+  if (!snapshotBody || typeof snapshotBody !== 'object' || snapshotBody.success !== true
+    || !snapshotBody.data || snapshotBody.data.account_id !== expectedAccountId) {
+    throw new Error('snapshot fora do escopo da conta');
+  }
 }
 
 function assertReadonlyWebSocket(rawUrl, baseUrl) {
@@ -89,7 +154,7 @@ export function createProtocolRecord({ runId, sequence, step, result, screenshot
 }
 
 export async function executeProtocolStep({
-  runId, sequence, step, action, capture, write, now, terminal = false,
+  runId, sequence, step, action, capture, write, now, terminal = false, blocked = () => false,
 }) {
   let failed = false;
   let screenshot = null;
@@ -106,16 +171,18 @@ export async function executeProtocolStep({
     failed = true;
     screenshot = null;
   }
+  const wasBlocked = Boolean(blocked());
   const record = createProtocolRecord({
     runId,
     sequence,
     step,
-    result: failed ? 'failed' : (terminal ? 'passed' : 'running'),
+    result: wasBlocked ? 'blocked' : (failed ? 'failed' : (terminal ? 'passed' : 'running')),
     screenshot,
     cursor,
     observedAt: now(),
   });
   write(record);
+  if (wasBlocked) throw new NetworkPolicyViolation(`etapa ${step} bloqueada`);
   if (failed) throw new Error(`etapa ${step} falhou`);
   return record;
 }
@@ -167,6 +234,9 @@ export function parseRunnerEnv(env) {
     throw new Error('PREGAO_QA_BASE_URL deve conter somente a origem');
   }
   assertUuid(env.PREGAO_QA_RUN_ID, 'PREGAO_QA_RUN_ID');
+  if (!/^[1-9][0-9]*$/.test(env.PREGAO_QA_ACCOUNT_ID || '')) {
+    throw new Error('PREGAO_QA_ACCOUNT_ID inválido');
+  }
   if (typeof env.PREGAO_QA_OUTPUT_DIR !== 'string' || !path.isAbsolute(env.PREGAO_QA_OUTPUT_DIR)) {
     throw new Error('PREGAO_QA_OUTPUT_DIR absoluto é obrigatório');
   }
@@ -175,6 +245,7 @@ export function parseRunnerEnv(env) {
   return {
     baseUrl,
     runId: env.PREGAO_QA_RUN_ID,
+    accountId: Number(env.PREGAO_QA_ACCOUNT_ID),
     outputRoot: path.resolve(env.PREGAO_QA_OUTPUT_DIR),
     cookie: parseCookie(env.PREGAO_QA_SESSION_COOKIE),
     executablePath,
@@ -197,12 +268,18 @@ export async function run(config) {
   let context;
   let sequence = 0;
   let cursor = null;
-  const observations = { javascript: 0, http: 0, blocked: 0 };
+  const observations = {
+    javascript: 0,
+    http: 0,
+    violations: 0,
+    criticalDependencies: 0,
+  };
 
   try {
     context = await browser.newContext({
       serviceWorkers: 'block',
       acceptDownloads: false,
+      userAgent: auditUserAgent(config.runId),
       viewport: { width: 1440, height: 1000 },
     });
     await context.addCookies([{
@@ -214,11 +291,38 @@ export async function run(config) {
     }]);
 
     await context.route('**/*', async (route) => {
+      const request = route.request();
       try {
-        assertReadonlyRequest(route.request().method(), route.request().url(), config.baseUrl);
-        await route.continue();
+        const decision = networkPolicyDecision(request.method(), request.url(), config.baseUrl);
+        if (decision.kind === 'intercept') {
+          if (decision.critical) observations.criticalDependencies += 1;
+          await route.fulfill({
+            status: 200,
+            contentType: decision.contentType,
+            body: decision.body,
+            headers: { 'cache-control': 'no-store', 'x-pregao-qa-intercepted': '1' },
+          });
+          return;
+        }
+        const requestTarget = new URL(request.url());
+        if (request.method() === 'GET' && requestTarget.pathname === '/api/pregao/stream') {
+          await route.continue();
+          return;
+        }
+        const response = await route.fetch({ maxRedirects: 0 });
+        if (REDIRECT_STATUSES.has(response.status())) {
+          assertReadonlyRedirect({
+            status: response.status(),
+            method: request.method(),
+            fromUrl: request.url(),
+            location: response.headers().location || '',
+            baseUrl: config.baseUrl,
+          });
+        }
+        await route.fulfill({ response });
       } catch (error) {
-        observations.blocked += 1;
+        if (error instanceof NetworkPolicyViolation) observations.violations += 1;
+        else observations.http += 1;
         await route.abort('blockedbyclient');
       }
     });
@@ -229,7 +333,7 @@ export async function run(config) {
         assertReadonlyWebSocket(socket.url(), config.baseUrl);
         socket.connectToServer();
       } catch (error) {
-        observations.blocked += 1;
+        observations.violations += 1;
         socket.close({ code: 1008, reason: 'same-origin obrigatório' });
       }
     });
@@ -254,10 +358,13 @@ export async function run(config) {
         write: emit,
         now: () => new Date().toISOString(),
         terminal: name === 'console_http',
+        blocked: () => observations.violations !== 0
+          || (name === 'console_http' && observations.criticalDependencies !== 0),
       });
     }
 
     let snapshotResponse;
+    let renderedAccountId;
     await step('dashboard', async () => {
       const snapshotWait = page.waitForResponse((response) => {
         const target = new URL(response.url());
@@ -274,6 +381,7 @@ export async function run(config) {
         throw new Error('dashboard redirecionou');
       }
       await page.locator('#pregao-root[data-read-only="1"]').waitFor({ state: 'visible', timeout: 10000 });
+      renderedAccountId = await page.locator('#pregao-root').getAttribute('data-account-id');
       snapshotResponse = await snapshotWait;
       const box = await page.locator('.pg-header').boundingBox();
       if (!box) throw new Error('cabeçalho indisponível');
@@ -291,6 +399,8 @@ export async function run(config) {
         config.baseUrl,
       );
       await snapshotResponse.finished();
+      const snapshotBody = await snapshotResponse.json();
+      assertAccountScope(renderedAccountId, snapshotBody, config.accountId);
       await page.locator('#semaText').waitFor({ state: 'visible', timeout: 10000 });
       const box = await page.locator('#semaText').boundingBox();
       if (!box) throw new Error('semáforo indisponível');
@@ -328,8 +438,11 @@ export async function run(config) {
     });
 
     await step('console_http', async () => {
-      if (observations.javascript !== 0 || observations.http !== 0 || observations.blocked !== 0) {
+      if (observations.javascript !== 0 || observations.http !== 0) {
         throw new Error('erros de runtime observados');
+      }
+      if (observations.violations !== 0 || observations.criticalDependencies !== 0) {
+        throw new NetworkPolicyViolation('execução incompleta por política de rede');
       }
       return cursor;
     });

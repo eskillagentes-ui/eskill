@@ -8,6 +8,7 @@ use App\Services\Pregao\PregaoQaProof;
 use App\Services\Pregao\PregaoQaRunService;
 use App\Services\Pregao\PregaoQaSessionService;
 use App\Services\Pregao\PregaoQaStatusProducer;
+use App\Services\Pregao\PregaoQaWorkerEnvironment;
 use App\Services\Pregao\PregaoQaWorkerProtocol;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
@@ -37,6 +38,9 @@ if (!in_array($baseScheme, ['http', 'https'], true)
 
 $redis = PregaoQaRunService::connectRedis();
 $runs = new PregaoQaRunService($redis, $proof);
+$privateRoot = $root . '/storage/private/pregao-qa';
+PregaoQaRunService::purgeExpiredFrames($privateRoot);
+$runs->recoverPending();
 $claim = $runs->claimNext();
 if ($claim === null) {
     exit(0);
@@ -45,14 +49,16 @@ if ($claim === null) {
 $manifest = $claim['manifest'];
 $runId = $manifest['run_id'];
 $lockToken = $claim['lock_token'];
+$pendingJob = $claim['pending_job'];
 $sessionPrefix = (string) ($_ENV['PREGAO_QA_SESSION_PREFIX'] ?? 'PHPREDIS_SESSION:');
 $sessions = new PregaoQaSessionService($redis, $sessionPrefix);
 $sessionId = '';
 $process = null;
 $producer = new PregaoQaStatusProducer(new PregaoEmitService(null, $redis), $proof);
 $previousSequence = 0;
+$previousResult = null;
 $terminalResult = null;
-$privateRoot = $root . '/storage/private/pregao-qa';
+$workerExitCode = 0;
 
 try {
     $sessionId = $sessions->create(
@@ -79,15 +85,18 @@ try {
         1 => ['pipe', 'w'],
         2 => ['pipe', 'w'],
     ];
-    $environment = getenv();
-    if (!is_array($environment)) {
-        $environment = [];
+    $hostEnvironment = getenv();
+    if (!is_array($hostEnvironment)) {
+        $hostEnvironment = [];
     }
-    $environment = array_merge($environment, $_ENV);
-    $environment['PREGAO_QA_RUN_ID'] = $runId;
-    $environment['PREGAO_QA_BASE_URL'] = $baseUrl;
-    $environment['PREGAO_QA_OUTPUT_DIR'] = $outputDirectory;
-    $environment['PREGAO_QA_SESSION_COOKIE'] = 'PHPSESSID=' . $sessionId;
+    $hostEnvironment = [...$hostEnvironment, ...$_ENV];
+    $environment = PregaoQaWorkerEnvironment::build($hostEnvironment, [
+        'PREGAO_QA_RUN_ID' => $runId,
+        'PREGAO_QA_BASE_URL' => $baseUrl,
+        'PREGAO_QA_OUTPUT_DIR' => $outputDirectory,
+        'PREGAO_QA_SESSION_COOKIE' => 'PHPSESSID=' . $sessionId,
+        'PREGAO_QA_ACCOUNT_ID' => (string) $manifest['account_id'],
+    ]);
     $process = proc_open($command, $descriptors, $pipes, $root, $environment);
     if (!is_resource($process)) {
         throw new RuntimeException('qa_browser_start_failed');
@@ -98,12 +107,13 @@ try {
     stream_set_blocking($pipes[2], false);
 
     while (($line = fgets($pipes[1])) !== false) {
-        $protocol = PregaoQaWorkerProtocol::decode($line, $runId, $previousSequence);
+        $protocol = PregaoQaWorkerProtocol::decode($line, $runId, $previousSequence, $previousResult);
         if ($protocol === null) {
             proc_terminate($process);
             throw new RuntimeException('qa_browser_protocol_invalid');
         }
         $previousSequence = $protocol['sequence'];
+        $previousResult = $protocol['result'];
         if ($protocol['screenshot'] === 'latest.png') {
             PregaoQaRunService::retainLatestFrame(
                 $outputDirectory . '/latest.png',
@@ -142,7 +152,7 @@ try {
             $blocked = [
                 'run_id' => $runId,
                 'sequence' => $previousSequence + 1,
-                'step' => 'console_http',
+                'step' => PregaoQaWorkerProtocol::STEPS[$previousSequence] ?? 'console_http',
                 'result' => 'blocked',
                 'screenshot' => null,
                 'cursor' => null,
@@ -150,6 +160,7 @@ try {
             ];
             $runs->updateState($manifest, $blocked);
             $producer->emit($manifest, $blocked);
+            $terminalResult = 'blocked';
         } catch (Throwable) {
             log_error('Pregao QA blocked status emit failed', [
                 'reason' => 'qa_blocked_status_emit_failed',
@@ -158,7 +169,7 @@ try {
         }
     }
     log_error('Pregao QA worker failed', ['reason' => 'qa_worker_failed', 'run_id' => $runId]);
-    exit(1);
+    $workerExitCode = 1;
 } finally {
     if (is_resource($process)) {
         proc_terminate($process);
@@ -167,8 +178,14 @@ try {
     if ($sessionId !== '') {
         $sessions->destroy($sessionId);
     }
+    if ($terminalResult !== null) {
+        $runs->releaseActive($manifest['account_id'], $runId);
+        if (!$runs->ackPending($runId, $pendingJob)) {
+            log_error('Pregao QA pending ack failed', ['reason' => 'qa_pending_ack_failed', 'run_id' => $runId]);
+            $workerExitCode = 1;
+        }
+    }
     $runs->release($runId, $lockToken);
-    $runs->releaseActive($manifest['account_id'], $runId);
 }
 
-exit(0);
+exit($workerExitCode);

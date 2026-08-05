@@ -9,9 +9,11 @@ use Redis;
 final class PregaoQaRunService
 {
     public const QUEUE_KEY = 'pregao:qa:queue';
+    public const PENDING_KEY = 'pregao:qa:pending';
     public const RUN_ID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/D';
     public const RUN_TTL_SECONDS = 900;
     public const LOCK_TTL_SECONDS = 900;
+    public const EVIDENCE_TTL_SECONDS = 86400;
     private const ACTIVE_PREFIX = 'pregao:qa:active:';
 
     private Redis $redis;
@@ -97,35 +99,96 @@ final class PregaoQaRunService
         ];
     }
 
-    /** @return array{manifest:array<string,mixed>,lock_token:string}|null */
+    /** @return array{manifest:array<string,mixed>,lock_token:string,pending_job:string}|null */
     public function claimNext(): ?array
     {
-        $rawJob = $this->redis->rPop(self::QUEUE_KEY);
+        $rawJob = $this->redis->rPopLPush(self::QUEUE_KEY, self::PENDING_KEY);
         if (!is_string($rawJob) || $rawJob === '') {
             return null;
         }
-        $job = json_decode($rawJob, true);
-        if (!is_array($job) || array_keys($job) !== ['run_id'] || !is_string($job['run_id'])
-            || preg_match(self::RUN_ID_PATTERN, $job['run_id']) !== 1
-        ) {
+        $runId = self::decodeJob($rawJob);
+        if ($runId === null) {
+            $this->redis->lRem(self::PENDING_KEY, $rawJob, 1);
             return null;
         }
-        $runId = $job['run_id'];
         $token = bin2hex(random_bytes(24));
         if ($this->redis->set(self::lockKey($runId), $token, ['nx', 'ex' => self::LOCK_TTL_SECONDS]) !== true) {
             return null;
         }
         $manifest = $this->loadManifest($runId);
         if ($manifest === null) {
+            $this->ackPending($runId, $rawJob);
             $this->release($runId, $token);
             return null;
         }
         $expires = strtotime((string) $manifest['expires_at']);
         if ($expires === false || $expires < time()) {
+            $this->failPendingClosed($manifest);
+            $this->ackPending($runId, $rawJob);
+            $this->releaseActive((int) $manifest['account_id'], $runId);
             $this->release($runId, $token);
             return null;
         }
-        return ['manifest' => $manifest, 'lock_token' => $token];
+        return ['manifest' => $manifest, 'lock_token' => $token, 'pending_job' => $rawJob];
+    }
+
+    public function ackPending(string $runId, string $rawJob): bool
+    {
+        if (preg_match(self::RUN_ID_PATTERN, $runId) !== 1 || self::decodeJob($rawJob) !== $runId) {
+            return false;
+        }
+        return $this->redis->lRem(self::PENDING_KEY, $rawJob, 1) === 1;
+    }
+
+    public function recoverPending(): int
+    {
+        $jobs = $this->redis->lRange(self::PENDING_KEY, 0, -1);
+        if (!is_array($jobs)) {
+            return 0;
+        }
+        $recovered = 0;
+        foreach ($jobs as $rawJob) {
+            if (!is_string($rawJob) || $rawJob === '') {
+                continue;
+            }
+            $runId = self::decodeJob($rawJob);
+            if ($runId === null) {
+                $this->redis->lRem(self::PENDING_KEY, $rawJob, 0);
+                continue;
+            }
+            $lock = $this->redis->get(self::lockKey($runId));
+            if (is_string($lock) && $lock !== '') {
+                continue;
+            }
+            $stateRaw = $this->redis->get(self::stateKey($runId));
+            $state = is_string($stateRaw) ? json_decode($stateRaw, true) : null;
+            if (is_array($state) && in_array(($state['status'] ?? null), ['passed', 'failed', 'blocked'], true)) {
+                $this->redis->lRem(self::PENDING_KEY, $rawJob, 0);
+                continue;
+            }
+            $manifest = $this->loadManifest($runId);
+            if ($manifest === null) {
+                $this->redis->lRem(self::PENDING_KEY, $rawJob, 0);
+                continue;
+            }
+            $expires = strtotime((string) $manifest['expires_at']);
+            if ($expires === false || $expires < time()) {
+                $this->failPendingClosed($manifest);
+                $this->releaseActive((int) $manifest['account_id'], $runId);
+                $this->redis->lRem(self::PENDING_KEY, $rawJob, 0);
+                continue;
+            }
+            $lua = "if redis.call('EXISTS', KEYS[3]) == 0 and redis.call('LREM', KEYS[1], 1, ARGV[1]) == 1 then return redis.call('LPUSH', KEYS[2], ARGV[1]) else return 0 end";
+            $moved = $this->redis->eval(
+                $lua,
+                [self::PENDING_KEY, self::QUEUE_KEY, self::lockKey($runId), $rawJob],
+                3
+            );
+            if (is_int($moved) && $moved > 0) {
+                $recovered++;
+            }
+        }
+        return $recovered;
     }
 
     /** @return array<string,mixed>|null */
@@ -171,12 +234,17 @@ final class PregaoQaRunService
             'observed_at' => $protocol['observed_at'],
             'updated_at' => (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format(DATE_ATOM),
         ];
+        $terminal = in_array($protocol['result'], ['passed', 'failed', 'blocked'], true);
+        $ttl = $terminal ? self::EVIDENCE_TTL_SECONDS : self::RUN_TTL_SECONDS;
         if ($this->redis->setex(
             self::stateKey($manifest['run_id']),
-            self::RUN_TTL_SECONDS,
+            $ttl,
             json_encode($state, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)
         ) !== true) {
             throw new \RuntimeException('Falha ao atualizar estado QA');
+        }
+        if ($terminal && $this->redis->expire(self::manifestKey($manifest['run_id']), $ttl) !== true) {
+            throw new \RuntimeException('Falha ao reter manifesto QA terminal');
         }
     }
 
@@ -249,6 +317,74 @@ final class PregaoQaRunService
         return $destination;
     }
 
+    /** @return list<string> UUIDs removidos */
+    public static function purgeExpiredFrames(
+        string $privateRoot,
+        ?int $now = null,
+        int $retentionSeconds = 86400
+    ): array {
+        if ($privateRoot === '' || str_contains($privateRoot, "\0") || $retentionSeconds < 1 || is_link($privateRoot)) {
+            throw new \InvalidArgumentException('Raiz de retenção QA inválida');
+        }
+        if (!is_dir($privateRoot)) {
+            return [];
+        }
+        $root = realpath($privateRoot);
+        if ($root === false) {
+            throw new \RuntimeException('Raiz de retenção QA indisponível');
+        }
+        $cutoff = ($now ?? time()) - $retentionSeconds;
+        $deleted = [];
+        $entries = scandir($root);
+        if (!is_array($entries)) {
+            throw new \RuntimeException('Falha ao listar retenção QA');
+        }
+        foreach ($entries as $runId) {
+            if (preg_match(self::RUN_ID_PATTERN, $runId) !== 1) {
+                continue;
+            }
+            $directory = $root . DIRECTORY_SEPARATOR . $runId;
+            $directoryStat = lstat($directory);
+            if ($directoryStat === false || is_link($directory) || !is_dir($directory)) {
+                continue;
+            }
+            $resolved = realpath($directory);
+            if ($resolved === false || dirname($resolved) !== $root) {
+                continue;
+            }
+            $children = scandir($directory);
+            if (!is_array($children)) {
+                continue;
+            }
+            $children = array_values(array_diff($children, ['.', '..']));
+            if ($children !== [] && $children !== ['latest.png']) {
+                continue;
+            }
+            $latest = $directory . DIRECTORY_SEPARATOR . 'latest.png';
+            $latestMtime = 0;
+            if ($children === ['latest.png']) {
+                $latestStat = lstat($latest);
+                if ($latestStat === false || is_link($latest) || !is_file($latest)) {
+                    continue;
+                }
+                $latestMtime = (int) ($latestStat['mtime'] ?? 0);
+            }
+            $lastChanged = max((int) ($directoryStat['mtime'] ?? 0), $latestMtime);
+            if ($lastChanged > $cutoff) {
+                continue;
+            }
+            if ($children === ['latest.png'] && !unlink($latest)) {
+                continue;
+            }
+            if (!rmdir($directory)) {
+                continue;
+            }
+            $deleted[] = $runId;
+        }
+        sort($deleted, SORT_STRING);
+        return $deleted;
+    }
+
     /** @return array<string,mixed>|null */
     private function loadManifest(string $runId): ?array
     {
@@ -258,6 +394,31 @@ final class PregaoQaRunService
         $raw = $this->redis->get(self::manifestKey($runId));
         $manifest = is_string($raw) ? json_decode($raw, true) : null;
         return is_array($manifest) && $this->proof->verifyManifest($manifest) ? $manifest : null;
+    }
+
+    /** @param array<string,mixed> $manifest */
+    private function failPendingClosed(array $manifest): void
+    {
+        $this->updateState($manifest, [
+            'run_id' => $manifest['run_id'],
+            'sequence' => 1,
+            'step' => 'console_http',
+            'result' => 'blocked',
+            'screenshot' => null,
+            'cursor' => null,
+            'observed_at' => (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format(DATE_ATOM),
+        ]);
+    }
+
+    private static function decodeJob(string $rawJob): ?string
+    {
+        $job = json_decode($rawJob, true);
+        if (!is_array($job) || array_keys($job) !== ['run_id'] || !is_string($job['run_id'])
+            || preg_match(self::RUN_ID_PATTERN, $job['run_id']) !== 1
+        ) {
+            return null;
+        }
+        return $job['run_id'];
     }
 
     private static function uuidV4(): string
