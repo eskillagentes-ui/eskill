@@ -94,4 +94,23 @@ final class PregaoSnapshotTimestampTest extends TestCase
             $observability
         );
     }
+
+    public function testCandlesTambemSelecionamEpochDoTimestampNaSessaoMySql(): void
+    {
+        $source = file_get_contents(
+            dirname(__DIR__, 4) . '/app/Services/Pregao/PregaoSnapshotService.php'
+        );
+        self::assertIsString($source);
+        $start = strpos($source, 'private function loadCandles');
+        $end = strpos($source, 'private function loadRecentEvents', (int) $start);
+        self::assertIsInt($start);
+        self::assertIsInt($end);
+        $window = substr($source, $start, $end - $start);
+
+        self::assertStringContainsString(
+            'UNIX_TIMESTAMP(updated_at) AS updated_at_epoch',
+            $window
+        );
+        self::assertStringContainsString("array_key_exists('updated_at_epoch', \$r)", $window);
+    }
 }

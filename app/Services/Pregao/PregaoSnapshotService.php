@@ -278,9 +278,13 @@ final class PregaoSnapshotService
      */
     private function loadCandles(int $accountId, int $limit): array
     {
-        $updatedAtSelect = $this->columnExists('account_index_daily', 'updated_at')
-            ? ', updated_at'
-            : '';
+        $hasUpdatedAt = $this->columnExists('account_index_daily', 'updated_at');
+        $updatedAtSelect = '';
+        if ($hasUpdatedAt) {
+            $updatedAtSelect = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql'
+                ? ', updated_at, UNIX_TIMESTAMP(updated_at) AS updated_at_epoch'
+                : ', updated_at';
+        }
         $stmt = $this->db->prepare(
             'SELECT `date`, o, h, l, c' . $updatedAtSelect . '
              FROM account_index_daily
@@ -301,9 +305,11 @@ final class PregaoSnapshotService
                 'h' => (float) $r['h'],
                 'l' => (float) $r['l'],
                 'c' => (float) $r['c'],
-                'updated_at' => isset($r['updated_at'])
-                    ? $this->mysqlTimestampToIso((string) $r['updated_at'])
-                    : null,
+                'updated_at' => array_key_exists('updated_at_epoch', $r)
+                    ? $this->epochToIso($r['updated_at_epoch'])
+                    : (isset($r['updated_at'])
+                        ? $this->mysqlTimestampToIso((string) $r['updated_at'])
+                        : null),
             ];
         }, $rows);
     }
