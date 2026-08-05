@@ -769,6 +769,11 @@ test('mantém o cache-busting do cliente corrigido', () => {
     assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
     assert.match(view, /\/js\/pregao\.js\?v=43/, 'view deve invalidar o cache do cliente corrigido');
     assert.match(pkg.scripts['test:unit:js'], /pregao-chart-layout\.test\.js/, 'runner deve descobrir layout');
+    assert.strictEqual(
+        pkg.scripts.test,
+        'npm run test:unit:js && npm run test:e2e:readonly',
+        'npm test canônico deve executar somente gates read-only'
+    );
     assert.match(deploy, /npm run test:unit:js/, 'deploy deve executar a suíte Node antes do gate');
 });
 

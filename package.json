@@ -1,6 +1,6 @@
 {
   "scripts": {
-    "test": "npm run test:e2e",
+    "test": "npm run test:unit:js && npm run test:e2e:readonly",
     "test:unit:js": "node --test tests/Unit/js/pregao-snapshot-state.test.js tests/Unit/js/pregao-events.test.js tests/Unit/js/pregao-chart-layout.test.js",
     "test:e2e": "mkdir -p .tmp/playwright-transform-cache-0 && TMPDIR=.tmp playwright test",
     "test:e2e:readonly": "mkdir -p .tmp/playwright-transform-cache-0 && TMPDIR=.tmp E2E_READONLY=1 playwright test --project=readonly",
