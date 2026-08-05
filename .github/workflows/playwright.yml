@@ -101,6 +101,12 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Ensure Playwright executable bit is set
+        # Bug mitigacao: install via npm como root omite +x em
+        # node_modules/@playwright/test/cli.js, gerando 'sh: 1: playwright:
+        # Permission denied' no PATH lookup. Restaurar aqui e idempotente.
+        run: chmod +x node_modules/.bin/playwright node_modules/@playwright/test/cli.js
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
@@ -212,6 +218,12 @@ jobs:
 
       - name: Install Node dependencies
         run: npm ci
+
+      - name: Ensure Playwright executable bit is set
+        # Bug mitigacao: install via npm como root omite +x em
+        # node_modules/@playwright/test/cli.js, gerando 'sh: 1: playwright:
+        # Permission denied' no PATH lookup. Restaurar aqui e idempotente.
+        run: chmod +x node_modules/.bin/playwright node_modules/@playwright/test/cli.js
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps ${{ matrix.project }}
