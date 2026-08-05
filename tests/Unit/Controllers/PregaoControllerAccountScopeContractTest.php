@@ -64,4 +64,22 @@ final class PregaoControllerAccountScopeContractTest extends TestCase
         );
         self::assertStringContainsString('catch (\\InvalidArgumentException)', $events);
     }
+
+    public function testTodosEndpointsConvertemAccountIdArrayEmBadRequest(): void
+    {
+        $source = file_get_contents(__DIR__ . '/../../../app/Controllers/PregaoController.php');
+        self::assertIsString($source);
+
+        foreach (['index', 'snapshot', 'stream', 'ticket'] as $method) {
+            $start = strpos($source, "public function {$method}(): void");
+            self::assertIsInt($start);
+            $window = substr($source, $start, 1800);
+            self::assertStringContainsString('$this->resolveAccountIdBoundary(', $window, $method);
+            self::assertStringContainsString('if ($accountId === false)', $window, $method);
+        }
+
+        $boundary = substr($source, (int) strpos($source, 'private function resolveAccountIdBoundary'));
+        self::assertStringContainsString('catch (\\InvalidArgumentException)', $boundary);
+        self::assertStringContainsString('http_response_code(400)', $boundary);
+    }
 }

@@ -43,7 +43,10 @@ class PregaoController extends BaseController
             exit;
         }
 
-        $accountId = $this->resolveAccountId();
+        $accountId = $this->resolveAccountIdBoundary(false);
+        if ($accountId === false) {
+            return;
+        }
         if ($accountId === null) {
             http_response_code(403);
             return;
@@ -72,7 +75,10 @@ class PregaoController extends BaseController
             return;
         }
 
-        $accountId = $this->resolveAccountId();
+        $accountId = $this->resolveAccountIdBoundary();
+        if ($accountId === false) {
+            return;
+        }
         if ($accountId === null) {
             http_response_code(403);
             echo json_encode(['success' => false, 'error' => 'Conta indisponível', 'data' => null]);
@@ -149,7 +155,10 @@ class PregaoController extends BaseController
             return;
         }
 
-        $accountId = $this->resolveAccountId();
+        $accountId = $this->resolveAccountIdBoundary(false);
+        if ($accountId === false) {
+            return;
+        }
         if ($accountId === null) {
             http_response_code(403);
             return;
@@ -170,7 +179,10 @@ class PregaoController extends BaseController
             return;
         }
 
-        $accountId = $this->resolveAccountId();
+        $accountId = $this->resolveAccountIdBoundary();
+        if ($accountId === false) {
+            return;
+        }
         if ($accountId === null) {
             http_response_code(403);
             echo json_encode(['success' => false, 'error' => 'Conta indisponível']);
@@ -256,6 +268,19 @@ class PregaoController extends BaseController
             $this->getActiveAccountId(),
             $accounts
         );
+    }
+
+    private function resolveAccountIdBoundary(bool $sendJson = true): int|false|null
+    {
+        try {
+            return $this->resolveAccountId();
+        } catch (\InvalidArgumentException) {
+            http_response_code(400);
+            if ($sendJson) {
+                echo json_encode(['success' => false, 'error' => 'Parâmetro account_id inválido']);
+            }
+            return false;
+        }
     }
 
     /**

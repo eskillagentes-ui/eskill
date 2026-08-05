@@ -62,6 +62,41 @@ class RequestTest extends TestCase
         $this->assertSame(1, $req->getInt('page', 1));
     }
 
+    public function testGetTypedAccessorsRejectArrayInput(): void
+    {
+        foreach (['int', 'float', 'bool', 'enum', 'clamped', 'sort'] as $accessor) {
+            $_GET = ['value' => ['2']];
+            $req = new Request();
+            try {
+                match ($accessor) {
+                    'int' => $req->getInt('value'),
+                    'float' => $req->getFloat('value'),
+                    'bool' => $req->getBool('value'),
+                    'enum' => $req->getEnum('value', ['2']),
+                    'clamped' => $req->getIntClamped('value', 1, 100),
+                    'sort' => $req->getSortDir('value'),
+                };
+                self::fail("{$accessor} deveria rejeitar array");
+            } catch (InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testPostEInputIntRejeitamArrayEmAccessorEscalar(): void
+    {
+        $_POST = ['value' => ['2']];
+        $req = new Request();
+        foreach ([fn () => $req->post('value'), fn () => $req->postInt('value'), fn () => $req->inputInt('value')] as $call) {
+            try {
+                $call();
+                self::fail('accessor escalar deveria rejeitar array');
+            } catch (InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
+
     public function testGetBool(): void
     {
         $_GET['active'] = 'true';

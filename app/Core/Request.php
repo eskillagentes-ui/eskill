@@ -52,7 +52,7 @@ class Request
      */
     public function getInt(string $key, int $default = 0): int
     {
-        return (int) ($this->query[$key] ?? $default);
+        return (int) $this->assertScalar($this->query[$key] ?? $default, $key, 'query');
     }
 
     /**
@@ -60,7 +60,7 @@ class Request
      */
     public function getFloat(string $key, float $default = 0.0): float
     {
-        return (float) ($this->query[$key] ?? $default);
+        return (float) $this->assertScalar($this->query[$key] ?? $default, $key, 'query');
     }
 
     /**
@@ -71,7 +71,7 @@ class Request
         if (!isset($this->query[$key])) {
             return $default;
         }
-        return filter_var($this->query[$key], FILTER_VALIDATE_BOOLEAN);
+        return filter_var($this->assertScalar($this->query[$key], $key, 'query'), FILTER_VALIDATE_BOOLEAN);
     }
 
     // ── POST Parameters ──────────────────────────────────────────────
@@ -82,6 +82,9 @@ class Request
     public function post(string $key, ?string $default = null): ?string
     {
         $value = $this->post[$key] ?? $default;
+        if ($value !== null && !is_string($value)) {
+            throw new \InvalidArgumentException("Post parameter '{$key}' must be scalar");
+        }
         return $value !== null ? $this->sanitizeString($value) : null;
     }
 
@@ -90,7 +93,7 @@ class Request
      */
     public function postInt(string $key, int $default = 0): int
     {
-        return (int) ($this->post[$key] ?? $default);
+        return (int) $this->assertScalar($this->post[$key] ?? $default, $key, 'post');
     }
 
     /**
@@ -133,10 +136,12 @@ class Request
     public function input(string $key, mixed $default = null): mixed
     {
         if (isset($this->query[$key])) {
-            return $this->sanitizeString($this->query[$key]);
+            $value = $this->assertScalar($this->query[$key], $key, 'query');
+            return $this->sanitizeString((string) $value);
         }
         if (isset($this->post[$key])) {
-            return $this->sanitizeString($this->post[$key]);
+            $value = $this->assertScalar($this->post[$key], $key, 'post');
+            return $this->sanitizeString((string) $value);
         }
         $json = $this->json();
         return $json[$key] ?? $default;
@@ -147,7 +152,8 @@ class Request
      */
     public function inputInt(string $key, int $default = 0): int
     {
-        return (int) ($this->query[$key] ?? $this->post[$key] ?? $this->json()[$key] ?? $default);
+        $value = $this->query[$key] ?? $this->post[$key] ?? $this->json()[$key] ?? $default;
+        return (int) $this->assertScalar($value, $key, 'input');
     }
 
     // ── Files ────────────────────────────────────────────────────────
@@ -270,7 +276,7 @@ class Request
      */
     public function getEnum(string $key, array $allowed, string $default = ''): string
     {
-        $value = $this->query[$key] ?? $default;
+        $value = $this->assertScalar($this->query[$key] ?? $default, $key, 'query');
         return in_array($value, $allowed, true) ? $value : $default;
     }
 
@@ -279,7 +285,7 @@ class Request
      */
     public function getIntClamped(string $key, int $min, int $max, int $default = 0): int
     {
-        $value = (int) ($this->query[$key] ?? $default);
+        $value = (int) $this->assertScalar($this->query[$key] ?? $default, $key, 'query');
         return max($min, min($max, $value));
     }
 
@@ -288,7 +294,7 @@ class Request
      */
     public function getSortDir(string $key = 'dir', string $default = 'DESC'): string
     {
-        $value = strtoupper($this->query[$key] ?? $default);
+        $value = strtoupper((string) $this->assertScalar($this->query[$key] ?? $default, $key, 'query'));
         return $value === 'ASC' ? 'ASC' : 'DESC';
     }
 
@@ -300,5 +306,14 @@ class Request
     private function sanitizeString(string $value): string
     {
         return htmlspecialchars(trim($value), ENT_QUOTES, 'UTF-8');
+    }
+
+    private function assertScalar(mixed $value, string $key, string $source): string|int|float|bool|null
+    {
+        if ($value !== null && !is_scalar($value)) {
+            throw new \InvalidArgumentException(ucfirst($source) . " parameter '{$key}' must be scalar");
+        }
+
+        return $value;
     }
 }
