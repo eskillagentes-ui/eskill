@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Services\Pregao;
 
+use App\Services\Pregao\PregaoMetricsCollector;
+use PDO;
 use PHPUnit\Framework\TestCase;
+use ReflectionMethod;
 
 /**
  * Freshness por fonte: o coletor deve persistir o horário real da coleta
@@ -87,8 +90,27 @@ final class PregaoMetricsCollectorFreshnessContractTest extends TestCase
             'private function collectQuestions'
         );
 
-        self::assertStringContainsString('UNIX_TIMESTAMP(created_at) AS created_at_epoch', $window);
+        self::assertStringContainsString("'mysql' => 'UNIX_TIMESTAMP(created_at)'", $source);
+        self::assertStringContainsString('$this->healthTimestampExpression()', $window);
         self::assertStringContainsString("'collected_at' => (int) \$row['created_at_epoch']", $window);
         self::assertStringNotContainsString("'as_of' =>", $window);
+    }
+
+    public function testExpressaoDeEpochHealthEhExecutavelNoSqlite(): void
+    {
+        $db = new PDO('sqlite::memory:');
+        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $db->exec('CREATE TABLE account_health_history (created_at TEXT NOT NULL)');
+        $db->exec("INSERT INTO account_health_history (created_at) VALUES ('2026-08-04 12:00:00')");
+
+        $collector = new PregaoMetricsCollector($db, null, null, []);
+        $method = new ReflectionMethod(PregaoMetricsCollector::class, 'healthTimestampExpression');
+        $method->setAccessible(true);
+        $expression = $method->invoke($collector);
+
+        self::assertSame("CAST(strftime('%s', created_at) AS INTEGER)", $expression);
+        $epoch = $db->query("SELECT {$expression} FROM account_health_history")->fetchColumn();
+        self::assertIsNumeric($epoch);
+        self::assertGreaterThan(0, (int) $epoch);
     }
 }

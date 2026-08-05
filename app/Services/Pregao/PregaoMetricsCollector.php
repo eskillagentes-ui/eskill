@@ -343,7 +343,7 @@ final class PregaoMetricsCollector
         try {
             $stmt = $this->db->prepare(
                 'SELECT overall_score, created_at,
-                        UNIX_TIMESTAMP(created_at) AS created_at_epoch
+                        ' . $this->healthTimestampExpression() . ' AS created_at_epoch
                  FROM account_health_history
                  WHERE account_id = ?
                  ORDER BY id DESC
@@ -391,6 +391,15 @@ final class PregaoMetricsCollector
             $meta['metrics']['health_medio'] = ['available' => false, 'error' => $e->getMessage()];
             return ['ok' => false, 'error' => $e->getMessage()];
         }
+    }
+
+    private function healthTimestampExpression(): string
+    {
+        return match ((string) $this->db->getAttribute(PDO::ATTR_DRIVER_NAME)) {
+            'mysql' => 'UNIX_TIMESTAMP(created_at)',
+            'sqlite' => "CAST(strftime('%s', created_at) AS INTEGER)",
+            default => throw new \RuntimeException('Driver sem conversão segura de timestamp para health'),
+        };
     }
 
     /**
