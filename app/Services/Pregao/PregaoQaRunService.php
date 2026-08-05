@@ -266,8 +266,12 @@ final class PregaoQaRunService
         }
 
         if (in_array($state['status'], ['passed', 'failed', 'blocked'], true)) {
+            $sequence = $state['sequence'] ?? null;
+            if (!is_int($sequence) || $sequence < 1 || $sequence > count(PregaoQaWorkerProtocol::STEPS)) {
+                return false;
+            }
             $retainedManifest = is_array($state['manifest'] ?? null) ? $state['manifest'] : null;
-            $receipt = $this->decodeStoredArray(self::receiptKey($runId));
+            $receipt = $this->decodeStoredArray(self::receiptKey($runId, $sequence));
             $status = is_array($receipt['status'] ?? null) ? $receipt['status'] : null;
             return $retainedManifest !== null
                 && $this->proof->verifyManifest($retainedManifest)

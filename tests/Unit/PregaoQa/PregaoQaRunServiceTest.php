@@ -601,11 +601,11 @@ final class PregaoQaRunServiceTest extends TestCase
         $runId = '123e4567-e89b-42d3-a456-426614174000';
 
         $records = $this->terminalMediaRecords($proof, $now);
-        unset($records[PregaoQaRunService::receiptKey($runId)]);
+        unset($records[PregaoQaRunService::receiptKey($runId, 5)]);
         self::assertFalse($this->mediaAuthorizationService($records, $clock, $proof)->isMediaAuthorized($runId, 1335));
 
         $records = $this->terminalMediaRecords($proof, $now);
-        $receiptKey = PregaoQaRunService::receiptKey($runId);
+        $receiptKey = PregaoQaRunService::receiptKey($runId, 5);
         $records[$receiptKey]['value']['event_id'] = 42;
         self::assertFalse($this->mediaAuthorizationService($records, $clock, $proof)->isMediaAuthorized($runId, 1335));
 
@@ -779,7 +779,7 @@ final class PregaoQaRunServiceTest extends TestCase
                     'receipt_event_id' => $eventId,
                 ],
             ],
-            PregaoQaRunService::receiptKey($runId) => [
+            PregaoQaRunService::receiptKey($runId, 5) => [
                 'expires_at' => $expiresAt,
                 'value' => [
                     'run_id' => $runId,
@@ -794,6 +794,16 @@ final class PregaoQaRunServiceTest extends TestCase
                     'event_id' => $eventId,
                     'event_ts' => $status['observed_at'],
                     'status' => $status,
+                ],
+            ],
+            PregaoQaRunService::latestReceiptKey(1335) => [
+                'expires_at' => $expiresAt,
+                'value' => [
+                    'run_id' => $runId,
+                    'sequence' => 5,
+                    'event_id' => $eventId,
+                    'payload_hash' => $payloadHash,
+                    'status_signature' => $status['signature'],
                 ],
             ],
         ];
