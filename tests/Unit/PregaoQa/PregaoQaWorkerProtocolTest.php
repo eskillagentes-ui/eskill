@@ -107,7 +107,8 @@ final class PregaoQaWorkerProtocolTest extends TestCase
         self::assertStringContainsString("'PREGAO_QA_BASE_URL' =>", $source);
         self::assertStringContainsString('PregaoQaWorkerEnvironment::build', $source);
         self::assertStringContainsString('PREGAO_QA_ALLOW_PRODUCTION_READONLY', $source);
-        self::assertStringContainsString('stream_set_timeout($pipes[1], 120)', $source);
+        self::assertStringContainsString('PregaoQaWorkerProcess::drain(', $source);
+        self::assertStringContainsString('BROWSER_TIMEOUT_SECONDS', $source);
         self::assertStringContainsString('$runs->releaseActive(', $source);
         self::assertStringNotContainsString("'--session-id'", $source);
         self::assertStringNotContainsString('curl', $source);

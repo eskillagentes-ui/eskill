@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
 import { fileURLToPath } from 'node:url';
+import vm from 'node:vm';
 
 import {
   QA_STEPS,
@@ -22,6 +23,8 @@ import {
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const runnerPath = path.resolve(__dirname, '../../../bin/pregao-qa-browser.mjs');
+const modernLayoutPath = path.resolve(__dirname, '../../../app/Views/layouts/modern/app.php');
+const modernInitPath = path.resolve(__dirname, '../../../public/js/layout-modern-init.js');
 const source = fs.readFileSync(runnerPath, 'utf8');
 const RUN_ID = '123e4567-e89b-42d3-a456-426614174000';
 
@@ -42,20 +45,55 @@ test('network guard aceita somente same-origin GET HEAD OPTIONS', () => {
   assert.throws(() => assertReadonlyRequest('GET', 'https://user:secret@qa.example.test/', base), /credenciais/i);
 });
 
-test('dependências externas conhecidas do layout são interceptadas sem egress e degradam honestamente', () => {
+test('grafo externo real do layout recebe stubs locais utilizáveis sem egress', () => {
   const base = new URL('https://qa.example.test');
-  for (const url of [
-    'https://fonts.googleapis.com/css2?family=Inter',
-    'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css',
+  const dependencySource = [modernLayoutPath, modernInitPath]
+    .map((file) => fs.readFileSync(file, 'utf8'))
+    .join('\n');
+  const urls = [...dependencySource.matchAll(/https:\/\/[^'"<\s]+/g)].map((match) => match[0]);
+  assert.deepStrictEqual(new Set(urls), new Set([
+    'https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap',
     'https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.0/font/bootstrap-icons.css',
+    'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css',
     'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js',
     'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js',
-  ]) {
+    'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.7/chart.umd.min.js',
+    'https://ui-avatars.com/api/?name=',
+  ]));
+
+  for (const url of urls) {
     const decision = networkPolicyDecision('GET', url, base);
     assert.strictEqual(decision.kind, 'intercept');
-    assert.strictEqual(decision.critical, true);
+    assert.strictEqual(decision.critical, false);
     assert.ok(decision.contentType.length > 0);
+    if (!decision.contentType.startsWith('image/')) {
+      assert.doesNotMatch(decision.body, /https?:\/\//, 'stub não pode iniciar outro egress');
+    }
   }
+
+  const chartDecision = networkPolicyDecision(
+    'GET',
+    'https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js',
+    base,
+  );
+  const chartSandbox = { window: {} };
+  vm.runInNewContext(chartDecision.body, chartSandbox);
+  assert.strictEqual(typeof chartSandbox.window.Chart, 'function');
+  const chart = new chartSandbox.window.Chart({}, { type: 'line', data: {} });
+  assert.doesNotThrow(() => chart.update());
+  assert.doesNotThrow(() => chart.destroy());
+
+  const bootstrapDecision = networkPolicyDecision(
+    'GET',
+    'https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js',
+    base,
+  );
+  const bootstrapSandbox = { window: {} };
+  vm.runInNewContext(bootstrapDecision.body, bootstrapSandbox);
+  for (const api of ['Collapse', 'Modal', 'Toast', 'Tooltip']) {
+    assert.strictEqual(typeof bootstrapSandbox.window.bootstrap[api], 'function');
+  }
+
   const avatar = networkPolicyDecision('GET', 'https://ui-avatars.com/api/?name=QA', base);
   assert.strictEqual(avatar.kind, 'intercept');
   assert.strictEqual(avatar.critical, false);

@@ -264,4 +264,57 @@ final class PregaoQaRunServiceTest extends TestCase
         $redis2->method('get')->willReturn(json_encode($manifest, JSON_THROW_ON_ERROR));
         self::assertNull((new PregaoQaRunService($redis2, $proof))->loadAuthorizedRun($manifest['run_id'], 1335));
     }
+
+    public function testWorkerLockTtlHasMarginBeyondRuntimeAndStopTimeout(): void
+    {
+        self::assertGreaterThan(180 + 15, PregaoQaRunService::LOCK_TTL_SECONDS);
+    }
+
+    public function testRenewLockExtendsOnlyTheTokenOwnedLeaseAtomically(): void
+    {
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $token = str_repeat('a', 48);
+        $redis = $this->createMock(Redis::class);
+        $redis->expects(self::once())->method('eval')
+            ->with(
+                self::logicalAnd(self::stringContains('GET'), self::stringContains('EXPIRE')),
+                [PregaoQaRunService::lockKey($runId), $token, PregaoQaRunService::LOCK_TTL_SECONDS],
+                1
+            )
+            ->willReturn(1);
+
+        $service = new PregaoQaRunService($redis, new PregaoQaProof(str_repeat('k', 32)));
+        self::assertTrue($service->renew($runId, $token));
+    }
+
+    public function testReleaseDeletesOnlyTheTokenOwnedWorkerLock(): void
+    {
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $token = str_repeat('b', 48);
+        $redis = $this->createMock(Redis::class);
+        $redis->expects(self::once())->method('eval')
+            ->with(
+                self::logicalAnd(self::stringContains('GET'), self::stringContains('DEL')),
+                [PregaoQaRunService::lockKey($runId), $token],
+                1
+            )
+            ->willReturn(0);
+
+        (new PregaoQaRunService($redis, new PregaoQaProof(str_repeat('k', 32))))->release($runId, $token);
+    }
+
+    public function testReleaseActiveCannotClearAnotherRunForTheAccount(): void
+    {
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $redis = $this->createMock(Redis::class);
+        $redis->expects(self::once())->method('eval')
+            ->with(
+                self::logicalAnd(self::stringContains('GET'), self::stringContains('DEL')),
+                [PregaoQaRunService::activeKey(1335), $runId],
+                1
+            )
+            ->willReturn(0);
+
+        (new PregaoQaRunService($redis, new PregaoQaProof(str_repeat('k', 32))))->releaseActive(1335, $runId);
+    }
 }
