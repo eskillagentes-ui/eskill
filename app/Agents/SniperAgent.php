@@ -8,9 +8,16 @@ use App\Services\ItemService;
 
 class SniperAgent extends BaseAgent
 {
+    private bool $dryRun = false;
+
     public function __construct()
     {
         parent::__construct('sniper');
+    }
+
+    public function setDryRun(bool $dryRun): void
+    {
+        $this->dryRun = $dryRun;
     }
 
     public function run(): void
@@ -98,13 +105,22 @@ class SniperAgent extends BaseAgent
                     
                     if ($targetPrice < $myPrice) {
                         // Lowering price to compete
-                        $this->log('action', "Sniper Shot: Baixando de R$ $myPrice para R$ $targetPrice (Min Mercado: R$ $marketMin)", [
-                            'item_id' => $item['ml_item_id'],
-                            'old_price' => $myPrice,
-                            'new_price' => $targetPrice,
-                            'market_min' => $marketMin
-                        ]);
-                        $itemService->updatePrice($item['ml_item_id'], $targetPrice);
+                        if ($this->dryRun) {
+                            $this->log('action', "[DRY-RUN] Sniper Shot: Baixaria de R$ $myPrice para R$ $targetPrice (Min Mercado: R$ $marketMin)", [
+                                'item_id' => $item['ml_item_id'],
+                                'old_price' => $myPrice,
+                                'new_price' => $targetPrice,
+                                'market_min' => $marketMin
+                            ]);
+                        } else {
+                            $this->log('action', "Sniper Shot: Baixando de R$ $myPrice para R$ $targetPrice (Min Mercado: R$ $marketMin)", [
+                                'item_id' => $item['ml_item_id'],
+                                'old_price' => $myPrice,
+                                'new_price' => $targetPrice,
+                                'market_min' => $marketMin
+                            ]);
+                            $itemService->updatePrice($item['ml_item_id'], $targetPrice);
+                        }
                         
                     } elseif ($targetPrice > $myPrice) {
                         // Raising price (Profit Maximization) if market allows
@@ -123,13 +139,22 @@ class SniperAgent extends BaseAgent
                         // This means I am NOT the min. Someone else is the min (higher than me).
                         // So I can raise my price to match them - 0.10.
                         
-                        $this->log('action', "Sniper Profit: Subindo de R$ $myPrice para R$ $targetPrice (Acompanhando Mercado)", [
-                            'item_id' => $item['ml_item_id'],
-                            'old_price' => $myPrice,
-                            'new_price' => $targetPrice,
-                            'market_min' => $marketMin
-                        ]);
-                        $itemService->updatePrice($item['ml_item_id'], $targetPrice);
+                        if ($this->dryRun) {
+                            $this->log('action', "[DRY-RUN] Sniper Profit: Subiria de R$ $myPrice para R$ $targetPrice (Acompanhando Mercado)", [
+                                'item_id' => $item['ml_item_id'],
+                                'old_price' => $myPrice,
+                                'new_price' => $targetPrice,
+                                'market_min' => $marketMin
+                            ]);
+                        } else {
+                            $this->log('action', "Sniper Profit: Subindo de R$ $myPrice para R$ $targetPrice (Acompanhando Mercado)", [
+                                'item_id' => $item['ml_item_id'],
+                                'old_price' => $myPrice,
+                                'new_price' => $targetPrice,
+                                'market_min' => $marketMin
+                            ]);
+                            $itemService->updatePrice($item['ml_item_id'], $targetPrice);
+                        }
                     }
                 }
             }
