@@ -221,3 +221,173 @@ test('init conecta o botão ao trigger sem permitir disparo concorrente', async 
     await Promise.all([first, second]);
     assert.strictEqual(requests, 1);
 });
+
+test('evento assinado respeita janela temporal e coerência de started_at com relógio injetado', () => {
+    const api = loadApi();
+    const { document } = makeDocument();
+    const ui = api.create({
+        document,
+        location: { href: 'https://app.example.test/dashboard/pregao', origin: 'https://app.example.test' },
+        boot: {},
+        fetch: async () => null,
+        now: () => Date.parse('2026-08-05T12:00:00.000Z')
+    });
+
+    assert.strictEqual(ui.applyQa(signedQa({
+        observed_at: '2026-08-04T12:00:00.000Z',
+        started_at: '2026-08-04T11:59:59.000Z'
+    })), true, 'limite de 24h é aceito');
+
+    const cases = [
+        {
+            observed_at: '2026-08-04T11:59:59.999Z',
+            started_at: '2026-08-04T11:59:59.000Z'
+        },
+        {
+            observed_at: '2026-08-05T12:01:00.001Z',
+            started_at: '2026-08-05T12:00:59.000Z'
+        },
+        {
+            observed_at: '2026-08-05T12:00:01.000Z',
+            started_at: '2026-08-05T12:00:02.000Z'
+        },
+        {
+            observed_at: '2026-08-05T12:00:01.000Z',
+            started_at: '2026-07-29T12:00:00.999Z'
+        },
+        {
+            observed_at: new Date('2026-08-05T12:00:01.000Z'),
+            started_at: '2026-08-05T12:00:00.000Z'
+        },
+        {
+            observed_at: '2026-08-05T12:00:01.000Z',
+            started_at: new Date('2026-08-05T12:00:00.000Z')
+        }
+    ];
+    for (const payload of cases) {
+        const isolated = api.create({
+            document: makeDocument().document,
+            location: { href: 'https://app.example.test/dashboard/pregao', origin: 'https://app.example.test' },
+            boot: {},
+            fetch: async () => null,
+            now: () => Date.parse('2026-08-05T12:00:00.000Z')
+        });
+        assert.strictEqual(isolated.applyQa(signedQa(payload)), false);
+    }
+});
+
+test('mesmo run rejeita sequence repetida ou menor e qualquer evento após terminal', () => {
+    const api = loadApi();
+    const { document, element } = makeDocument();
+    const ui = api.create({
+        document,
+        location: { href: 'https://app.example.test/dashboard/pregao', origin: 'https://app.example.test' },
+        boot: {},
+        fetch: async () => null,
+        now: () => Date.parse('2026-08-05T12:10:00.000Z')
+    });
+
+    assert.strictEqual(ui.applyQa(signedQa({ sequence: 2 })), true);
+    assert.strictEqual(ui.applyQa(signedQa({
+        sequence: 2,
+        observed_at: '2026-08-05T12:00:04.000Z',
+        result: 'failed',
+        running: false
+    })), false, 'replay da sequence é rejeitado');
+    assert.strictEqual(ui.applyQa(signedQa({
+        sequence: 1,
+        observed_at: '2026-08-05T12:00:05.000Z'
+    })), false, 'sequence inferior é rejeitada');
+    assert.strictEqual(element('qaStatus').textContent, 'EM EXECUÇÃO');
+
+    assert.strictEqual(ui.applyQa(signedQa({
+        sequence: 3,
+        observed_at: '2026-08-05T12:00:06.000Z',
+        result: 'blocked',
+        running: false
+    })), true);
+    assert.strictEqual(element('qaStatus').textContent, 'BLOQUEADO');
+    assert.strictEqual(ui.applyQa(signedQa({
+        sequence: 4,
+        observed_at: '2026-08-05T12:00:07.000Z'
+    })), false, 'terminal fecha o run');
+    assert.strictEqual(element('qaStatus').textContent, 'BLOQUEADO', 'rejeição não apaga estado terminal confiável');
+});
+
+test('observed_at não regride no mesmo run nem ao trocar de run', () => {
+    const api = loadApi();
+    const { document, element } = makeDocument();
+    const ui = api.create({
+        document,
+        location: { href: 'https://app.example.test/dashboard/pregao', origin: 'https://app.example.test' },
+        boot: {},
+        fetch: async () => null,
+        now: () => Date.parse('2026-08-05T12:10:00.000Z')
+    });
+    const secondRun = '223e4567-e89b-42d3-a456-426614174001';
+
+    assert.strictEqual(ui.applyQa(signedQa({
+        sequence: 1,
+        observed_at: '2026-08-05T12:05:00.000Z'
+    })), true);
+    assert.strictEqual(ui.applyQa(signedQa({
+        sequence: 2,
+        observed_at: '2026-08-05T12:04:59.999Z'
+    })), false, 'sequence maior não autoriza regressão temporal no run');
+    assert.strictEqual(ui.applyQa(signedQa({
+        run_id: secondRun,
+        sequence: 1,
+        observed_at: '2026-08-05T12:04:59.999Z',
+        stream_url: '/qa/live/' + secondRun,
+        screenshot_url: '/qa/frame/' + secondRun
+    })), false, 'run novo não pode ser mais antigo que o último status confiável');
+    assert.strictEqual(element('qaStatus').textContent, 'EM EXECUÇÃO');
+    assert.strictEqual(ui.applyQa(signedQa({
+        run_id: secondRun,
+        sequence: 1,
+        observed_at: '2026-08-05T12:05:00.001Z',
+        stream_url: '/qa/live/' + secondRun,
+        screenshot_url: '/qa/frame/' + secondRun
+    })), true);
+    assert.strictEqual(element('qaStream').getAttribute('src'), '/qa/live/' + secondRun);
+});
+
+test('projeção sem sequence só antecede watermark assinado e nunca reabre run terminal', () => {
+    const api = loadApi();
+    const firstDocument = makeDocument();
+    const beforeSigned = api.create({
+        document: firstDocument.document,
+        location: { href: 'https://app.example.test/dashboard/pregao', origin: 'https://app.example.test' },
+        boot: {},
+        fetch: async () => null,
+        now: () => Date.parse('2026-08-05T12:10:00.000Z')
+    });
+
+    assert.strictEqual(beforeSigned.applyQa(trustedQa()), true, 'snapshot inicial é aceito');
+    assert.strictEqual(beforeSigned.applyQa(signedQa({ sequence: 1 })), true, 'evento assinado pode suceder snapshot');
+    assert.strictEqual(beforeSigned.applyQa(trustedQa({
+        status: 'failed',
+        result: 'failed'
+    })), false, 'snapshot não substitui watermark assinado');
+    assert.strictEqual(firstDocument.element('qaStatus').textContent, 'EM EXECUÇÃO');
+
+    const terminalDocument = makeDocument();
+    const terminalFirst = api.create({
+        document: terminalDocument.document,
+        location: { href: 'https://app.example.test/dashboard/pregao', origin: 'https://app.example.test' },
+        boot: {},
+        fetch: async () => null,
+        now: () => Date.parse('2026-08-05T12:10:00.000Z')
+    });
+    assert.strictEqual(terminalFirst.applyQa(trustedQa({
+        status: 'passed',
+        result: 'passed'
+    })), true);
+    assert.strictEqual(terminalFirst.applyQa({
+        executed: false, running: false, suite: null, test: null, result: null, video_url: null,
+        stream_url: null, run_id: null, sequence: null, step: null, observed_at: null, log: []
+    }), false, 'estado vazio não apaga status confiável');
+    assert.strictEqual(terminalFirst.applyQa(trustedQa()), false, 'snapshot não regride terminal');
+    assert.strictEqual(terminalFirst.applyQa(signedQa({ sequence: 1 })), false, 'nenhum evento reabre run terminal');
+    assert.strictEqual(terminalDocument.element('qaStatus').textContent, 'APROVADO');
+});
