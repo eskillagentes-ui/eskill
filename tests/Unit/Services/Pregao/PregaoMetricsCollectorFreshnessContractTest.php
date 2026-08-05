@@ -4,9 +4,11 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Services\Pregao;
 
+use App\Services\Pregao\PregaoEmitService;
 use App\Services\Pregao\PregaoMetricsCollector;
 use PDO;
 use PHPUnit\Framework\TestCase;
+use Redis;
 use ReflectionMethod;
 
 /**
@@ -141,7 +143,12 @@ final class PregaoMetricsCollectorFreshnessContractTest extends TestCase
              VALUES (1335, 82, '2026-08-04 12:00:00')"
         );
 
-        $collector = new PregaoMetricsCollector($db, null, null, []);
+        $redis = $this->createMock(Redis::class);
+        $redis->expects(self::once())->method('publish')->willReturn(1);
+        $redis->expects(self::once())->method('lPush')->willReturn(1);
+        $redis->expects(self::once())->method('lTrim')->willReturn(true);
+        $emitter = new PregaoEmitService($db, $redis);
+        $collector = new PregaoMetricsCollector($db, null, $emitter, []);
         $method = new ReflectionMethod(PregaoMetricsCollector::class, 'collectHealth');
         $method->setAccessible(true);
         $meta = ['available' => [], 'metrics' => []];
