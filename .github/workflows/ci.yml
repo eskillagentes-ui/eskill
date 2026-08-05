@@ -146,9 +146,14 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
+      - name: Install Node.js dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Run JavaScript unit tests
+        run: npm run test:unit:js
+
       - name: Run Playwright readonly gate
         run: |
-          npm ci --ignore-scripts
           npx playwright install --with-deps chromium
           npm run test:e2e:readonly
 
