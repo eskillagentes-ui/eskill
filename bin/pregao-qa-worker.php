@@ -61,6 +61,18 @@ $terminalResult = null;
 $workerExitCode = 0;
 
 try {
+    $existingState = $runs->loadState($runId, (int) $manifest['account_id']);
+    if (!is_array($existingState)
+        || !is_int($existingState['sequence'] ?? null)
+        || !is_string($existingState['status'] ?? null)
+    ) {
+        throw new RuntimeException('qa_state_unavailable');
+    }
+    $previousSequence = $existingState['sequence'];
+    $previousResult = $existingState['status'] === 'queued' ? null : $existingState['status'];
+    if ($previousSequence > 0) {
+        throw new RuntimeException('qa_recovered_after_worker_crash');
+    }
     $sessionId = $sessions->create(
         $manifest['user_id'],
         $manifest['account_id'],

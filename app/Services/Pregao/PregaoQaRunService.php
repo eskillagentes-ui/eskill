@@ -12,7 +12,7 @@ final class PregaoQaRunService
     public const PENDING_KEY = 'pregao:qa:pending';
     public const RUN_ID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/D';
     public const RUN_TTL_SECONDS = 900;
-    public const LOCK_TTL_SECONDS = 900;
+    public const LOCK_TTL_SECONDS = 180;
     public const EVIDENCE_TTL_SECONDS = 86400;
     private const ACTIVE_PREFIX = 'pregao:qa:active:';
 
@@ -221,6 +221,27 @@ final class PregaoQaRunService
         if (!$this->proof->verifyManifest($manifest) || $manifest['run_id'] !== ($protocol['run_id'] ?? null)) {
             throw new \InvalidArgumentException('Estado QA sem manifesto válido');
         }
+        $currentRaw = $this->redis->get(self::stateKey($manifest['run_id']));
+        $current = is_string($currentRaw) ? json_decode($currentRaw, true) : null;
+        if (!is_array($current)
+            || ($current['run_id'] ?? null) !== $manifest['run_id']
+            || ($current['account_id'] ?? null) !== $manifest['account_id']
+            || !is_int($current['sequence'] ?? null)
+            || !is_string($current['status'] ?? null)
+        ) {
+            throw new \InvalidArgumentException('Progressão QA atual inválida');
+        }
+        $previousResult = $current['status'] === 'queued' ? null : $current['status'];
+        $validated = PregaoQaWorkerProtocol::decode(
+            json_encode($protocol, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+            $manifest['run_id'],
+            $current['sequence'],
+            $previousResult
+        );
+        if ($validated === null) {
+            throw new \InvalidArgumentException('Progressão QA regressiva ou terminal');
+        }
+        $protocol = $validated;
         $state = [
             'run_id' => $manifest['run_id'],
             'account_id' => $manifest['account_id'],
@@ -399,10 +420,16 @@ final class PregaoQaRunService
     /** @param array<string,mixed> $manifest */
     private function failPendingClosed(array $manifest): void
     {
+        $currentRaw = $this->redis->get(self::stateKey($manifest['run_id']));
+        $current = is_string($currentRaw) ? json_decode($currentRaw, true) : null;
+        $sequence = is_array($current) && is_int($current['sequence'] ?? null) ? $current['sequence'] : 0;
+        if ($sequence >= count(PregaoQaWorkerProtocol::STEPS)) {
+            return;
+        }
         $this->updateState($manifest, [
             'run_id' => $manifest['run_id'],
-            'sequence' => 1,
-            'step' => 'console_http',
+            'sequence' => $sequence + 1,
+            'step' => PregaoQaWorkerProtocol::STEPS[$sequence],
             'result' => 'blocked',
             'screenshot' => null,
             'cursor' => null,
