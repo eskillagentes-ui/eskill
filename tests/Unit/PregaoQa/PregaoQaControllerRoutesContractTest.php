@@ -26,6 +26,10 @@ final class PregaoQaControllerRoutesContractTest extends TestCase
         self::assertStringContainsString('$this->requireAuthJson()', $controller);
         self::assertStringContainsString('$this->resolveAccountIdBoundary()', $controller);
         self::assertStringContainsString('loadAuthorizedRun($runId, $accountId)', $controller);
+        self::assertStringContainsString('PregaoQaRunService::readLatestFrame($root, $runId)', $controller);
+        self::assertStringContainsString('getimagesizefromstring($frame)', $controller);
+        self::assertStringNotContainsString('readfile($frame)', $controller);
+        self::assertStringNotContainsString('getimagesize($frame)', $controller);
         self::assertStringContainsString("in_array(\$_SERVER['REQUEST_METHOD'], ['POST', 'PUT', 'DELETE', 'PATCH'])", $index);
         self::assertStringContainsString('CsrfMiddleware', $index);
     }

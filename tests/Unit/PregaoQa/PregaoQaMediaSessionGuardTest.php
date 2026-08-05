@@ -20,6 +20,7 @@ final class PregaoQaMediaSessionGuardTest extends TestCase
             $runId = '123e4567-e89b-42d3-a456-426614174000';
             self::assertSame($root . '/' . $runId . '/latest.png', PregaoQaRunService::framePath($root, $runId));
             foreach (['../etc/passwd', '%2e%2e', $runId . '/../../secret', 'not-a-uuid'] as $hostile) {
+                self::assertNull(PregaoQaRunService::readLatestFrame($root, $hostile));
                 try {
                     PregaoQaRunService::framePath($root, $hostile);
                     self::fail('traversal deveria ser rejeitado');
@@ -29,6 +30,138 @@ final class PregaoQaMediaSessionGuardTest extends TestCase
             }
         } finally {
             @rmdir($root);
+        }
+    }
+
+    public function testRetainAndReadLatestFrameUseARegularFileInsideTheRealRoot(): void
+    {
+        $base = sys_get_temp_dir() . '/pregao-qa-regular-' . bin2hex(random_bytes(4));
+        $root = $base . '/private';
+        $sourceDirectory = $base . '/source';
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        mkdir($root, 0700, true);
+        mkdir($sourceDirectory, 0700);
+        $source = $sourceDirectory . '/latest.png';
+        file_put_contents($source, 'regular-frame');
+
+        try {
+            $retained = PregaoQaRunService::retainLatestFrame($source, $root, $runId);
+            self::assertSame($root . '/' . $runId . '/latest.png', $retained);
+            self::assertFalse(is_link($retained));
+            self::assertSame('regular-frame', PregaoQaRunService::readLatestFrame($root, $runId));
+        } finally {
+            @unlink($root . '/' . $runId . '/latest.png');
+            @rmdir($root . '/' . $runId);
+            @unlink($source);
+            @rmdir($sourceDirectory);
+            @rmdir($root);
+            @rmdir($base);
+        }
+    }
+
+    public function testRootSymlinkIsRejectedForReadAndRetention(): void
+    {
+        $base = sys_get_temp_dir() . '/pregao-qa-root-link-' . bin2hex(random_bytes(4));
+        $outside = $base . '/outside';
+        $root = $base . '/private-link';
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        mkdir($outside . '/' . $runId, 0700, true);
+        file_put_contents($outside . '/' . $runId . '/latest.png', 'outside');
+        symlink($outside, $root);
+        $source = $base . '/latest.png';
+        file_put_contents($source, 'source');
+
+        try {
+            self::assertNull(PregaoQaRunService::readLatestFrame($root, $runId));
+            try {
+                PregaoQaRunService::retainLatestFrame($source, $root, $runId);
+                self::fail('raiz symlink deveria ser rejeitada');
+            } catch (\InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+            self::assertSame('outside', file_get_contents($outside . '/' . $runId . '/latest.png'));
+        } finally {
+            @unlink($root);
+            @unlink($source);
+            @unlink($outside . '/' . $runId . '/latest.png');
+            @rmdir($outside . '/' . $runId);
+            @rmdir($outside);
+            @rmdir($base);
+        }
+    }
+
+    public function testRunDirectorySymlinkIsRejectedForReadAndRetention(): void
+    {
+        $base = sys_get_temp_dir() . '/pregao-qa-run-link-' . bin2hex(random_bytes(4));
+        $root = $base . '/private';
+        $outside = $base . '/outside';
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        mkdir($root, 0700, true);
+        mkdir($outside, 0700);
+        file_put_contents($outside . '/latest.png', 'outside');
+        symlink($outside, $root . '/' . $runId);
+        $source = $base . '/latest.png';
+        file_put_contents($source, 'source');
+
+        try {
+            self::assertNull(PregaoQaRunService::readLatestFrame($root, $runId));
+            try {
+                PregaoQaRunService::retainLatestFrame($source, $root, $runId);
+                self::fail('diretório de run symlink deveria ser rejeitado');
+            } catch (\InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+            self::assertSame('outside', file_get_contents($outside . '/latest.png'));
+        } finally {
+            @unlink($root . '/' . $runId);
+            @unlink($source);
+            @unlink($outside . '/latest.png');
+            @rmdir($outside);
+            @rmdir($root);
+            @rmdir($base);
+        }
+    }
+
+    public function testFrameAndSourceSymlinksAreRejectedAsNonRegularFiles(): void
+    {
+        $base = sys_get_temp_dir() . '/pregao-qa-file-link-' . bin2hex(random_bytes(4));
+        $root = $base . '/private';
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        mkdir($root . '/' . $runId, 0700, true);
+        $outside = $base . '/outside.png';
+        file_put_contents($outside, 'outside');
+        symlink($outside, $root . '/' . $runId . '/latest.png');
+        $sourceLink = $base . '/latest.png';
+        symlink($outside, $sourceLink);
+        $regularSourceDirectory = $base . '/source';
+        mkdir($regularSourceDirectory, 0700);
+        $regularSource = $regularSourceDirectory . '/latest.png';
+        file_put_contents($regularSource, 'replacement');
+
+        try {
+            self::assertNull(PregaoQaRunService::readLatestFrame($root, $runId));
+            try {
+                PregaoQaRunService::retainLatestFrame($sourceLink, $root, $runId);
+                self::fail('fonte symlink deveria ser rejeitada');
+            } catch (\InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+            try {
+                PregaoQaRunService::retainLatestFrame($regularSource, $root, $runId);
+                self::fail('destino symlink deveria ser rejeitado');
+            } catch (\InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+            self::assertSame('outside', file_get_contents($outside));
+        } finally {
+            @unlink($sourceLink);
+            @unlink($regularSource);
+            @rmdir($regularSourceDirectory);
+            @unlink($root . '/' . $runId . '/latest.png');
+            @unlink($outside);
+            @rmdir($root . '/' . $runId);
+            @rmdir($root);
+            @rmdir($base);
         }
     }
 

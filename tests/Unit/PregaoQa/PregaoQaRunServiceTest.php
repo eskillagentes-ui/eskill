@@ -11,20 +11,33 @@ use Redis;
 
 final class PregaoQaRunServiceTest extends TestCase
 {
-    public function testStartRunCreatesUuidPrivateSignedManifestAndQueuesOnlyReference(): void
+    public function testAdmissionLimitsAreExplicitAndReasonable(): void
+    {
+        self::assertSame(60, PregaoQaRunService::COOLDOWN_TTL_SECONDS);
+        self::assertSame(8, PregaoQaRunService::MAX_QUEUE_DEPTH);
+    }
+
+    public function testStartRunCreatesUuidPrivateSignedManifestAndAtomicallyQueuesOnlyReference(): void
     {
         $stored = [];
-        $queued = null;
+        $admission = null;
+        $enqueue = null;
         $redis = $this->createMock(Redis::class);
-        $redis->method('set')->willReturn(true);
         $redis->method('setex')->willReturnCallback(static function (string $key, int $ttl, string $value) use (&$stored): bool {
             $stored[$key] = [$ttl, $value];
             return true;
         });
-        $redis->method('lPush')->willReturnCallback(static function (string $key, mixed ...$values) use (&$queued): int {
-            $queued = [$key, $values[0] ?? null];
-            return 1;
-        });
+        $redis->method('eval')->willReturnCallback(
+            static function (string $script, array $arguments, int $keyCount) use (&$admission, &$enqueue): int {
+                if (str_contains($script, 'LLEN')) {
+                    $enqueue = [$script, $arguments, $keyCount];
+                    return 1;
+                }
+                $admission = [$script, $arguments, $keyCount];
+                return 1;
+            }
+        );
+        $redis->expects(self::never())->method('lPush');
 
         $proof = new PregaoQaProof(str_repeat('k', 32));
         $service = new PregaoQaRunService($redis, $proof);
@@ -33,8 +46,21 @@ final class PregaoQaRunServiceTest extends TestCase
         self::assertMatchesRegularExpression(PregaoQaRunService::RUN_ID_PATTERN, $run['run_id']);
         self::assertSame(1335, $run['account_id']);
         self::assertArrayNotHasKey('signature', $run, 'resposta pública não pode expor assinatura privada');
-        self::assertSame(PregaoQaRunService::QUEUE_KEY, $queued[0]);
-        self::assertSame(['run_id' => $run['run_id']], json_decode((string) $queued[1], true));
+        self::assertSame([
+            PregaoQaRunService::activeKey(1335),
+            'pregao:qa:cooldown:account:1335',
+            'pregao:qa:cooldown:user:77',
+            $run['run_id'],
+            PregaoQaRunService::RUN_TTL_SECONDS,
+        ], $admission[1]);
+        self::assertSame(3, $admission[2]);
+        self::assertStringContainsString('EXISTS', $admission[0]);
+
+        self::assertSame(PregaoQaRunService::QUEUE_KEY, $enqueue[1][0]);
+        self::assertSame(PregaoQaRunService::PENDING_KEY, $enqueue[1][1]);
+        self::assertSame(['run_id' => $run['run_id']], json_decode((string) $enqueue[1][2], true));
+        self::assertSame(PregaoQaRunService::MAX_QUEUE_DEPTH, $enqueue[1][3]);
+        self::assertSame(2, $enqueue[2]);
 
         $manifestKey = PregaoQaRunService::manifestKey($run['run_id']);
         self::assertArrayHasKey($manifestKey, $stored);
@@ -46,18 +72,56 @@ final class PregaoQaRunServiceTest extends TestCase
         self::assertSame('pregao:qa:active:1335', PregaoQaRunService::activeKey(1335));
     }
 
-    public function testStartRunRejectsSecondActiveRunForSameAccount(): void
+    public function testStartRunAtomicallyRejectsActiveOrCoolingAccountUserWithoutPersisting(): void
     {
         $redis = $this->createMock(Redis::class);
-        $redis->expects(self::once())->method('set')
-            ->with(PregaoQaRunService::activeKey(1335), self::isType('string'), ['nx', 'ex' => PregaoQaRunService::RUN_TTL_SECONDS])
-            ->willReturn(false);
+        $redis->expects(self::once())->method('eval')
+            ->with(
+                self::stringContains('EXISTS'),
+                self::callback(static function (array $arguments): bool {
+                    return count($arguments) === 5
+                        && $arguments[0] === PregaoQaRunService::activeKey(1335)
+                        && $arguments[1] === 'pregao:qa:cooldown:account:1335'
+                        && $arguments[2] === 'pregao:qa:cooldown:user:77'
+                        && is_string($arguments[3])
+                        && preg_match(PregaoQaRunService::RUN_ID_PATTERN, $arguments[3]) === 1
+                        && $arguments[4] === PregaoQaRunService::RUN_TTL_SECONDS;
+                }),
+                3
+            )
+            ->willReturn(0);
         $redis->expects(self::never())->method('setex');
         $redis->expects(self::never())->method('lPush');
 
         $service = new PregaoQaRunService($redis, new PregaoQaProof(str_repeat('k', 32)));
         $this->expectException(\DomainException::class);
         $service->startRun(1335, 77);
+    }
+
+    public function testStartRunFailsClosedWhenAtomicQueueDepthIsFull(): void
+    {
+        $evalCalls = 0;
+        $redis = $this->createMock(Redis::class);
+        $redis->method('setex')->willReturn(true);
+        $redis->expects(self::once())->method('del')
+            ->with(self::isType('string'), self::isType('string'));
+        $redis->method('eval')->willReturnCallback(static function (string $script) use (&$evalCalls): int {
+            $evalCalls++;
+            if (str_contains($script, 'LLEN')) {
+                return 0;
+            }
+            return 1;
+        });
+        $redis->expects(self::never())->method('lPush');
+
+        $service = new PregaoQaRunService($redis, new PregaoQaProof(str_repeat('k', 32)));
+        try {
+            $service->startRun(1335, 77);
+            self::fail('fila cheia deveria falhar fechada');
+        } catch (\RuntimeException $exception) {
+            self::assertSame('Falha ao enfileirar QA', $exception->getMessage());
+        }
+        self::assertSame(3, $evalCalls, 'admission, enqueue e release ativo devem ser atômicos');
     }
 
     public function testClaimAtomicallyMovesQueueToPendingAndReturnsExactAckReference(): void
@@ -199,6 +263,17 @@ final class PregaoQaRunServiceTest extends TestCase
         $redis->expects(self::once())->method('expire')
             ->with(PregaoQaRunService::manifestKey($runId), PregaoQaRunService::EVIDENCE_TTL_SECONDS)
             ->willReturn(true);
+        $redis->expects(self::once())->method('eval')
+            ->with(
+                self::stringContains('SETEX'),
+                [
+                    'pregao:qa:cooldown:account:1335',
+                    'pregao:qa:cooldown:user:77',
+                    PregaoQaRunService::COOLDOWN_TTL_SECONDS,
+                ],
+                2
+            )
+            ->willReturn(1);
         $service = new PregaoQaRunService($redis, $proof);
         $service->updateState($manifest, [
             'run_id' => $runId,
