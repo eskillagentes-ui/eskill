@@ -28,7 +28,7 @@ const context2d = new Proxy({}, {
 });
 function element(id) {
     if (!elements.has(id)) {
-        elements.set(id, {
+        const node = {
             id,
             hidden: false,
             textContent: '',
@@ -41,12 +41,32 @@ function element(id) {
             width: 600,
             height: 380,
             children: [],
+            srcWrites: 0,
+            attributes: new Map(),
             appendChild(child) { this.children.push(child); },
-            setAttribute(name, value) { this[name] = value; },
-            removeAttribute(name) { this[name] = ''; },
+            setAttribute(name, value) {
+                if (name === 'src') this.src = value;
+                else this.attributes.set(name, String(value));
+            },
+            getAttribute(name) {
+                return name === 'src' ? (this.attributes.get('src') ?? null) : (this.attributes.get(name) ?? null);
+            },
+            removeAttribute(name) { this.attributes.delete(name); },
             load() {},
             getContext() { return context2d; }
+        };
+        Object.defineProperty(node, 'src', {
+            get() {
+                const value = this.attributes.get('src');
+                if (!value) return '';
+                return value.startsWith('/') ? 'https://example.test' + value : value;
+            },
+            set(value) {
+                this.srcWrites += 1;
+                this.attributes.set('src', String(value));
+            }
         });
+        elements.set(id, node);
     }
     return elements.get(id);
 }
@@ -743,9 +763,13 @@ test('cinco agentes com correlações diferentes nunca aparecem saudáveis', asy
 
 test('mantém o cache-busting do cliente corrigido', () => {
     const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
+    const pkg = JSON.parse(fs.readFileSync(path.resolve(__dirname, '../../../package.json'), 'utf8'));
+    const deploy = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/deploy.yml'), 'utf8');
     assert.match(source, /iconNode\.textContent = String\(icon\)/, 'ícone do feed deve usar textContent');
     assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
-    assert.match(view, /\/js\/pregao\.js\?v=42/, 'view deve invalidar o cache do cliente corrigido');
+    assert.match(view, /\/js\/pregao\.js\?v=43/, 'view deve invalidar o cache do cliente corrigido');
+    assert.match(pkg.scripts['test:unit:js'], /pregao-chart-layout\.test\.js/, 'runner deve descobrir layout');
+    assert.match(deploy, /npm run test:unit:js/, 'deploy deve executar a suíte Node antes do gate');
 });
 
 test('QA sem status real aparece como não executado, sem mídia artificial', async () => {
@@ -787,7 +811,19 @@ test('QA limpa mídia anterior e rejeita URLs fora dos caminhos permitidos', asy
             result: 'running', video_url: null, stream_url: '/qa/stream/session-1', log: []
         }
     });
-    assert.strictEqual(element('qaStream').src, '/qa/stream/session-1');
+    assert.strictEqual(element('qaStream').getAttribute('src'), '/qa/stream/session-1');
+
+    const writesBefore = element('qaStream').srcWrites;
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:30-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        qa: {
+            executed: true, running: true, suite: 'smoke', test: 'login',
+            result: 'running', video_url: null, stream_url: '/qa/stream/session-1', log: []
+        }
+    });
+    assert.strictEqual(element('qaStream').srcWrites, writesBefore, 'snapshot repetido não recarrega iframe');
 
     await runSnapshot({
         server_ts: '2026-08-04T12:01:00-03:00',
@@ -795,7 +831,7 @@ test('QA limpa mídia anterior e rejeita URLs fora dos caminhos permitidos', asy
         candles: [],
         qa: { executed: false, running: false, result: null, video_url: null, stream_url: null, log: [] }
     });
-    assert.strictEqual(element('qaStream').src, '', 'src anterior deve ser removido');
+    assert.strictEqual(element('qaStream').getAttribute('src'), null, 'src anterior deve ser removido');
 
     await runSnapshot({
         server_ts: '2026-08-04T12:02:00-03:00',
@@ -806,7 +842,7 @@ test('QA limpa mídia anterior e rejeita URLs fora dos caminhos permitidos', asy
             result: 'running', video_url: null, stream_url: 'javascript:alert(1)', log: []
         }
     });
-    assert.notStrictEqual(element('qaStream').src, 'javascript:alert(1)');
+    assert.notStrictEqual(element('qaStream').getAttribute('src'), 'javascript:alert(1)');
     assert.strictEqual(element('qaStream').hidden, true);
 });
 

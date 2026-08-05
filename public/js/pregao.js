@@ -526,7 +526,7 @@
                 video.load();
             }
             stream.hidden = false;
-            if (stream.src !== streamUrl) stream.src = streamUrl;
+            if (stream.getAttribute('src') !== streamUrl) stream.src = streamUrl;
         } else if (videoUrl) {
             idle.hidden = true;
             if (stream) {
@@ -534,7 +534,7 @@
                 stream.removeAttribute('src');
             }
             video.hidden = false;
-            if (video.src !== videoUrl) {
+            if (video.getAttribute('src') !== videoUrl) {
                 video.src = videoUrl;
                 video.load();
             }

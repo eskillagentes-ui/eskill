@@ -66,6 +66,7 @@ jobs:
         ./vendor/bin/phpunit --testsuite Unit
         ./vendor/bin/phpunit tests/Unit/Services/Agents
         npm ci --ignore-scripts
+        npm run test:unit:js
         npx playwright install --with-deps chromium
         npm run test:e2e:readonly
         QA_GATE_PHP_LINT=passed \
