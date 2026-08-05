@@ -52,6 +52,27 @@ function trustedQa(overrides = {}) {
     };
 }
 
+function projectedQa(overrides = {}) {
+    return {
+        elapsed_ms: 3000,
+        executed: true,
+        log: [],
+        observed_at: '2026-08-05T12:00:03.000Z',
+        result: 'passed',
+        run_id: RUN_ID,
+        running: false,
+        sequence: 5,
+        status: 'passed',
+        step: 'console_http',
+        stream_url: '/qa/live/' + RUN_ID,
+        suite: 'pregao-live',
+        test: 'console_http',
+        trusted: true,
+        video_url: null,
+        ...overrides
+    };
+}
+
 function signedQa(overrides = {}) {
     return {
         manifest_hash: 'a'.repeat(64),
@@ -131,6 +152,55 @@ test('applyQa aceita somente projeção trusted exata e deriva iframe de UUID', 
     assert.strictEqual(ui.applyQa({ ...trustedQa(), step: 'arbitrary-script' }), false);
 });
 
+test('reload aceita projeção backend exata e preserva APROVADO FALHOU BLOQUEADO com mídia correta', () => {
+    const api = loadApi();
+    const labels = { passed: 'APROVADO', failed: 'FALHOU', blocked: 'BLOQUEADO' };
+
+    for (const [result, label] of Object.entries(labels)) {
+        const { document, element } = makeDocument();
+        const ui = api.create({
+            document,
+            location: { href: 'https://app.example.test/dashboard/pregao', origin: 'https://app.example.test' },
+            boot: {},
+            fetch: async () => null
+        });
+        assert.strictEqual(ui.applyQa(projectedQa({ result, status: result })), true);
+        assert.strictEqual(element('qaStatus').textContent, label);
+        assert.strictEqual(element('qaLive').textContent, label);
+        assert.strictEqual(element('qaStream').hidden, false);
+        assert.strictEqual(element('qaStream').getAttribute('src'), '/qa/live/' + RUN_ID);
+    }
+});
+
+test('projeção backend rejeita campos ausentes ou extras e não sintetiza mídia ausente', () => {
+    const api = loadApi();
+    const missing = projectedQa();
+    delete missing.observed_at;
+
+    for (const payload of [missing, { ...projectedQa(), unexpected: true }]) {
+        const fixture = makeDocument();
+        const ui = api.create({
+            document: fixture.document,
+            location: { href: 'https://app.example.test/dashboard/pregao', origin: 'https://app.example.test' },
+            boot: {},
+            fetch: async () => null
+        });
+        assert.strictEqual(ui.applyQa(payload), false);
+        assert.strictEqual(fixture.element('qaStream').hidden, true);
+    }
+
+    const { document, element } = makeDocument();
+    const withoutMedia = api.create({
+        document,
+        location: { href: 'https://app.example.test/dashboard/pregao', origin: 'https://app.example.test' },
+        boot: {},
+        fetch: async () => null
+    });
+    assert.strictEqual(withoutMedia.applyQa(projectedQa({ stream_url: null })), true);
+    assert.strictEqual(element('qaStream').hidden, true);
+    assert.strictEqual(element('qaStream').getAttribute('src'), null);
+});
+
 test('applyQa normaliza evento assinado realtime e mostra blocked sem inventar aprovação', () => {
     const api = loadApi();
     const { document, element } = makeDocument();
@@ -150,6 +220,22 @@ test('applyQa normaliza evento assinado realtime e mostra blocked sem inventar a
     assert.strictEqual(element('qaStatus').textContent, 'BLOQUEADO');
     assert.match(element('qaFeedback').textContent, /bloqueado/i);
     assert.strictEqual(ui.applyQa(signedQa({ signature: '0'.repeat(63) })), false);
+});
+
+test('evento HMAC exato com stream ausente não tem contrato afrouxado nem mídia sintetizada', () => {
+    const api = loadApi();
+    const { document, element } = makeDocument();
+    const ui = api.create({
+        document,
+        location: { href: 'https://app.example.test/dashboard/pregao', origin: 'https://app.example.test' },
+        boot: {},
+        fetch: async () => null
+    });
+
+    assert.strictEqual(ui.applyQa(signedQa({ stream_url: null, screenshot_url: null })), true);
+    assert.strictEqual(element('qaStream').hidden, true);
+    assert.strictEqual(element('qaStream').getAttribute('src'), null);
+    assert.strictEqual(ui.applyQa({ ...signedQa(), extra: 'rejeitar' }), false);
 });
 
 test('snapshot sem execução confiável permanece NÃO EXECUTADO', () => {

@@ -62,10 +62,28 @@ test('modo parede remove chrome, amplia leitura e mitiga burn-in sem esconder es
     assert.ok(fs.existsSync(wallClientPath), 'cliente dedicado do modo parede deve existir');
 
     const wall = require(wallClientPath);
-    assert.strictEqual(wall.deriveState({ semaClass: 'sema verde', agentsClass: 'agents-summary is-healthy' }), 'healthy');
-    assert.strictEqual(wall.deriveState({ semaClass: 'sema vermelho', agentsClass: 'agents-summary is-healthy' }), 'critical');
-    assert.strictEqual(wall.deriveState({ semaClass: 'sema verde', agentsClass: 'agents-summary is-attention' }), 'warning');
-    assert.strictEqual(wall.deriveState({ semaClass: 'sema verde', semaText: 'FALHA NO SNAPSHOT', agentsClass: 'agents-summary is-healthy' }), 'unknown');
+    const healthy = {
+        semaClass: 'sema verde',
+        agentsClass: 'agents-summary is-healthy',
+        qaText: 'APROVADO',
+        freshnessClass: 'source-freshness',
+        freshnessText: 'consolidado 12:00:00 · 30s atrás'
+    };
+    assert.strictEqual(wall.deriveState(healthy), 'healthy');
+    assert.strictEqual(wall.deriveState({ ...healthy, qaText: 'passed' }), 'healthy');
+    assert.strictEqual(wall.deriveState({ ...healthy, semaClass: 'sema vermelho' }), 'critical');
+    assert.strictEqual(wall.deriveState({ ...healthy, qaText: 'FALHOU' }), 'critical');
+    assert.strictEqual(wall.deriveState({ ...healthy, qaText: 'failed' }), 'critical');
+    assert.strictEqual(wall.deriveState({ ...healthy, agentsClass: 'agents-summary is-attention' }), 'warning');
+    assert.strictEqual(wall.deriveState({ ...healthy, qaText: 'BLOQUEADO' }), 'warning');
+    assert.strictEqual(wall.deriveState({ ...healthy, qaText: 'blocked' }), 'warning');
+    for (const qaText of ['INDISPONÍVEL', 'NÃO EXECUTADO', '']) {
+        assert.strictEqual(wall.deriveState({ ...healthy, qaText }), 'unknown');
+    }
+    assert.strictEqual(wall.deriveState({ ...healthy, freshnessText: '' }), 'unknown');
+    assert.strictEqual(wall.deriveState({ ...healthy, freshnessClass: 'source-freshness is-stale' }), 'unknown');
+    assert.strictEqual(wall.deriveState({ ...healthy, freshnessText: 'consolidado 12:00:00 · 301s atrás' }), 'unknown');
+    assert.strictEqual(wall.deriveState({ ...healthy, semaText: 'FALHA NO SNAPSHOT', semaClass: 'sema' }), 'unknown');
     assert.strictEqual(wall.deriveState({ semaClass: 'sema', agentsClass: 'agents-summary is-waiting' }), 'unknown');
     assert.strictEqual(wall.compactAgents('5/5 reportando · 5 saudáveis'), '5/5 reportando');
     assert.strictEqual(wall.compactAgents(''), '0/5 reportando');

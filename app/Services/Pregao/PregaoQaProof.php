@@ -9,6 +9,11 @@ final class PregaoQaProof
     private const STATUS_MAX_AGE_SECONDS = 86400;
     private const STATUS_FUTURE_SKEW_SECONDS = 60;
 
+    public const STATUS_PROJECTION_KEYS = [
+        'elapsed_ms', 'executed', 'log', 'observed_at', 'result', 'run_id', 'running', 'sequence',
+        'status', 'step', 'stream_url', 'suite', 'test', 'trusted', 'video_url',
+    ];
+
     private const MANIFEST_KEYS = [
         'account_id', 'created_at', 'expires_at', 'manifest_hash', 'run_id', 'signature', 'user_id',
     ];
@@ -136,21 +141,21 @@ final class PregaoQaProof
         }
         $running = $status['result'] === 'running';
         return [
-            'trusted' => true,
+            'elapsed_ms' => ($observed - $started) * 1000,
             'executed' => true,
-            'running' => $running,
-            'suite' => $status['suite'],
-            'test' => $status['test'],
-            'video_url' => $status['video_url'],
-            'stream_url' => $status['stream_url'],
+            'log' => [],
+            'observed_at' => $status['observed_at'],
+            'result' => $running ? null : $status['result'],
             'run_id' => $status['run_id'],
+            'running' => $running,
             'sequence' => $status['sequence'],
             'status' => $status['result'],
             'step' => $status['step'],
-            'observed_at' => $status['observed_at'],
-            'elapsed_ms' => ($observed - $started) * 1000,
-            'result' => $running ? null : $status['result'],
-            'log' => [],
+            'stream_url' => $status['stream_url'],
+            'suite' => $status['suite'],
+            'test' => $status['test'],
+            'trusted' => true,
+            'video_url' => $status['video_url'],
         ];
     }
 
