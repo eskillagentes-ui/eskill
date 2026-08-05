@@ -174,24 +174,14 @@ final class PregaoEmitService
     }
 
     /**
-     * Única capability de emissão qa.status. O emissor genérico acima permanece bloqueado.
-     *
-     * @param array<string, mixed> $payload
-     * @return array{v:int,type:string,ts:string,payload:array<string,mixed>,source:string,account_id:int}
-     */
-    public function emitTrustedQaStatus(array $payload, int $accountId, PregaoQaProof $proof): array
-    {
-        return $this->emitTrustedQaStatusWithReceipt($payload, $accountId, $proof)['event'];
-    }
-
-    /**
-     * Persiste/publica uma prova uma única vez e devolve a identidade autoritativa do evento.
-     * Se o processo caiu depois da persistência, o replay reutiliza a linha existente sem republicar.
+     * Persiste uma prova uma única vez e devolve a identidade candidata do evento.
+     * Confirmação autoritativa e publicação atômica ficam a cargo do produtor QA.
+     * Se o processo caiu depois da persistência, o replay reutiliza a linha existente.
      *
      * @param array<string, mixed> $payload
      * @return array{event:array{v:int,type:string,ts:string,payload:array<string,mixed>,source:string,account_id:int},event_id:int,replayed:bool}
      */
-    public function emitTrustedQaStatusWithReceipt(array $payload, int $accountId, PregaoQaProof $proof): array
+    public function persistTrustedQaStatus(array $payload, int $accountId, PregaoQaProof $proof): array
     {
         if ($accountId <= 0 || !$proof->verifyStatus($payload, $accountId)) {
             throw new \InvalidArgumentException('Prova qa.status inválida');
@@ -212,8 +202,6 @@ final class PregaoEmitService
         if ($eventId === null) {
             throw new \RuntimeException('Falha ao persistir qa.status');
         }
-        $this->persistSideEffects($event);
-        $this->publish($event);
         return ['event' => $event, 'event_id' => $eventId, 'replayed' => false];
     }
 
