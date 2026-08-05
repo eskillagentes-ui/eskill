@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/css/pregao.css?v=7">
+<link rel="stylesheet" href="/css/pregao.css?v=8">
 
 <div id="pregao-root" data-account-id="<?= (int)($pregaoAccountId ?? 0) ?>" data-read-only="1">
     <header class="pg-header">
@@ -18,7 +18,32 @@
         </div>
         <div class="clock" id="clock">--:--:--</div>
         <div class="conn" id="conn" title="transporte">●</div>
+        <button type="button" class="wall-mode-toggle" id="wallModeToggle" aria-pressed="false">TELA 24H</button>
     </header>
+
+    <section class="wall-anchor" aria-live="polite" aria-label="Âncora operacional do modo parede">
+        <div class="wall-state" data-wall-state="unknown">
+            <span class="wall-state-dot" aria-hidden="true"></span>
+            <span><small>ESTADO OPERACIONAL</small><strong id="wallState">AGUARDANDO DADOS</strong></span>
+            <span class="wall-state-detail" id="wallHealthDetail">Saúde da conta indisponível</span>
+        </div>
+        <div class="wall-anchor-item wall-index">
+            <small>ESKL11</small><strong id="wallIndex">—</strong>
+        </div>
+        <div class="wall-anchor-item">
+            <small>AGENTES</small><strong id="wallAgents">0/5</strong>
+        </div>
+        <div class="wall-anchor-item">
+            <small>QA READ-ONLY</small><strong id="wallQa">NÃO EXECUTADO</strong>
+        </div>
+        <div class="wall-anchor-item">
+            <small>FRESHNESS</small><strong id="wallFreshness">AGUARDANDO</strong>
+        </div>
+        <div class="wall-anchor-clock">
+            <strong id="wallClock">--:--:--</strong>
+            <button type="button" class="wall-mode-exit" id="wallModeExit">SAIR DA TELA 24H</button>
+        </div>
+    </section>
 
     <div class="tape">
         <div class="tape-in" id="tape"></div>
@@ -234,4 +259,5 @@
 <script src="/js/pregao-chart-layout.js?v=1"></script>
 <script src="/js/pregao-qa.js?v=1" defer></script>
 <script src="/js/pregao.js?v=45" defer></script>
+<script src="/js/pregao-wall.js?v=1" defer></script>
 <script src="/js/pregao-events.js?v=1" defer></script>
