@@ -194,15 +194,23 @@
                 </ul>
             </div>
 
-            <div class="panel">
-                <div class="p-head">🖱️ QA PLAYWRIGHT — HERMES TESTANDO O ESKILL <span class="live" id="qaLive">STANDBY</span></div>
+            <div class="panel qa-panel" id="qaPanel">
+                <div class="p-head">🖱️ QA PLAYWRIGHT — SOMENTE LEITURA <span class="live" id="qaLive">NÃO EXECUTADO</span></div>
+                <div class="qa-controls">
+                    <button type="button" class="qa-run-button" id="qaRunButton">Executar QA read-only</button>
+                    <dl class="qa-summary" aria-label="Estado do QA">
+                        <div><dt>Status</dt><dd id="qaStatus">NÃO EXECUTADO</dd></div>
+                        <div><dt>Etapa</dt><dd id="qaStep">—</dd></div>
+                        <div><dt>Tempo</dt><dd id="qaElapsed">—</dd></div>
+                    </dl>
+                </div>
+                <div class="qa-feedback" id="qaFeedback" role="alert" aria-live="assertive">Nenhuma execução real registrada.</div>
                 <div class="qa-stage" id="stage">
                     <div id="qaMedia">
-                        <div class="qa-idle" id="qaIdle">Aguardando eventos <code>qa.status</code>…</div>
-                        <iframe id="qaStream" class="qa-frame" hidden title="QA live stream"></iframe>
-                        <video id="qaVideo" class="qa-frame" controls playsinline hidden></video>
+                        <div class="qa-idle" id="qaIdle">Aguardando uma execução QA read-only confiável…</div>
+                        <iframe id="qaStream" class="qa-frame" hidden sandbox="" referrerpolicy="no-referrer" title="QA read-only ao vivo"></iframe>
                     </div>
-                    <div class="qa-log" id="qalog">▶ standby</div>
+                    <div class="qa-log" id="qalog">▶ não executado</div>
                 </div>
             </div>
         </div>
@@ -218,9 +226,12 @@
         eventsUrl: '/api/pregao/events',
         streamUrl: '/api/pregao/stream',
         ticketUrl: '/api/pregao/ticket',
-        wsPath: '/ws/pregao'
+        wsPath: '/ws/pregao',
+        qaRunUrl: '/api/pregao/qa/run',
+        csrfToken: <?= json_encode((string)($_SESSION['csrf_token'] ?? ''), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>
     };
 </script>
 <script src="/js/pregao-chart-layout.js?v=1"></script>
-<script src="/js/pregao.js?v=44" defer></script>
+<script src="/js/pregao-qa.js?v=1" defer></script>
+<script src="/js/pregao.js?v=45" defer></script>
 <script src="/js/pregao-events.js?v=1" defer></script>
