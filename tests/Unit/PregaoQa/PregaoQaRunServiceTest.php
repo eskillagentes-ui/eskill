@@ -325,8 +325,11 @@ final class PregaoQaRunServiceTest extends TestCase
         $redis->expects(self::once())->method('eval')
             ->with(
                 self::logicalAnd(self::stringContains('cjson.decode'), self::stringContains('SETEX')),
-                self::callback(static fn (array $args): bool => $args[0] === PregaoQaRunService::stateKey($runId)),
-                1
+                self::callback(static fn (array $args): bool => $args[0] === PregaoQaRunService::stateKey($runId)
+                    && $args[1] === PregaoQaRunService::cooldownAccountKey(1335)
+                    && $args[2] === PregaoQaRunService::cooldownUserKey(77)
+                    && $args[10] === '0'),
+                3
             )
             ->willReturn(1);
 
