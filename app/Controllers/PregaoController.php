@@ -7,6 +7,8 @@ namespace App\Controllers;
 use App\Controllers\BaseController;
 use App\Services\Pregao\PregaoAccountAuthorizer;
 use App\Services\Pregao\PregaoEventExplorerService;
+use App\Services\Pregao\PregaoQaProof;
+use App\Services\Pregao\PregaoQaRunService;
 use App\Services\Pregao\PregaoSnapshotService;
 use App\Services\Pregao\PregaoStreamService;
 use App\Services\UserService;
@@ -224,6 +226,123 @@ class PregaoController extends BaseController
                 'error' => 'Ticket WS indisponível — use SSE /api/pregao/stream',
                 'fallback' => '/api/pregao/stream',
             ]);
+        }
+    }
+
+    /** POST /api/pregao/qa/run — CSRF é aplicado globalmente em public/index.php. */
+    public function qaRun(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: private, no-store');
+        if (!$this->requireAuthJson()) {
+            return;
+        }
+        $accountId = $this->resolveAccountIdBoundary();
+        if ($accountId === false) {
+            return;
+        }
+        if ($accountId === null) {
+            $this->jsonError('Conta indisponível', 403);
+            return;
+        }
+        $userId = (int) ($_SESSION['user_id'] ?? 0);
+        if ($userId <= 0) {
+            $this->jsonError('Usuário inválido', 401);
+            return;
+        }
+        try {
+            $proof = PregaoQaProof::fromEnvironment();
+            if ($proof === null) {
+                throw new \RuntimeException('qa_signing_unavailable');
+            }
+            $service = new PregaoQaRunService(PregaoQaRunService::connectRedis(), $proof);
+            $run = $service->startRun($accountId, $userId);
+            $this->json(['success' => true, 'data' => $run], 202);
+        } catch (Throwable) {
+            log_error('Pregao QA run failed', ['reason' => 'qa_run_unavailable']);
+            $this->jsonError('QA live indisponível', 503);
+        }
+    }
+
+    /** GET /qa/live/{runId} */
+    public function qaLive(string $runId): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: private, no-store');
+        if (!$this->requireAuthJson()) {
+            return;
+        }
+        $accountId = $this->resolveAccountIdBoundary();
+        if ($accountId === false) {
+            return;
+        }
+        if ($accountId === null || preg_match(PregaoQaRunService::RUN_ID_PATTERN, $runId) !== 1) {
+            $this->jsonError('Execução QA não encontrada', 404);
+            return;
+        }
+        try {
+            $proof = PregaoQaProof::fromEnvironment();
+            if ($proof === null) {
+                throw new \RuntimeException('qa_signing_unavailable');
+            }
+            $service = new PregaoQaRunService(PregaoQaRunService::connectRedis(), $proof);
+            if ($service->loadAuthorizedRun($runId, $accountId) === null) {
+                $this->jsonError('Execução QA não encontrada', 404);
+                return;
+            }
+            $state = $service->loadState($runId, $accountId);
+            if ($state === null) {
+                $this->jsonError('Estado QA indisponível', 404);
+                return;
+            }
+            $this->json(['success' => true, 'data' => $state]);
+        } catch (Throwable) {
+            $this->jsonError('QA live indisponível', 503);
+        }
+    }
+
+    /** GET /qa/frame/{runId} */
+    public function qaFrame(string $runId): void
+    {
+        header('Cache-Control: private, no-store');
+        header('X-Content-Type-Options: nosniff');
+        if (!$this->requireAuthJson(false)) {
+            return;
+        }
+        $accountId = $this->resolveAccountIdBoundary(false);
+        if ($accountId === false) {
+            return;
+        }
+        if ($accountId === null || preg_match(PregaoQaRunService::RUN_ID_PATTERN, $runId) !== 1) {
+            http_response_code(404);
+            return;
+        }
+        try {
+            $proof = PregaoQaProof::fromEnvironment();
+            if ($proof === null) {
+                throw new \RuntimeException('qa_signing_unavailable');
+            }
+            $service = new PregaoQaRunService(PregaoQaRunService::connectRedis(), $proof);
+            if ($service->loadAuthorizedRun($runId, $accountId) === null) {
+                http_response_code(404);
+                return;
+            }
+            $root = dirname(__DIR__, 2) . '/storage/private/pregao-qa';
+            $frame = PregaoQaRunService::framePath($root, $runId);
+            if (!is_file($frame) || !is_readable($frame)) {
+                http_response_code(404);
+                return;
+            }
+            $info = @getimagesize($frame);
+            if (!is_array($info) || ($info[2] ?? null) !== IMAGETYPE_PNG) {
+                http_response_code(404);
+                return;
+            }
+            header('Content-Type: image/png');
+            header('Content-Length: ' . (string) filesize($frame));
+            readfile($frame);
+        } catch (Throwable) {
+            http_response_code(404);
         }
     }
 

@@ -34,7 +34,11 @@ LUA;
     ];
 
     /** @param array<string, mixed> $event */
-    public static function isEventAllowedForAccount(array $event, int $accountId): bool
+    public static function isEventAllowedForAccount(
+        array $event,
+        int $accountId,
+        ?PregaoQaProof $qaProof = null
+    ): bool
     {
         if ($accountId <= 0) {
             return false;
@@ -65,10 +69,15 @@ LUA;
             return PregaoEmitService::isKeywordRankPayloadValid($event['payload']);
         }
         if ($type === 'qa.status') {
-            // Não propaga QA até existir produtor autenticado com evidência verificável.
-            return false;
+            $qaProof = $qaProof ?? PregaoQaProof::fromEnvironment();
+            return $qaProof !== null && $qaProof->verifyStatus($event['payload'], $accountId);
         }
         return true;
+    }
+
+    public static function eventVersion(): int
+    {
+        return PregaoEmitService::VERSION;
     }
 
     private static function isCanonicalTimestamp(string $timestamp): bool
