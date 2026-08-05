@@ -44,6 +44,15 @@ final class PregaoSnapshotQaTest extends TestCase
         return $qa;
     }
 
+    /** @param array<string, mixed>|string $payload */
+    private function insertQa(PDO $db, int $accountId, array|string $payload): void
+    {
+        $encoded = is_array($payload) ? json_encode($payload, JSON_THROW_ON_ERROR) : $payload;
+        $db->prepare(
+            'INSERT INTO pregao_events (account_id, type, ts, payload, source) VALUES (?, ?, ?, ?, ?)'
+        )->execute([$accountId, 'qa.status', '2026-08-04 12:00:00', $encoded, 'live']);
+    }
+
     public function testSemEventoQaStatusRealMarcaExecutedFalseSemInventarNada(): void
     {
         $qa = $this->loadLatestQa($this->makeDb(), 1335);
@@ -64,18 +73,62 @@ final class PregaoSnapshotQaTest extends TestCase
             'suite' => 'smoke',
             'test' => 'login',
             'result' => 'passed',
-            // Payload nunca decide o flag de execução — o backend decide.
-            'executed' => false,
+            'stream_url' => '/qa/stream/session-1',
         ];
-        $db->prepare(
-            'INSERT INTO pregao_events (account_id, type, ts, payload, source) VALUES (?, ?, ?, ?, ?)'
-        )->execute([1335, 'qa.status', '2026-08-04 12:00:00', json_encode($payload, JSON_THROW_ON_ERROR), 'live']);
+        $this->insertQa($db, 1335, $payload);
 
         $qa = $this->loadLatestQa($db, 1335);
 
         self::assertTrue($qa['executed'], 'evento real registrado deve marcar executed=true');
         self::assertSame('passed', $qa['result']);
         self::assertSame('smoke', $qa['suite']);
+        self::assertSame('/qa/stream/session-1', $qa['stream_url']);
         self::assertCount(1, $qa['log']);
+    }
+
+    public function testPayloadQaVazioMalformadoOuComCampoExtraFalhaFechado(): void
+    {
+        $db = $this->makeDb();
+        $this->insertQa($db, 1335, []);
+        $this->insertQa($db, 1336, '{not-json');
+        $this->insertQa($db, 1337, [
+            'running' => false,
+            'suite' => 'smoke',
+            'test' => 'login',
+            'result' => 'passed',
+            'internal_secret' => 'não pode vazar',
+        ]);
+
+        foreach ([1335, 1336, 1337] as $accountId) {
+            $qa = $this->loadLatestQa($db, $accountId);
+            self::assertFalse($qa['executed']);
+            self::assertNull($qa['result']);
+            self::assertSame([], $qa['log']);
+            self::assertStringNotContainsString(
+                'não pode vazar',
+                json_encode($qa, JSON_THROW_ON_ERROR)
+            );
+        }
+    }
+
+    public function testUrlQaExternaOuJavascriptFalhaFechado(): void
+    {
+        $db = $this->makeDb();
+        foreach ([
+            1335 => 'https://internal.example/token?secret=x',
+            1336 => 'javascript:alert(1)',
+            1337 => '/qa/../secrets',
+        ] as $accountId => $url) {
+            $this->insertQa($db, $accountId, [
+                'running' => true,
+                'suite' => 'smoke',
+                'test' => 'login',
+                'result' => 'running',
+                'stream_url' => $url,
+            ]);
+            $qa = $this->loadLatestQa($db, $accountId);
+            self::assertFalse($qa['executed']);
+            self::assertNull($qa['stream_url']);
+        }
     }
 }

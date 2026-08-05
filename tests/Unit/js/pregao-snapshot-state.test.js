@@ -42,7 +42,9 @@ function element(id) {
             height: 380,
             children: [],
             appendChild(child) { this.children.push(child); },
-            setAttribute() {},
+            setAttribute(name, value) { this[name] = value; },
+            removeAttribute(name) { this[name] = ''; },
+            load() {},
             getContext() { return context2d; }
         });
     }
@@ -743,7 +745,7 @@ test('mantém o cache-busting do cliente corrigido', () => {
     const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
     assert.match(source, /iconNode\.textContent = String\(icon\)/, 'ícone do feed deve usar textContent');
     assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
-    assert.match(view, /\/js\/pregao\.js\?v=41/, 'view deve invalidar o cache do cliente corrigido');
+    assert.match(view, /\/js\/pregao\.js\?v=42/, 'view deve invalidar o cache do cliente corrigido');
 });
 
 test('QA sem status real aparece como não executado, sem mídia artificial', async () => {
@@ -773,6 +775,39 @@ test('QA sem status real aparece como não executado, sem mídia artificial', as
         }
     });
     assert.strictEqual(element('qaLive').textContent, 'PASSED', 'resultado real deve continuar sendo exibido');
+});
+
+test('QA limpa mídia anterior e rejeita URLs fora dos caminhos permitidos', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        qa: {
+            executed: true, running: true, suite: 'smoke', test: 'login',
+            result: 'running', video_url: null, stream_url: '/qa/stream/session-1', log: []
+        }
+    });
+    assert.strictEqual(element('qaStream').src, '/qa/stream/session-1');
+
+    await runSnapshot({
+        server_ts: '2026-08-04T12:01:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        qa: { executed: false, running: false, result: null, video_url: null, stream_url: null, log: [] }
+    });
+    assert.strictEqual(element('qaStream').src, '', 'src anterior deve ser removido');
+
+    await runSnapshot({
+        server_ts: '2026-08-04T12:02:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        qa: {
+            executed: true, running: true, suite: 'smoke', test: 'login',
+            result: 'running', video_url: null, stream_url: 'javascript:alert(1)', log: []
+        }
+    });
+    assert.notStrictEqual(element('qaStream').src, 'javascript:alert(1)');
+    assert.strictEqual(element('qaStream').hidden, true);
 });
 
 test('semáforos são nomeados como Saúde da conta e Sentinela operacional', async () => {

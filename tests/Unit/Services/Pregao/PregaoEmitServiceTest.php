@@ -55,6 +55,47 @@ class PregaoEmitServiceTest extends TestCase
         }
     }
 
+    public function testQaStatusRejeitaPayloadSemEvidenciaOuComUrlHostilAntesDeIo(): void
+    {
+        $service = new PregaoEmitService($this->createMock(PDO::class), $this->createMock(Redis::class));
+        $invalidPayloads = [
+            [],
+            ['running' => false, 'suite' => 'smoke', 'test' => 'login', 'result' => 'passed', 'extra' => true],
+            [
+                'running' => true,
+                'suite' => 'smoke',
+                'test' => 'login',
+                'result' => 'running',
+                'stream_url' => 'javascript:alert(1)',
+            ],
+        ];
+
+        foreach ($invalidPayloads as $payload) {
+            try {
+                $service->emit('qa.status', $payload, 1335);
+                self::fail('qa.status inválido deveria ser rejeitado');
+            } catch (\InvalidArgumentException) {
+                self::addToAssertionCount(1);
+            }
+        }
+    }
+
+    public function testQaStatusValidatorAceitaSomenteContratoSeguro(): void
+    {
+        $payload = [
+            'running' => false,
+            'suite' => 'smoke',
+            'test' => 'login',
+            'result' => 'passed',
+            'video_url' => '/storage/qa/run-1.mp4',
+        ];
+
+        self::assertSame(
+            $payload + ['stream_url' => null],
+            PregaoEmitService::validateQaStatusPayload($payload)
+        );
+    }
+
     public function testFalhaDeConexaoRedisNaoExpoeMensagemBrutaNoLog(): void
     {
         $source = file_get_contents(

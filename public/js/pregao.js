@@ -477,6 +477,23 @@
         while (feed.children.length > 50) feed.lastChild.remove();
     }
 
+    function safeQaMediaPath(value) {
+        if (typeof value !== 'string' || value.includes('..')) return null;
+        return /^\/(?:qa|storage\/qa)\/[A-Za-z0-9_./-]+$/.test(value) ? value : null;
+    }
+
+    function clearQaMedia(stream, video) {
+        if (stream) {
+            stream.hidden = true;
+            stream.removeAttribute('src');
+        }
+        if (video) {
+            video.hidden = true;
+            video.removeAttribute('src');
+            video.load();
+        }
+    }
+
     function applyQa(qa) {
         if (!qa) return;
         const idle = $('qaIdle');
@@ -491,8 +508,7 @@
                 idle.hidden = false;
                 idle.textContent = 'QA não executado — nenhum resultado real registrado.';
             }
-            if (stream) stream.hidden = true;
-            if (video) video.hidden = true;
+            clearQaMedia(stream, video);
             $('qalog').textContent = '▶ não executado';
             return;
         }
@@ -500,19 +516,32 @@
         if (qa.running) live.textContent = 'AO VIVO';
         else live.textContent = qa.result ? String(qa.result).toUpperCase() : 'STANDBY';
 
-        if (qa.stream_url) {
+        const streamUrl = safeQaMediaPath(qa.stream_url);
+        const videoUrl = safeQaMediaPath(qa.video_url);
+        if (streamUrl) {
             idle.hidden = true;
-            video.hidden = true;
-            stream.hidden = false;
-            if (stream.src !== qa.stream_url) stream.src = qa.stream_url;
-        } else if (qa.video_url) {
-            idle.hidden = true;
-            stream.hidden = true;
-            video.hidden = false;
-            if (video.src !== qa.video_url) {
-                video.src = qa.video_url;
+            if (video) {
+                video.hidden = true;
+                video.removeAttribute('src');
                 video.load();
             }
+            stream.hidden = false;
+            if (stream.src !== streamUrl) stream.src = streamUrl;
+        } else if (videoUrl) {
+            idle.hidden = true;
+            if (stream) {
+                stream.hidden = true;
+                stream.removeAttribute('src');
+            }
+            video.hidden = false;
+            if (video.src !== videoUrl) {
+                video.src = videoUrl;
+                video.load();
+            }
+        } else {
+            idle.hidden = false;
+            idle.textContent = 'QA executado sem mídia segura disponível.';
+            clearQaMedia(stream, video);
         }
 
         const logLine = qa.test

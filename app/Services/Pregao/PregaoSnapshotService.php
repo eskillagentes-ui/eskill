@@ -428,20 +428,12 @@ final class PregaoSnapshotService
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if (!$row) {
             // Sem qa.status real: declara "não executado" — nunca inventa resultado/log.
-            return [
-                'executed' => false,
-                'running' => false,
-                'suite' => null,
-                'test' => null,
-                'result' => null,
-                'video_url' => null,
-                'stream_url' => null,
-                'log' => [],
-            ];
+            return $this->emptyQaState();
         }
-        $payload = is_string($row['payload'])
-            ? (json_decode($row['payload'], true) ?: [])
-            : (array) $row['payload'];
+        $payload = PregaoEmitService::validateQaStatusPayload($row['payload'] ?? null);
+        if ($payload === null) {
+            return $this->emptyQaState();
+        }
 
         $logStmt = $this->db->prepare(
             "SELECT payload, ts FROM pregao_events
@@ -451,25 +443,43 @@ final class PregaoSnapshotService
         $logStmt->execute(['qa.status', $accountId]);
         $log = [];
         foreach ($logStmt->fetchAll(PDO::FETCH_ASSOC) as $lr) {
-            $p = is_string($lr['payload']) ? (json_decode($lr['payload'], true) ?: []) : (array) $lr['payload'];
+            $p = PregaoEmitService::validateQaStatusPayload($lr['payload'] ?? null);
+            if ($p === null) {
+                continue;
+            }
             $log[] = [
                 'ts' => $this->mysqlToIso((string) $lr['ts']),
-                'test' => $p['test'] ?? null,
-                'result' => $p['result'] ?? null,
-                'suite' => $p['suite'] ?? null,
+                'test' => $p['test'],
+                'result' => $p['result'],
+                'suite' => $p['suite'],
             ];
         }
 
-        // 'executed' é decidido aqui (evento real persistido), nunca pelo payload.
-        return array_merge([
+        return [
+            'executed' => true,
+            'running' => $payload['running'],
+            'suite' => $payload['suite'],
+            'test' => $payload['test'],
+            'result' => $payload['result'],
+            'video_url' => $payload['video_url'],
+            'stream_url' => $payload['stream_url'],
+            'log' => $log,
+        ];
+    }
+
+    /** @return array{executed:false,running:false,suite:null,test:null,result:null,video_url:null,stream_url:null,log:array{}} */
+    private function emptyQaState(): array
+    {
+        return [
+            'executed' => false,
             'running' => false,
             'suite' => null,
             'test' => null,
             'result' => null,
             'video_url' => null,
             'stream_url' => null,
-            'log' => $log,
-        ], $payload, ['log' => $log, 'executed' => true]);
+            'log' => [],
+        ];
     }
 
     /**

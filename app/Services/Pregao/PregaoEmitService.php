@@ -52,6 +52,22 @@ final class PregaoEmitService
     private const KEYWORD_RANK_KEYS = ['delta', 'kw', 'pos'];
 
     /** @var list<string> */
+    private const QA_STATUS_REQUIRED_KEYS = ['result', 'running', 'suite', 'test'];
+
+    /** @var list<string> */
+    private const QA_STATUS_ALLOWED_KEYS = [
+        'result',
+        'running',
+        'stream_url',
+        'suite',
+        'test',
+        'video_url',
+    ];
+
+    /** @var list<string> */
+    private const QA_STATUS_RESULTS = ['error', 'failed', 'passed', 'running', 'skipped'];
+
+    /** @var list<string> */
     private const AGENT_STATUS_AGENTS = [
         'sentinela',
         'collector',
@@ -122,6 +138,12 @@ final class PregaoEmitService
             $this->assertAgentStatusPayload($payload, $accountId);
         } elseif ($type === 'keyword.rank') {
             $this->assertKeywordRankPayload($payload);
+        } elseif ($type === 'qa.status') {
+            $validatedQa = self::validateQaStatusPayload($payload);
+            if ($validatedQa === null) {
+                throw new \InvalidArgumentException('Payload qa.status inválido');
+            }
+            $payload = $validatedQa;
         }
 
         $source = $source === 'seed' ? 'seed' : 'live';
@@ -147,6 +169,75 @@ final class PregaoEmitService
         }
 
         return $event;
+    }
+
+    /**
+     * @param array<string, mixed>|string|null $raw
+     * @return array{running:bool,suite:string,test:string,result:string,video_url:?string,stream_url:?string}|null
+     */
+    public static function validateQaStatusPayload(array|string|null $raw): ?array
+    {
+        if (is_string($raw)) {
+            $decoded = json_decode($raw, true);
+            if (!is_array($decoded)) {
+                return null;
+            }
+            $raw = $decoded;
+        }
+        if (!is_array($raw)) {
+            return null;
+        }
+
+        $keys = array_keys($raw);
+        sort($keys, SORT_STRING);
+        if (array_diff($keys, self::QA_STATUS_ALLOWED_KEYS) !== []
+            || array_diff(self::QA_STATUS_REQUIRED_KEYS, $keys) !== []
+            || !is_bool($raw['running'])
+            || !is_string($raw['suite'])
+            || trim($raw['suite']) === ''
+            || strlen($raw['suite']) > 100
+            || !is_string($raw['test'])
+            || trim($raw['test']) === ''
+            || strlen($raw['test']) > 200
+            || !is_string($raw['result'])
+            || !in_array($raw['result'], self::QA_STATUS_RESULTS, true)
+            || ($raw['running'] === true) !== ($raw['result'] === 'running')
+        ) {
+            return null;
+        }
+
+        $videoUrl = self::validateQaMediaPath($raw['video_url'] ?? null);
+        $streamUrl = self::validateQaMediaPath($raw['stream_url'] ?? null);
+        if ((array_key_exists('video_url', $raw) && $videoUrl === null && $raw['video_url'] !== null)
+            || (array_key_exists('stream_url', $raw) && $streamUrl === null && $raw['stream_url'] !== null)
+            || ($videoUrl !== null && $streamUrl !== null)
+        ) {
+            return null;
+        }
+
+        return [
+            'running' => $raw['running'],
+            'suite' => trim($raw['suite']),
+            'test' => trim($raw['test']),
+            'result' => $raw['result'],
+            'video_url' => $videoUrl,
+            'stream_url' => $streamUrl,
+        ];
+    }
+
+    private static function validateQaMediaPath(mixed $value): ?string
+    {
+        if ($value === null) {
+            return null;
+        }
+        if (!is_string($value)
+            || str_contains($value, '..')
+            || preg_match('#^/(?:qa|storage/qa)/[A-Za-z0-9_./-]+$#D', $value) !== 1
+        ) {
+            return null;
+        }
+
+        return $value;
     }
 
     private function assertAgentStatusPayload(array $payload, ?int $accountId): void
