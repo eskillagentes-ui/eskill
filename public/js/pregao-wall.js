@@ -32,6 +32,11 @@
         }
     }
 
+    function compactAgents(value) {
+        const first = String(value || '').split('·')[0].trim();
+        return first || '0/5 reportando';
+    }
+
     function deriveState(input) {
         const semaClass = String(input && input.semaClass || '');
         const semaText = String(input && input.semaText || '').toUpperCase();
@@ -82,8 +87,8 @@
             anchor.dataset.state = state;
             byId('wallState').textContent = labels[state];
             byId('wallHealthDetail').textContent = text('semaText', 'Saúde da conta indisponível');
-            byId('wallIndex').textContent = text('px', '—') + '  ' + text('chg', 'n/d');
-            byId('wallAgents').textContent = text('agentsSummary', '0/5 reportando');
+            byId('wallIndex').textContent = text('px', '—');
+            byId('wallAgents').textContent = compactAgents(text('agentsSummary', ''));
             byId('wallQa').textContent = text('qaLive', 'NÃO EXECUTADO');
             byId('wallFreshness').textContent = text('sourceFreshness', 'AGUARDANDO');
             byId('wallClock').textContent = text('clock', '--:--:--');
@@ -149,5 +154,5 @@
         return { setWallMode, sync };
     }
 
-    return { burnInOffset, deriveState, init, isWallRequested };
+    return { burnInOffset, compactAgents, deriveState, init, isWallRequested };
 }));
