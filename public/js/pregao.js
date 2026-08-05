@@ -17,15 +17,50 @@
     const seenOps = new Set();
     let candles = [];
     let currentDate = null;
-    let open0 = 1000;
-    let cur = { o: 1000, c: 1000, h: 1000, l: 1000 };
+    let open0 = null;
+    let cur = { o: null, c: null, h: null, l: null };
+    let indexWatermarkMs = null;
+    const candleWatermarks = new Map();
     let reconnectAttempt = 0;
     let es = null;
     let ws = null;
     let intentionalClose = false;
+    const agentOrder = ['sentinela', 'collector', 'financeiro', 'otimizador', 'orquestrador'];
+    const agentStatuses = ['waiting', 'success', 'skipped', 'blocked', 'failed'];
+    const agentSafeReasons = new Set([
+        'aggregated', 'agent_blocked', 'agent_exception', 'agent_failed',
+        'collector_unavailable', 'cost_validation_blocked', 'financeiro_unavailable',
+        'incomplete_legacy_payload', 'invalid_legacy_payload',
+        'invalid_optimizer_cost_snapshot', 'invalid_optimizer_observation_snapshot',
+        'legacy_error', 'legacy_read_complete', 'read_only_violation',
+        'recommendations_ready', 'runtime_exception', 'sentinela_unavailable'
+    ]);
+    const agentReasonsByStatus = {
+        success: ['aggregated', 'legacy_read_complete', 'recommendations_ready'],
+        skipped: ['legacy_read_complete'],
+        blocked: ['agent_blocked', 'cost_validation_blocked', 'read_only_violation'],
+        failed: [
+            'agent_exception', 'agent_failed', 'collector_unavailable', 'financeiro_unavailable',
+            'incomplete_legacy_payload', 'invalid_legacy_payload',
+            'invalid_optimizer_cost_snapshot', 'invalid_optimizer_observation_snapshot',
+            'legacy_error', 'read_only_violation', 'runtime_exception', 'sentinela_unavailable'
+        ]
+    };
+    const agentEventKeys = ['account_id', 'payload', 'source', 'ts', 'type', 'v'];
+    const realtimeEventTypes = new Set([
+        'account.semaforo', 'agent.status', 'index.candle', 'index.tick', 'keyword.rank',
+        'metric.update', 'op', 'qa.status', 'sale'
+    ]);
+    const agentPayloadKeys = [
+        'agent', 'attempts', 'correlation_id', 'ml_write_automation',
+        'reason', 'state_changed', 'status'
+    ];
+    const agentStaleAfterMs = 600 * 1000;
+    const agentState = Object.create(null);
 
     setInterval(() => {
         if ($('clock')) $('clock').textContent = new Date().toLocaleTimeString('pt-BR');
+        refreshAgentFreshness(Date.now());
     }, 1000);
 
     function fmtMoney(n) {
@@ -114,6 +149,7 @@
         if (chartEmpty) chartEmpty.hidden = !show;
         if (cv) cv.style.opacity = show ? '0.25' : '1';
     }
+
 
     function draw() {
         if (!ctx || !cv) return;
@@ -351,28 +387,35 @@
     function renderTape(ranks, rankTrackerEnabled) {
         const el = $('tape');
         if (!el) return;
+        el.textContent = '';
         if (rankTrackerEnabled === false) {
-            el.innerHTML = '<span>rank tracker desativado</span>';
+            el.textContent = 'rank tracker desativado';
             return;
         }
-        const list = Array.isArray(ranks) ? ranks : [];
+        const list = Array.isArray(ranks) ? ranks.filter(isValidKeywordRankPayload) : [];
         if (!list.length) {
-            el.innerHTML = '<span>sem ranks</span>';
+            el.textContent = 'sem ranks';
             return;
         }
-        let tp = '';
-        list.forEach((k) => {
-            const delta = k.delta;
-            let cls = 'y', label = '·';
-            if (typeof delta === 'number') {
-                if (delta > 0) { cls = 'u'; label = '▲' + delta; }
-                else if (delta < 0) { cls = 'd'; label = '▼' + Math.abs(delta); }
-                else { cls = 'y'; label = '='; }
-            }
-            if (k.pos === 1) { cls = 'y'; label = 'TOPO'; }
-            tp += `<span><b>${escapeHtml(k.kw)}</b> #${k.pos} <span class="${cls}">${label}</span></span>`;
-        });
-        el.innerHTML = tp + tp;
+        for (let copy = 0; copy < 2; copy++) {
+            list.forEach((rank) => {
+                let cls = 'y', label = '·';
+                if (rank.delta > 0) { cls = 'u'; label = '▲' + rank.delta; }
+                else if (rank.delta < 0) { cls = 'd'; label = '▼' + Math.abs(rank.delta); }
+                else if (rank.delta === 0) { label = '='; }
+                if (rank.pos === 1) { cls = 'y'; label = 'TOPO'; }
+                const item = document.createElement('span');
+                const keyword = document.createElement('b');
+                const delta = document.createElement('span');
+                keyword.textContent = rank.kw;
+                delta.className = cls;
+                delta.textContent = label;
+                item.appendChild(keyword);
+                item.appendChild(document.createTextNode(' #' + String(rank.pos) + ' '));
+                item.appendChild(delta);
+                el.appendChild(item);
+            });
+        }
     }
 
     function escapeHtml(str) {
@@ -401,7 +444,21 @@
         if (robot === 'VENDA' || level === 'success') li.className = 'sale';
         if (level === 'alert') li.className = 'alert';
         const ts = ev.ts ? new Date(ev.ts).toLocaleTimeString('pt-BR') : new Date().toLocaleTimeString('pt-BR');
-        li.innerHTML = `<span class="ic">${icon}</span><span class="tx"><b>${escapeHtml(robot)}</b> — ${escapeHtml(msg)}<span class="ts">${ts} · read-only</span></span>`;
+        const iconNode = document.createElement('span');
+        iconNode.className = 'ic';
+        iconNode.textContent = String(icon);
+        const textNode = document.createElement('span');
+        textNode.className = 'tx';
+        const robotNode = document.createElement('b');
+        robotNode.textContent = String(robot);
+        const timestampNode = document.createElement('span');
+        timestampNode.className = 'ts';
+        timestampNode.textContent = ts + ' · read-only';
+        textNode.appendChild(robotNode);
+        textNode.appendChild(document.createTextNode(' — ' + String(msg)));
+        textNode.appendChild(timestampNode);
+        li.appendChild(iconNode);
+        li.appendChild(textNode);
         const feed = $('feed');
         if (prepend !== false) feed.prepend(li);
         else feed.appendChild(li);
@@ -439,15 +496,75 @@
         $('qalog').textContent = logLine;
     }
 
-    function applyIndexTick(value) {
-        const v = Number(value);
-        if (!Number.isFinite(v)) return;
+    function eventWatermark(timestamp) {
+        return timestampWatermark(timestamp);
+    }
+
+    function timestampWatermark(timestamp) {
+        if (!isCanonicalAgentTimestamp(timestamp)) return null;
+        const parsed = Date.parse(timestamp);
+        return Number.isNaN(parsed) ? null : parsed;
+    }
+
+    function timestampBusinessDate(timestamp) {
+        const parsed = timestampWatermark(timestamp);
+        if (parsed == null) return null;
+        const parts = new Intl.DateTimeFormat('en-US', {
+            timeZone: 'America/Sao_Paulo',
+            year: 'numeric',
+            month: '2-digit',
+            day: '2-digit'
+        }).formatToParts(new Date(parsed));
+        const values = {};
+        parts.forEach((part) => {
+            if (part.type !== 'literal') values[part.type] = part.value;
+        });
+        const date = values.year + '-' + values.month + '-' + values.day;
+        return isCalendarDate(date) ? date : null;
+    }
+
+    function isCalendarDate(value) {
+        if (typeof value !== 'string') return false;
+        const match = value.match(/^([0-9]{4})-([0-9]{2})-([0-9]{2})$/);
+        if (!match) return false;
+        const year = Number(match[1]);
+        const month = Number(match[2]);
+        const day = Number(match[3]);
+        const date = new Date(Date.UTC(year, month - 1, day));
+        return date.getUTCFullYear() === year
+            && date.getUTCMonth() === month - 1
+            && date.getUTCDate() === day;
+    }
+
+    function sortAndTrimCandles() {
+        candles.sort((left, right) => left.date.localeCompare(right.date));
+        if (candles.length > 90) candles = candles.slice(-90);
+    }
+
+    function applyIndexTick(value, eventTs) {
+        if (typeof value !== 'number' || !Number.isFinite(value)) return;
+        const v = value;
+        const incomingMs = eventWatermark(eventTs);
+        const eventDate = timestampBusinessDate(eventTs);
+        if (incomingMs == null || eventDate == null) return;
+        if (currentDate && eventDate < currentDate) return;
+        if (indexWatermarkMs != null && incomingMs <= indexWatermarkMs) return;
+        indexWatermarkMs = incomingMs;
+        if (!currentDate || eventDate > currentDate) {
+            currentDate = eventDate;
+            open0 = null;
+            cur = { o: null, c: v, h: null, l: null, date: eventDate, change_pct: null };
+            updateHeader();
+            draw();
+            return;
+        }
         cur.c = v;
         const currentIndex = currentDate ? findCandleIndex(currentDate) : -1;
         if (currentIndex >= 0) {
             cur.h = cur.h == null ? v : Math.max(cur.h, v);
             cur.l = cur.l == null ? v : Math.min(cur.l, v);
             candles[currentIndex] = { ...candles[currentIndex], c: v, h: cur.h, l: cur.l };
+            candleWatermarks.set(currentDate, incomingMs);
         }
         updateHeader();
         draw();
@@ -457,16 +574,38 @@
         return candles.findIndex((candle) => candle.date === date);
     }
 
-    function applyCandle(c) {
-        if (!c || !c.date) return;
+    function applyCandle(c, eventTs) {
+        if (!c || !isCalendarDate(c.date)) return;
+        if (![c.o, c.h, c.l, c.c].every((value) => typeof value === 'number' && Number.isFinite(value))) return;
+        const currentCandleWatermark = candleWatermarks.get(c.date);
+        const incomingMs = eventWatermark(eventTs);
+        if (incomingMs == null) return;
+        if (currentCandleWatermark != null && incomingMs <= currentCandleWatermark) return;
+        const staleForCurrentIndex = c.date === currentDate
+            && indexWatermarkMs != null
+            && incomingMs <= indexWatermarkMs;
         const row = { o: +c.o, h: +c.h, l: +c.l, c: +c.c, date: c.date };
+        if (staleForCurrentIndex && typeof cur.c === 'number' && Number.isFinite(cur.c)) {
+            row.c = cur.c;
+            row.h = Math.max(row.h, cur.c, Number.isFinite(cur.h) ? cur.h : row.h);
+            row.l = Math.min(row.l, cur.c, Number.isFinite(cur.l) ? cur.l : row.l);
+        }
         const idx = findCandleIndex(c.date);
         if (idx >= 0) candles[idx] = row;
         else candles.push(row);
-        if (candles.length > 90) candles = candles.slice(-90);
-        if (c.date === currentDate) {
+        candleWatermarks.set(c.date, staleForCurrentIndex ? indexWatermarkMs : incomingMs);
+        sortAndTrimCandles();
+        if (!currentDate || c.date > currentDate) {
+            currentDate = c.date;
             cur = { ...row };
             open0 = row.o;
+            indexWatermarkMs = incomingMs;
+        } else if (c.date === currentDate) {
+            cur = { ...row };
+            open0 = Number.isFinite(row.o) ? row.o : open0;
+            if (!staleForCurrentIndex) {
+                indexWatermarkMs = indexWatermarkMs == null ? incomingMs : Math.max(indexWatermarkMs, incomingMs);
+            }
         }
         updateHeader();
         draw();
@@ -560,15 +699,233 @@
         if (flashCls) flash(ids[1], flashCls);
     }
 
+    function normalizeAgentItem(item, eventTs) {
+        const updatedAt = typeof item === 'object' && item !== null && typeof item.updated_at === 'string'
+            ? item.updated_at
+            : (typeof eventTs === 'string' ? eventTs : null);
+        if (!item || typeof item !== 'object'
+            || !agentOrder.includes(item.agent)
+            || !agentStatuses.includes(item.status)
+            || item.status === 'waiting'
+            || typeof item.reason !== 'string'
+            || (!agentSafeReasons.has(item.reason) && !/^legacy_http_[1345][0-9]{2}$/.test(item.reason))
+            || !isAgentStatusReasonCoherent(item.status, item.reason)
+            || typeof item.correlation_id !== 'string'
+            || !(new RegExp('^agent24x7-[0-9]{8}T[0-9]{6}Z-[a-f0-9]{8}:' + accountId + '$')).test(item.correlation_id)
+            || !Number.isInteger(item.attempts)
+            || item.attempts < 1
+            || item.attempts > 3
+            || item.state_changed !== false
+            || item.ml_write_automation !== false
+            || (updatedAt !== null && !isCanonicalAgentTimestamp(updatedAt))
+        ) return null;
+        const realtimeAgeMs = eventTs !== null && updatedAt !== null
+            ? Date.now() - Date.parse(updatedAt)
+            : 0;
+        return {
+            agent: item.agent,
+            status: item.status,
+            reason: item.reason,
+            correlation_id: item.correlation_id,
+            updated_at: updatedAt,
+            stale: item.stale === true || realtimeAgeMs > agentStaleAfterMs
+        };
+    }
+
+    function isCanonicalAgentTimestamp(timestamp) {
+        if (typeof timestamp !== 'string') return false;
+        const match = timestamp.match(
+            /^([0-9]{4})-([0-9]{2})-([0-9]{2})T([0-9]{2}):([0-9]{2}):([0-9]{2})(?:\.[0-9]{1,6})?(?:Z|([+-])([0-9]{2}):([0-9]{2}))$/
+        );
+        if (!match) return false;
+        const year = Number(match[1]);
+        const month = Number(match[2]);
+        const day = Number(match[3]);
+        const calendar = new Date(Date.UTC(year, month - 1, day));
+        const offsetHour = Number(match[8] || 0);
+        const offsetMinute = Number(match[9] || 0);
+        if (calendar.getUTCFullYear() !== year
+            || calendar.getUTCMonth() !== month - 1
+            || calendar.getUTCDate() !== day
+            || Number(match[4]) > 23
+            || Number(match[5]) > 59
+            || Number(match[6]) > 59
+            || offsetHour > 14
+            || offsetMinute > 59
+            || (offsetHour === 14 && offsetMinute !== 0)
+        ) return false;
+        const valueMs = Date.parse(timestamp);
+        return !Number.isNaN(valueMs) && valueMs <= Date.now() + 60 * 1000;
+    }
+
+    function isAgentStatusReasonCoherent(status, reason) {
+        if (/^legacy_http_[1345][0-9]{2}$/.test(reason)) return status === 'failed';
+        return Array.isArray(agentReasonsByStatus[status])
+            && agentReasonsByStatus[status].includes(reason);
+    }
+
+    function agentStatusLabel(item) {
+        if (item.stale && item.updated_at) return 'ATRASADO';
+        return {
+            success: 'OK',
+            skipped: 'SEM MUDANÇA',
+            blocked: 'BLOQUEADO',
+            failed: 'FALHOU',
+            waiting: 'AGUARDANDO'
+        }[item.status] || 'AGUARDANDO';
+    }
+
+    function agentTone(item) {
+        if (item.stale && item.updated_at) return 'is-attention';
+        if (item.status === 'success' || item.status === 'skipped') return 'is-healthy';
+        if (item.status === 'blocked' || item.status === 'failed') return 'is-attention';
+        return 'is-waiting';
+    }
+
+    function renderAgent(item) {
+        agentState[item.agent] = item;
+        const card = $('agentCard-' + item.agent);
+        const status = $('agentStatus-' + item.agent);
+        const reason = $('agentReason-' + item.agent);
+        const time = $('agentTime-' + item.agent);
+        if (card) card.className = 'agent-card ' + agentTone(item);
+        if (status) status.textContent = agentStatusLabel(item);
+        if (reason) reason.textContent = item.reason.replace(/_/g, ' ');
+        if (time) {
+            if (!item.updated_at) {
+                time.textContent = 'sem ciclo registrado';
+            } else {
+                const parsed = new Date(item.updated_at);
+                time.textContent = Number.isNaN(parsed.getTime())
+                    ? 'horário indisponível'
+                    : 'último ciclo ' + parsed.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+            }
+        }
+    }
+
+    function refreshAgentSummary() {
+        const list = agentOrder.map((agent) => agentState[agent]).filter(Boolean);
+        const reporting = list.filter((item) => item.updated_at).length;
+        const healthy = list.filter((item) => !item.stale
+            && (item.status === 'success' || item.status === 'skipped')).length;
+        const unhealthy = list.filter((item) => item.updated_at
+            && (item.stale || item.status === 'blocked' || item.status === 'failed')).length;
+        const correlations = new Set(list.filter((item) => item.updated_at).map((item) => item.correlation_id));
+        const mixedCohort = reporting === agentOrder.length && correlations.size !== 1;
+        const attention = reporting > 0
+            ? unhealthy + (agentOrder.length - reporting) + (mixedCohort ? 1 : 0)
+            : 0;
+        const summary = $('agentsSummary');
+        if (summary) {
+            summary.textContent = reporting + '/' + agentOrder.length + ' reportando · '
+                + healthy + ' saudáveis' + (attention ? ' · ' + attention + ' atenção' : '');
+            summary.className = 'agents-summary ' + (attention ? 'is-attention' : (reporting ? 'is-healthy' : 'is-waiting'));
+        }
+    }
+
+    function refreshAgentFreshness(nowMs) {
+        const referenceMs = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+        agentOrder.forEach((agent) => {
+            const item = agentState[agent];
+            if (!item || !item.updated_at) return;
+            const updatedMs = Date.parse(item.updated_at);
+            const ageMs = referenceMs - updatedMs;
+            const stale = Number.isNaN(updatedMs)
+                || ageMs > agentStaleAfterMs
+                || ageMs < -60 * 1000;
+            if (item.stale !== stale) renderAgent({ ...item, stale });
+        });
+        refreshAgentSummary();
+    }
+
+    function applyAgents(data) {
+        agentOrder.forEach((agent) => {
+            if (!agentState[agent]) {
+                renderAgent({ agent, status: 'waiting', reason: 'no_data', updated_at: null, stale: true });
+            }
+        });
+        const items = data && Array.isArray(data.items) ? data.items : [];
+        items.forEach((item) => {
+            const normalized = normalizeAgentItem(item, null);
+            if (!normalized || !normalized.updated_at) return;
+            const incomingMs = Date.parse(normalized.updated_at);
+            if (Number.isNaN(incomingMs)) return;
+            const current = agentState[normalized.agent];
+            const currentMs = current && current.updated_at ? Date.parse(current.updated_at) : NaN;
+            if (!Number.isNaN(currentMs) && incomingMs <= currentMs) return;
+            renderAgent(normalized);
+        });
+        refreshAgentSummary();
+    }
+
+    function applyAgentStatus(payload, eventTs) {
+        const normalized = normalizeAgentItem({ ...payload, stale: false }, eventTs);
+        if (!normalized || !normalized.updated_at) return;
+        const incomingMs = Date.parse(normalized.updated_at);
+        if (Number.isNaN(incomingMs)) return;
+        const current = agentState[normalized.agent];
+        const currentMs = current && current.updated_at ? Date.parse(current.updated_at) : NaN;
+        if (!Number.isNaN(currentMs) && incomingMs <= currentMs) return;
+        renderAgent(normalized);
+        refreshAgentSummary();
+    }
+
+    function isValidAgentEvent(event) {
+        if (!isValidRealtimeEvent(event) || event.type !== 'agent.status') return false;
+        const payload = event.payload;
+        return payload && typeof payload === 'object'
+            && JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(agentPayloadKeys)
+            && normalizeAgentItem(payload, event.ts) !== null;
+    }
+
+    function isValidRealtimeEvent(event) {
+        if (!event || typeof event !== 'object' || Array.isArray(event)) return false;
+        return JSON.stringify(Object.keys(event).sort()) === JSON.stringify(agentEventKeys)
+            && event.v === 2
+            && typeof event.type === 'string'
+            && realtimeEventTypes.has(event.type)
+            && event.account_id === accountId
+            && (event.source === 'live' || event.source === 'seed')
+            && isCanonicalAgentTimestamp(event.ts)
+            && event.payload && typeof event.payload === 'object'
+            && !Array.isArray(event.payload)
+            && isValidRealtimePayload(event.type, event.payload);
+    }
+
+    function isValidRealtimePayload(type, payload) {
+        if (type === 'index.tick') {
+            return typeof payload.value === 'number' && Number.isFinite(payload.value);
+        }
+        if (type === 'index.candle') {
+            return isCalendarDate(payload.date)
+                && [payload.o, payload.h, payload.l, payload.c].every(
+                    (value) => typeof value === 'number' && Number.isFinite(value)
+                );
+        }
+        if (type === 'keyword.rank') return isValidKeywordRankPayload(payload);
+        return true;
+    }
+
+    function isValidKeywordRankPayload(payload) {
+        return payload && typeof payload === 'object'
+            && JSON.stringify(Object.keys(payload).sort()) === JSON.stringify(['delta', 'kw', 'pos'])
+            && typeof payload.kw === 'string'
+            && payload.kw.trim().length > 0
+            && payload.kw.length <= 200
+            && Number.isInteger(payload.pos)
+            && payload.pos >= 1
+            && (payload.delta == null || Number.isInteger(payload.delta));
+    }
+
     function handleEvent(ev) {
-        if (!ev || !ev.type) return;
+        if (!isValidRealtimeEvent(ev)) return;
         switch (ev.type) {
             case 'index.tick':
-                applyIndexTick(ev.payload && ev.payload.value);
+                applyIndexTick(ev.payload && ev.payload.value, ev.ts);
                 if (ev.payload) setFactorsBadge(ev.payload);
                 break;
             case 'index.candle':
-                applyCandle(ev.payload);
+                applyCandle(ev.payload, ev.ts);
                 break;
             case 'metric.update':
                 applyMetricUpdate(ev.payload || {});
@@ -577,19 +934,24 @@
                 pushOp(ev, true);
                 break;
             case 'sale':
-                // cadeia metric/op já vem do backend; só bump visual no candle
-                applyIndexTick((Number.isFinite(cur.c) ? cur.c : (Number.isFinite(open0) ? open0 : 0)) + 3);
+                // A cadeia metric/op já vem do backend; venda nunca altera o índice.
                 break;
             case 'keyword.rank':
                 if (ev.payload) {
                     const k = ev.payload;
                     const node = document.createElement('span');
-                    node.innerHTML = `<b>${escapeHtml(k.kw)}</b> #${k.pos}`;
+                    const keyword = document.createElement('b');
+                    keyword.textContent = k.kw;
+                    node.appendChild(keyword);
+                    node.appendChild(document.createTextNode(' #' + String(k.pos)));
                     $('tape').appendChild(node);
                 }
                 break;
             case 'qa.status':
                 applyQa(ev.payload || {});
+                break;
+            case 'agent.status':
+                if (isValidAgentEvent(ev)) applyAgentStatus(ev.payload, ev.ts);
                 break;
             case 'account.semaforo':
                 applySemaforo(ev.payload || {});
@@ -616,53 +978,90 @@
         if (!body.success) throw new Error(body.error || 'snapshot fail');
         const d = body.data;
 
-        candles = (d.candles || []).map((c) => ({
-            o: +c.o, h: +c.h, l: +c.l, c: +c.c, date: c.date
-        }));
-        currentDate = typeof d.server_ts === 'string' ? d.server_ts.slice(0, 10) : null;
-        const currentIndex = currentDate
-            ? findCandleIndex(currentDate)
-            : -1;
         const index = d.index || {};
-        const liveValue = index.value == null ? null : Number(index.value);
-        const indexOpen = index.open == null ? null : Number(index.open);
-        const indexChange = index.change_pct == null ? null : Number(index.change_pct);
-        const hasLiveValue = Number.isFinite(liveValue);
-        const hasDailyOpen = Number.isFinite(indexOpen) && indexOpen > 0;
-        const hasDailyChange = Number.isFinite(indexChange);
-        if (currentIndex >= 0) {
-            // Candle do dia + índice live prevalece sobre fechamento persistido (stale pós-Ft).
-            cur = { ...candles[currentIndex] };
-            open0 = hasDailyOpen ? indexOpen : cur.o;
-            if (hasLiveValue) {
-                cur.c = liveValue;
-                cur.h = Number.isFinite(cur.h) ? Math.max(cur.h, liveValue) : liveValue;
-                cur.l = Number.isFinite(cur.l) ? Math.min(cur.l, liveValue) : liveValue;
-                candles[currentIndex] = {
-                    ...candles[currentIndex],
-                    c: cur.c,
-                    h: cur.h,
-                    l: cur.l
-                };
-            }
-            const indexHigh = index.high == null ? null : Number(index.high);
-            const indexLow = index.low == null ? null : Number(index.low);
-            if (Number.isFinite(indexHigh)) cur.h = Number.isFinite(cur.h) ? Math.max(cur.h, indexHigh) : indexHigh;
-            if (Number.isFinite(indexLow)) cur.l = Number.isFinite(cur.l) ? Math.min(cur.l, indexLow) : indexLow;
-            if (hasDailyOpen && hasDailyChange) cur.change_pct = indexChange;
-        } else if (hasLiveValue) {
-            cur = {
-                o: hasDailyOpen ? indexOpen : null,
-                c: liveValue,
-                h: null,
-                l: null,
-                date: currentDate,
-                change_pct: hasDailyOpen && hasDailyChange ? indexChange : null
+        const snapshotDate = typeof d.server_ts === 'string' ? d.server_ts.slice(0, 10) : null;
+        const snapshotWatermarkMs = timestampWatermark(index.updated_at);
+        (d.candles || []).forEach((candle) => {
+            if (!candle || !isCalendarDate(candle.date)
+                || ![candle.o, candle.h, candle.l, candle.c].every(
+                    (value) => typeof value === 'number' && Number.isFinite(value)
+                )
+            ) return;
+            const incomingMs = timestampWatermark(candle.updated_at);
+            if (incomingMs == null) return;
+            const currentMs = candleWatermarks.get(candle.date);
+            if (currentMs != null && incomingMs <= currentMs) return;
+            const staleForCurrentIndex = candle.date === currentDate
+                && indexWatermarkMs != null
+                && incomingMs <= indexWatermarkMs;
+            const row = {
+                o: candle.o, h: candle.h, l: candle.l, c: candle.c, date: candle.date
             };
-            open0 = hasDailyOpen ? indexOpen : null;
-        } else {
-            cur = { o: null, c: null, h: null, l: null, date: currentDate, change_pct: null };
-            open0 = null;
+            if (staleForCurrentIndex && typeof cur.c === 'number' && Number.isFinite(cur.c)) {
+                row.c = cur.c;
+                row.h = Math.max(row.h, cur.c, Number.isFinite(cur.h) ? cur.h : row.h);
+                row.l = Math.min(row.l, cur.c, Number.isFinite(cur.l) ? cur.l : row.l);
+            }
+            const candleIndex = findCandleIndex(candle.date);
+            if (candleIndex >= 0) candles[candleIndex] = row;
+            else candles.push(row);
+            candleWatermarks.set(candle.date, staleForCurrentIndex ? indexWatermarkMs : incomingMs);
+            if (staleForCurrentIndex) {
+                cur = { ...row };
+                open0 = row.o;
+            }
+        });
+        sortAndTrimCandles();
+        const canApplyIndex = snapshotWatermarkMs != null
+            && (indexWatermarkMs == null || snapshotWatermarkMs > indexWatermarkMs)
+            && (!currentDate || !snapshotDate || snapshotDate >= currentDate);
+        const liveValue = typeof index.value === 'number' && Number.isFinite(index.value)
+            ? index.value : null;
+        const indexOpen = typeof index.open === 'number' && Number.isFinite(index.open)
+            ? index.open : null;
+        const indexChange = typeof index.change_pct === 'number' && Number.isFinite(index.change_pct)
+            ? index.change_pct : null;
+        const hasLiveValue = liveValue !== null;
+        const hasDailyOpen = indexOpen !== null;
+        const hasDailyChange = indexChange !== null;
+        if (canApplyIndex) {
+            currentDate = snapshotDate || currentDate;
+            const currentIndex = currentDate ? findCandleIndex(currentDate) : -1;
+            if (currentIndex >= 0) {
+            // Candle do dia + índice live prevalece sobre fechamento persistido (stale pós-Ft).
+                cur = { ...candles[currentIndex] };
+                open0 = hasDailyOpen ? indexOpen : cur.o;
+                if (hasLiveValue) {
+                    cur.c = liveValue;
+                    cur.h = Number.isFinite(cur.h) ? Math.max(cur.h, liveValue) : liveValue;
+                    cur.l = Number.isFinite(cur.l) ? Math.min(cur.l, liveValue) : liveValue;
+                    candles[currentIndex] = {
+                        ...candles[currentIndex], c: cur.c, h: cur.h, l: cur.l
+                    };
+                }
+                const indexHigh = typeof index.high === 'number' && Number.isFinite(index.high)
+                    ? index.high : null;
+                const indexLow = typeof index.low === 'number' && Number.isFinite(index.low)
+                    ? index.low : null;
+                if (indexHigh !== null) cur.h = Number.isFinite(cur.h) ? Math.max(cur.h, indexHigh) : indexHigh;
+                if (indexLow !== null) cur.l = Number.isFinite(cur.l) ? Math.min(cur.l, indexLow) : indexLow;
+                if (hasDailyOpen && hasDailyChange) cur.change_pct = indexChange;
+                if (snapshotWatermarkMs != null) candleWatermarks.set(currentDate, snapshotWatermarkMs);
+            } else if (hasLiveValue) {
+                cur = {
+                    o: hasDailyOpen ? indexOpen : null,
+                    c: liveValue,
+                    h: null,
+                    l: null,
+                    date: currentDate,
+                    change_pct: hasDailyOpen && hasDailyChange ? indexChange : null
+                };
+                open0 = hasDailyOpen ? indexOpen : null;
+            } else {
+                cur = { o: null, c: null, h: null, l: null, date: currentDate, change_pct: null };
+                open0 = null;
+            }
+            if (snapshotWatermarkMs != null) indexWatermarkMs = snapshotWatermarkMs;
         }
         setFactorsBadge(d.index || {});
         updateHeader();
@@ -674,6 +1073,7 @@
         applySemaforo(d.semaforo);
         renderTape(d.ranks != null ? d.ranks : d.keywords, d.rank_tracker_enabled);
         applyQa(d.qa);
+        applyAgents(d.agents);
 
         seenOps.clear();
         $('feed').innerHTML = '';
@@ -757,7 +1157,7 @@
         setConn('sse');
         reconnectAttempt = 0;
 
-        const types = ['index.tick', 'index.candle', 'metric.update', 'op', 'sale', 'keyword.rank', 'qa.status', 'account.semaforo'];
+        const types = ['index.tick', 'index.candle', 'metric.update', 'op', 'sale', 'keyword.rank', 'qa.status', 'agent.status', 'account.semaforo'];
         types.forEach((t) => {
             es.addEventListener(t, (e) => {
                 try { handleEvent(JSON.parse(e.data)); } catch (err) { /* ignore */ }
@@ -792,6 +1192,10 @@
         .then(() => connectRealtime())
         .catch((err) => {
             console.error('[pregao] snapshot', err);
+            open0 = null;
+            cur = { o: null, c: null, h: null, l: null, date: currentDate, change_pct: null };
+            updateHeader();
+            draw();
             $('semaText').textContent = 'FALHA NO SNAPSHOT';
             connectSse();
         });

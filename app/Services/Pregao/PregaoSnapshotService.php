@@ -16,15 +16,21 @@ final class PregaoSnapshotService
 {
     private PDO $db;
     private AccountIndexCalculator $calculator;
+    private PregaoAgentStatusService $agentStatusService;
 
     /** @var array<string, mixed> */
     private array $config;
 
-    public function __construct(?PDO $db = null, ?AccountIndexCalculator $calculator = null, ?array $config = null)
-    {
+    public function __construct(
+        ?PDO $db = null,
+        ?AccountIndexCalculator $calculator = null,
+        ?array $config = null,
+        ?PregaoAgentStatusService $agentStatusService = null
+    ) {
         $this->db = $db ?? Database::getInstance();
         $this->calculator = $calculator ?? new AccountIndexCalculator();
         $this->config = $config ?? (require dirname(__DIR__, 3) . '/config/pregao.php');
+        $this->agentStatusService = $agentStatusService ?? new PregaoAgentStatusService($this->db);
     }
 
     /**
@@ -40,6 +46,10 @@ final class PregaoSnapshotService
         $ops = $this->loadRecentEvents($accountId, 'op', 50);
         $ranks = $this->loadKeywordRanks($accountId, $meta);
         $qa = $this->loadLatestQa($accountId);
+        $agents = $this->agentStatusService->latestForAccount(
+            $accountId,
+            (bool) ($this->config['seed_enabled'] ?? false)
+        );
         $semaforo = $this->buildSemaforo($metrics, $meta);
 
         $calc = $this->calculator->calculate([
@@ -76,7 +86,7 @@ final class PregaoSnapshotService
 
         $high = $currentCandle !== null ? (float) $currentCandle['h'] : null;
         $low = $currentCandle !== null ? (float) $currentCandle['l'] : null;
-        if ($indexValue !== null) {
+        if ($currentCandle !== null && $indexValue !== null) {
             $high = $high === null ? $indexValue : max($high, $indexValue);
             $low = $low === null ? $indexValue : min($low, $indexValue);
         }
@@ -86,6 +96,9 @@ final class PregaoSnapshotService
             'server_ts' => $now->format('Y-m-d\TH:i:sP'),
             'index' => [
                 'symbol' => 'ESKL11',
+                'updated_at' => isset($metrics['updated_at'])
+                    ? $this->mysqlToIso((string) $metrics['updated_at'])
+                    : null,
                 'value' => $indexValue !== null ? round($indexValue, 2) : null,
                 'change_pct' => $changePct !== null ? round($changePct, 2) : null,
                 'open' => $openRef !== null ? round($openRef, 2) : null,
@@ -104,6 +117,7 @@ final class PregaoSnapshotService
             // Alias deprecado (1 versão): clientes antigos ainda leem `keywords`
             'keywords' => $ranks,
             'qa' => $qa,
+            'agents' => $agents,
             'semaforo' => $semaforo,
             'baselines' => $baselines,
             'sentinela' => $this->loadSentinelaSummary($accountId),
@@ -188,12 +202,15 @@ final class PregaoSnapshotService
     }
 
     /**
-     * @return list<array{date: string, o: float, h: float, l: float, c: float}>
+     * @return list<array{date: string, o: float, h: float, l: float, c: float, updated_at: string|null}>
      */
     private function loadCandles(int $accountId, int $limit): array
     {
+        $updatedAtSelect = $this->columnExists('account_index_daily', 'updated_at')
+            ? ', updated_at'
+            : '';
         $stmt = $this->db->prepare(
-            'SELECT `date`, o, h, l, c
+            'SELECT `date`, o, h, l, c' . $updatedAtSelect . '
              FROM account_index_daily
              WHERE account_id = ?
              ORDER BY `date` DESC
@@ -205,13 +222,16 @@ final class PregaoSnapshotService
         $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
         $rows = array_reverse($rows);
 
-        return array_map(static function (array $r): array {
+        return array_map(function (array $r): array {
             return [
                 'date' => (string) $r['date'],
                 'o' => (float) $r['o'],
                 'h' => (float) $r['h'],
                 'l' => (float) $r['l'],
                 'c' => (float) $r['c'],
+                'updated_at' => isset($r['updated_at'])
+                    ? $this->mysqlToIso((string) $r['updated_at'])
+                    : null,
             ];
         }, $rows);
     }
@@ -228,7 +248,7 @@ final class PregaoSnapshotService
             $sql = 'SELECT type, ts, payload, source
                     FROM pregao_events
                     WHERE type = ?
-                      AND (account_id = ? OR account_id IS NULL)
+                      AND account_id = ?
                       AND source <> \'seed\'
                     ORDER BY ts DESC
                     LIMIT ?';
@@ -236,7 +256,7 @@ final class PregaoSnapshotService
             $sql = 'SELECT type, ts, payload' . ($hasSource ? ', source' : '') . '
                     FROM pregao_events
                     WHERE type = ?
-                      AND (account_id = ? OR account_id IS NULL)
+                      AND account_id = ?
                     ORDER BY ts DESC
                     LIMIT ?';
         }
@@ -294,13 +314,30 @@ final class PregaoSnapshotService
             return [];
         }
 
-        return array_map(static function (array $r): array {
-            return [
-                'kw' => (string) $r['kw'],
-                'pos' => (int) $r['pos'],
-                'delta' => $r['delta'] !== null ? (int) $r['delta'] : null,
+        $out = [];
+        foreach ($rows as $row) {
+            $keyword = is_string($row['kw'] ?? null) ? trim($row['kw']) : '';
+            $positionRaw = $row['pos'] ?? null;
+            $deltaRaw = $row['delta'] ?? null;
+            $validPosition = is_int($positionRaw)
+                || (is_string($positionRaw) && ctype_digit($positionRaw));
+            $validDelta = $deltaRaw === null
+                || is_int($deltaRaw)
+                || (is_string($deltaRaw) && preg_match('/^-?[0-9]+$/D', $deltaRaw) === 1);
+            if ($keyword === '' || mb_strlen($keyword) > 200 || !$validPosition || !$validDelta) {
+                continue;
+            }
+            $position = (int) $positionRaw;
+            if ($position < 1) {
+                continue;
+            }
+            $out[] = [
+                'kw' => $keyword,
+                'pos' => $position,
+                'delta' => $deltaRaw !== null ? (int) $deltaRaw : null,
             ];
-        }, $rows);
+        }
+        return $out;
     }
 
     /**
@@ -314,7 +351,7 @@ final class PregaoSnapshotService
 
         $stmt = $this->db->prepare(
             "SELECT payload, ts FROM pregao_events
-             WHERE type = ? AND (account_id = ? OR account_id IS NULL){$sourceFilter}
+             WHERE type = ? AND account_id = ?{$sourceFilter}
              ORDER BY ts DESC LIMIT 1"
         );
         $stmt->execute(['qa.status', $accountId]);
@@ -336,7 +373,7 @@ final class PregaoSnapshotService
 
         $logStmt = $this->db->prepare(
             "SELECT payload, ts FROM pregao_events
-             WHERE type = ? AND (account_id = ? OR account_id IS NULL){$sourceFilter}
+             WHERE type = ? AND account_id = ?{$sourceFilter}
              ORDER BY ts DESC LIMIT 12"
         );
         $logStmt->execute(['qa.status', $accountId]);
@@ -542,7 +579,7 @@ final class PregaoSnapshotService
     private function columnExists(string $table, string $column): bool
     {
         static $cache = [];
-        $key = $table . '.' . $column;
+        $key = spl_object_id($this->db) . ':' . $table . '.' . $column;
         if (array_key_exists($key, $cache)) {
             return $cache[$key];
         }
@@ -553,19 +590,39 @@ final class PregaoSnapshotService
             );
             $stmt->execute([$table, $column]);
             $cache[$key] = ((int) $stmt->fetchColumn()) > 0;
-        } catch (Throwable $e) {
-            $cache[$key] = false;
+        } catch (Throwable) {
+            if (preg_match('/^[a-z_][a-z0-9_]*$/D', $table) !== 1
+                || preg_match('/^[a-z_][a-z0-9_]*$/D', $column) !== 1
+            ) {
+                return $cache[$key] = false;
+            }
+            try {
+                $this->db->query("SELECT `{$column}` FROM `{$table}` WHERE 1 = 0");
+                $cache[$key] = true;
+            } catch (Throwable) {
+                $cache[$key] = false;
+            }
         }
         return $cache[$key];
     }
 
-    private function mysqlToIso(string $mysqlTs): string
+    private function mysqlToIso(string $mysqlTs): ?string
     {
-        try {
-            $dt = new \DateTimeImmutable($mysqlTs, new \DateTimeZone('America/Sao_Paulo'));
-            return $dt->format('Y-m-d\TH:i:sP');
-        } catch (Throwable $e) {
-            return $mysqlTs;
+        $timezone = new \DateTimeZone('America/Sao_Paulo');
+        foreach (['Y-m-d H:i:s', 'Y-m-d H:i:s.u'] as $format) {
+            $parsed = \DateTimeImmutable::createFromFormat('!' . $format, $mysqlTs, $timezone);
+            $errors = \DateTimeImmutable::getLastErrors();
+            if ($parsed !== false
+                && ($errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0))
+                && $parsed->format($format) === $mysqlTs
+            ) {
+                $futureLimit = new \DateTimeImmutable('+60 seconds', $timezone);
+                if ($parsed > $futureLimit) {
+                    return null;
+                }
+                return $parsed->format('Y-m-d\TH:i:sP');
+            }
         }
+        return null;
     }
 }

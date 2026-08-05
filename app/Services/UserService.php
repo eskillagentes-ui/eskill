@@ -808,8 +808,11 @@ class UserService
             $stmt->execute(['user_id' => $userId]);
 
             return $stmt->fetchAll(PDO::FETCH_ASSOC);
-        } catch (\Throwable $e) {
-            log_warning('Erro ao obter contas do usuário (DB indisponível)', ['service' => 'UserService', 'error' => $e->getMessage()]);
+        } catch (\Throwable) {
+            log_warning('Erro ao obter contas do usuário (DB indisponível)', [
+                'service' => 'UserService',
+                'reason' => 'account_list_unavailable',
+            ]);
             return [];
         }
     }

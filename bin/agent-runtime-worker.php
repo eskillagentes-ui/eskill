@@ -7,6 +7,8 @@ use App\Database;
 use App\Services\Agents\AgentRuntimeAccountSource;
 use App\Services\Agents\AgentRuntimeExecutor;
 use App\Services\Agents\AgentRuntimeWorker;
+use App\Services\Agents\PregaoAgentRuntimeReporter;
+use App\Services\Pregao\PregaoEmitService;
 
 const AGENT_WORKER_USAGE = 'usage: php bin/agent-runtime-worker.php --once|--loop --environment=local|staging|production [--interval=SECONDS] [--max-attempts=1|2|3]';
 
@@ -137,9 +139,11 @@ if (function_exists('pcntl_async_signals') && function_exists('pcntl_signal')) {
 $heartbeatPath = $root . '/storage/agent-runtime-heartbeat.json';
 $exitCode = 0;
 try {
+    $db = Database::getInstance();
     $worker = new AgentRuntimeWorker(
-        new AgentRuntimeAccountSource(Database::getInstance()),
-        new AgentRuntimeExecutor()
+        new AgentRuntimeAccountSource($db),
+        new AgentRuntimeExecutor(),
+        new PregaoAgentRuntimeReporter(new PregaoEmitService($db))
     );
 
     do {

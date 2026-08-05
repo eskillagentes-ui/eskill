@@ -58,7 +58,8 @@ final class AgentRuntimeWorkerCliTest extends TestCase
         self::assertIsString($source);
         foreach ([
             'LOCK_EX | LOCK_NB', 'AgentRuntimeAccountSource', 'AgentRuntimeExecutor',
-            'AgentRuntimeWorker', 'agent-runtime-heartbeat.json',
+            'AgentRuntimeWorker', 'PregaoAgentRuntimeReporter', 'PregaoEmitService',
+            'agent-runtime-heartbeat.json',
             '@file_put_contents(', '@rename(',
         ] as $required) {
             self::assertStringContainsString($required, $source);

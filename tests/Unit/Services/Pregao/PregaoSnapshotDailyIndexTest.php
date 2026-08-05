@@ -31,7 +31,8 @@ final class PregaoSnapshotDailyIndexTest extends TestCase
                 reputacao_cor TEXT,
                 tacos REAL,
                 indice_atual REAL,
-                metrics_meta TEXT
+                metrics_meta TEXT,
+                updated_at TEXT DEFAULT \'2026-08-04 12:00:00\'
             )'
         );
         $this->db->exec(
@@ -50,7 +51,8 @@ final class PregaoSnapshotDailyIndexTest extends TestCase
                 o REAL,
                 h REAL,
                 l REAL,
-                c REAL
+                c REAL,
+                updated_at TEXT DEFAULT \'2026-08-04 12:00:00\'
             )'
         );
         $this->db->exec(
@@ -106,6 +108,10 @@ final class PregaoSnapshotDailyIndexTest extends TestCase
         // high/low do dia = extremos do candle ∪ índice live
         $this->assertSame(max(1150.0, $live), (float) $snapshot['index']['high']);
         $this->assertSame(min(950.0, $live), (float) $snapshot['index']['low']);
+        $this->assertArrayHasKey('agents', $snapshot);
+        $this->assertCount(5, $snapshot['agents']['items']);
+        self::assertSame('2026-08-04T12:00:00-03:00', $snapshot['index']['updated_at']);
+        self::assertSame('2026-08-04T12:00:00-03:00', $snapshot['candles'][0]['updated_at']);
     }
 
     public function testVariacaoDiariaFalhaFechadoComAberturaZero(): void
@@ -143,5 +149,132 @@ final class PregaoSnapshotDailyIndexTest extends TestCase
         $snapshot = $service->getSnapshot($accountId);
 
         $this->assertNull($snapshot['index']['change_pct']);
+    }
+
+    public function testIndiceLiveSemCandleAtualNaoInventaExtremosDiarios(): void
+    {
+        $accountId = 79;
+        $meta = json_encode([
+            'available' => ['Fv' => true],
+            'metrics' => ['vendas_7d' => ['available' => true]],
+        ], JSON_THROW_ON_ERROR);
+        $this->db->prepare(
+            'INSERT INTO account_index_metrics
+             (account_id, vendas_7d, visitas_7d, health_medio, reputacao_cor, tacos, indice_atual, metrics_meta)
+             VALUES (?, 11, 0, 0, NULL, NULL, NULL, ?)'
+        )->execute([$accountId, $meta]);
+        $this->db->prepare(
+            'INSERT INTO account_index_baselines
+             (account_id, vendas_7d_baseline, pos_baseline, visitas_baseline, tacos_baseline)
+             VALUES (?, 10, 10, 1, 10)'
+        )->execute([$accountId]);
+        $oldDate = (new DateTimeImmutable('today', new DateTimeZone('America/Sao_Paulo')))
+            ->modify('-1 day')
+            ->format('Y-m-d');
+        $this->db->prepare(
+            'INSERT INTO account_index_daily (account_id, `date`, o, h, l, c) VALUES (?, ?, 800, 900, 700, 850)'
+        )->execute([$accountId, $oldDate]);
+
+        $snapshot = (new PregaoSnapshotService(
+            $this->db,
+            new AccountIndexCalculator(),
+            ['seed_enabled' => false, 'rank_tracker_enabled' => false]
+        ))->getSnapshot($accountId);
+
+        self::assertNotNull($snapshot['index']['value']);
+        self::assertNull($snapshot['index']['open']);
+        self::assertNull($snapshot['index']['change_pct']);
+        self::assertNull($snapshot['index']['high']);
+        self::assertNull($snapshot['index']['low']);
+    }
+
+    public function testSnapshotNaoIncluiEventoGlobalLegado(): void
+    {
+        $insert = $this->db->prepare(
+            'INSERT INTO pregao_events (account_id, type, ts, payload) VALUES (?, ?, ?, ?)'
+        );
+        $insert->execute([null, 'op', '2026-08-04 12:00:00', json_encode([
+            'robot' => 'GLOBAL', 'msg' => 'não deve vazar',
+        ], JSON_THROW_ON_ERROR)]);
+        $insert->execute([77, 'op', '2026-08-04 12:01:00', json_encode([
+            'robot' => 'CONTA', 'msg' => 'permitido',
+        ], JSON_THROW_ON_ERROR)]);
+
+        $snapshot = (new PregaoSnapshotService(
+            $this->db,
+            new AccountIndexCalculator(),
+            ['seed_enabled' => false, 'rank_tracker_enabled' => false]
+        ))->getSnapshot(77);
+
+        self::assertCount(1, $snapshot['operations']);
+        self::assertSame('CONTA', $snapshot['operations'][0]['payload']['robot']);
+        $source = file_get_contents(dirname(__DIR__, 4) . '/app/Services/Pregao/PregaoSnapshotService.php');
+        self::assertIsString($source);
+        self::assertStringNotContainsString('account_id IS NULL', $source);
+    }
+
+    public function testWatermarksComDataImpossivelFalhamFechado(): void
+    {
+        $meta = json_encode([
+            'available' => ['Fv' => true],
+            'metrics' => ['vendas_7d' => ['available' => true]],
+        ], JSON_THROW_ON_ERROR);
+        $this->db->prepare(
+            'INSERT INTO account_index_metrics
+             (account_id, vendas_7d, visitas_7d, health_medio, reputacao_cor, tacos, indice_atual, metrics_meta, updated_at)
+             VALUES (81, 11, 0, 0, NULL, NULL, NULL, ?, ?)'
+        )->execute([$meta, '2026-02-30 12:00:00']);
+        $this->db->prepare(
+            'INSERT INTO account_index_daily (account_id, `date`, o, h, l, c, updated_at)
+             VALUES (81, ?, 100, 110, 90, 105, ?)'
+        )->execute([
+            (new DateTimeImmutable('today', new DateTimeZone('America/Sao_Paulo')))->format('Y-m-d'),
+            '2026-02-30 12:00:00',
+        ]);
+
+        $snapshot = (new PregaoSnapshotService(
+            $this->db,
+            new AccountIndexCalculator(),
+            ['seed_enabled' => false, 'rank_tracker_enabled' => false]
+        ))->getSnapshot(81);
+
+        self::assertNull($snapshot['index']['updated_at']);
+        self::assertNull($snapshot['candles'][0]['updated_at']);
+    }
+
+    public function testWatermarksFuturosFalhamFechado(): void
+    {
+        $meta = json_encode([
+            'available' => ['Fv' => true],
+            'metrics' => ['vendas_7d' => ['available' => true]],
+        ], JSON_THROW_ON_ERROR);
+        $this->db->prepare(
+            'INSERT INTO account_index_metrics
+             (account_id, vendas_7d, visitas_7d, health_medio, reputacao_cor, tacos, indice_atual, metrics_meta, updated_at)
+             VALUES (82, 11, 0, 0, NULL, NULL, NULL, ?, ?)'
+        )->execute([$meta, '2099-01-01 00:00:00']);
+        $this->db->prepare(
+            'INSERT INTO account_index_daily (account_id, `date`, o, h, l, c, updated_at)
+             VALUES (82, ?, 100, 110, 90, 105, ?)'
+        )->execute([
+            (new DateTimeImmutable('today', new DateTimeZone('America/Sao_Paulo')))->format('Y-m-d'),
+            '2099-01-01 00:00:00',
+        ]);
+
+        $snapshot = (new PregaoSnapshotService(
+            $this->db,
+            new AccountIndexCalculator(),
+            ['seed_enabled' => false, 'rank_tracker_enabled' => false]
+        ))->getSnapshot(82);
+
+        self::assertNull($snapshot['index']['updated_at']);
+        self::assertNull($snapshot['candles'][0]['updated_at']);
+    }
+
+    public function testColetorDeAcoesNaoIncluiEventosGlobaisLegados(): void
+    {
+        $source = file_get_contents(dirname(__DIR__, 4) . '/app/Services/Pregao/PregaoMetricsCollector.php');
+        self::assertIsString($source);
+        self::assertStringNotContainsString('account_id = ? OR account_id IS NULL', $source);
     }
 }

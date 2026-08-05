@@ -14,13 +14,16 @@ final class AgentRuntimeWorker
 
     private AgentRuntimeAccountSourceInterface $accountSource;
     private AgentRuntimeExecutorInterface $executor;
+    private ?AgentRuntimeReporterInterface $reporter;
 
     public function __construct(
         AgentRuntimeAccountSourceInterface $accountSource,
-        AgentRuntimeExecutorInterface $executor
+        AgentRuntimeExecutorInterface $executor,
+        ?AgentRuntimeReporterInterface $reporter = null
     ) {
         $this->accountSource = $accountSource;
         $this->executor = $executor;
+        $this->reporter = $reporter;
     }
 
     /**
@@ -62,6 +65,18 @@ final class AgentRuntimeWorker
                     $result = AgentResult::failed('agent-runtime', 'runtime_exception');
                 }
             } while ($result->status() === 'failed' && $attempts < $maxAttempts);
+
+            if ($this->reporter !== null) {
+                try {
+                    $this->reporter->report($accountId, $correlationId, $result, $attempts);
+                } catch (Throwable) {
+                    log_warning('AgentRuntimeWorker: falha na telemetria Pregão', [
+                        'account_id' => $accountId,
+                        'correlation_id' => $correlationId,
+                        'reason' => 'telemetry_exception',
+                    ]);
+                }
+            }
 
             $records[] = [
                 'accountId' => $accountId,

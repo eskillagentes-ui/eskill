@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Controllers\BaseController;
+use App\Services\Pregao\PregaoAccountAuthorizer;
 use App\Services\Pregao\PregaoSnapshotService;
 use App\Services\Pregao\PregaoStreamService;
 use App\Services\UserService;
@@ -18,10 +19,12 @@ use Throwable;
 class PregaoController extends BaseController
 {
     private ?UserService $userService = null;
+    private PregaoAccountAuthorizer $accountAuthorizer;
 
     public function __construct()
     {
         parent::__construct();
+        $this->accountAuthorizer = new PregaoAccountAuthorizer();
         try {
             $this->userService = new UserService();
         } catch (Throwable $e) {
@@ -39,7 +42,11 @@ class PregaoController extends BaseController
             exit;
         }
 
-        $accountId = $this->getActiveAccountId();
+        $accountId = $this->resolveAccountId();
+        if ($accountId === null) {
+            http_response_code(403);
+            return;
+        }
         $pageTitle = 'Pregão';
         $currentPage = 'pregao';
         $pregaoAccountId = $accountId;
@@ -66,8 +73,8 @@ class PregaoController extends BaseController
 
         $accountId = $this->resolveAccountId();
         if ($accountId === null) {
-            http_response_code(400);
-            echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada', 'data' => null]);
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'Conta indisponível', 'data' => null]);
             return;
         }
 
@@ -81,8 +88,8 @@ class PregaoController extends BaseController
                 'data' => $data,
                 'meta' => ['elapsed_ms' => $elapsedMs, 'read_only' => true],
             ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
-        } catch (Throwable $e) {
-            log_error('Pregao snapshot failed', ['error' => $e->getMessage()]);
+        } catch (Throwable) {
+            log_error('Pregao snapshot failed', ['reason' => 'snapshot_exception']);
             http_response_code(500);
             echo json_encode(['success' => false, 'error' => 'Falha ao montar snapshot', 'data' => null]);
         }
@@ -98,6 +105,10 @@ class PregaoController extends BaseController
         }
 
         $accountId = $this->resolveAccountId();
+        if ($accountId === null) {
+            http_response_code(403);
+            return;
+        }
         $service = new PregaoStreamService();
         $service->streamSse($accountId);
     }
@@ -116,8 +127,8 @@ class PregaoController extends BaseController
 
         $accountId = $this->resolveAccountId();
         if ($accountId === null) {
-            http_response_code(400);
-            echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'Conta indisponível']);
             return;
         }
 
@@ -174,9 +185,31 @@ class PregaoController extends BaseController
     private function resolveAccountId(): ?int
     {
         $fromQuery = $this->request->get('account_id');
-        if ($fromQuery !== null && (int) $fromQuery > 0) {
-            return (int) $fromQuery;
+        $requestedId = null;
+        if ($fromQuery !== null) {
+            if ((!is_int($fromQuery) && !is_string($fromQuery))
+                || filter_var($fromQuery, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]) === false
+            ) {
+                return null;
+            }
+            $requestedId = (int) $fromQuery;
         }
-        return $this->getActiveAccountId();
+
+        if ($this->userService === null) {
+            return null;
+        }
+
+        try {
+            $accounts = $this->userService->getUserAccounts();
+        } catch (Throwable) {
+            log_warning('Pregao account scope failed', ['reason' => 'account_list_unavailable']);
+            return null;
+        }
+
+        return $this->accountAuthorizer->resolve(
+            $requestedId,
+            $this->getActiveAccountId(),
+            $accounts
+        );
     }
 }

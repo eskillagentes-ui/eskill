@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/css/pregao.css?v=5">
+<link rel="stylesheet" href="/css/pregao.css?v=6">
 
 <div id="pregao-root" data-account-id="<?= (int)($pregaoAccountId ?? 0) ?>" data-read-only="1">
     <header class="pg-header">
@@ -90,6 +90,41 @@
                     <div class="sb" id="sSentinela">abrindo painel de riscos…</div>
                 </a>
             </div>
+
+            <section class="panel agents-panel" id="agentsPanel" aria-labelledby="agentsTitle">
+                <div class="p-head" id="agentsTitle">
+                    🤖 AGENTES 24/7 — MONITORAMENTO
+                    <span class="agents-summary is-waiting" id="agentsSummary" role="status" aria-live="polite">0/5 reportando</span>
+                </div>
+                <div class="agents-grid">
+                    <article class="agent-card is-waiting" id="agentCard-sentinela">
+                        <div class="agent-card-head"><b>🛡️ SENTINELA</b><span id="agentStatus-sentinela">AGUARDANDO</span></div>
+                        <div class="agent-reason" id="agentReason-sentinela">no data</div>
+                        <div class="agent-time" id="agentTime-sentinela">sem ciclo registrado</div>
+                    </article>
+                    <article class="agent-card is-waiting" id="agentCard-collector">
+                        <div class="agent-card-head"><b>📡 COLETOR</b><span id="agentStatus-collector">AGUARDANDO</span></div>
+                        <div class="agent-reason" id="agentReason-collector">no data</div>
+                        <div class="agent-time" id="agentTime-collector">sem ciclo registrado</div>
+                    </article>
+                    <article class="agent-card is-waiting" id="agentCard-financeiro">
+                        <div class="agent-card-head"><b>💰 FINANCEIRO</b><span id="agentStatus-financeiro">AGUARDANDO</span></div>
+                        <div class="agent-reason" id="agentReason-financeiro">no data</div>
+                        <div class="agent-time" id="agentTime-financeiro">sem ciclo registrado</div>
+                    </article>
+                    <article class="agent-card is-waiting" id="agentCard-otimizador">
+                        <div class="agent-card-head"><b>📈 OTIMIZADOR</b><span id="agentStatus-otimizador">AGUARDANDO</span></div>
+                        <div class="agent-reason" id="agentReason-otimizador">no data</div>
+                        <div class="agent-time" id="agentTime-otimizador">sem ciclo registrado</div>
+                    </article>
+                    <article class="agent-card is-waiting" id="agentCard-orquestrador">
+                        <div class="agent-card-head"><b>🧭 ORQUESTRADOR</b><span id="agentStatus-orquestrador">AGUARDANDO</span></div>
+                        <div class="agent-reason" id="agentReason-orquestrador">no data</div>
+                        <div class="agent-time" id="agentTime-orquestrador">sem ciclo registrado</div>
+                    </article>
+                </div>
+                <div class="agents-readonly">Somente leitura · nenhuma alteração automática no Mercado Livre</div>
+            </section>
         </div>
 
         <div class="right">
@@ -133,4 +168,4 @@
     };
 </script>
 <script src="/js/pregao-chart-layout.js?v=1"></script>
-<script src="/js/pregao.js?v=10" defer></script>
+<script src="/js/pregao.js?v=36" defer></script>
