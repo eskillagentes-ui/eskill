@@ -5,10 +5,13 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Controllers\BaseController;
+use App\Database;
 use App\Services\Pregao\PregaoAccountAuthorizer;
+use App\Services\Pregao\PregaoEventExplorerService;
 use App\Services\Pregao\PregaoSnapshotService;
 use App\Services\Pregao\PregaoStreamService;
 use App\Services\UserService;
+use InvalidArgumentException;
 use Throwable;
 
 /**
@@ -92,6 +95,71 @@ class PregaoController extends BaseController
             log_error('Pregao snapshot failed', ['reason' => 'snapshot_exception']);
             http_response_code(500);
             echo json_encode(['success' => false, 'error' => 'Falha ao montar snapshot', 'data' => null]);
+        }
+    }
+
+    /**
+     * GET /api/pregao/events — histórico paginado e sanitizado.
+     */
+    public function events(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: private, no-store');
+        header('X-Content-Type-Options: nosniff');
+
+        if (!$this->requireAuthJson()) {
+            return;
+        }
+
+        $accountId = $this->resolveAccountId();
+        if ($accountId === null) {
+            http_response_code(403);
+            echo json_encode([
+                'success' => false,
+                'error' => 'Conta indisponível',
+                'message' => 'Não foi possível autorizar a conta solicitada',
+                'data' => null,
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            return;
+        }
+
+        $filters = [];
+        foreach (['page', 'per_page', 'type', 'source', 'from', 'to'] as $filter) {
+            $value = $this->request->get($filter);
+            if ($value !== null && $value !== '') {
+                $filters[$filter] = $value;
+            }
+        }
+
+        try {
+            $config = require dirname(__DIR__, 2) . '/config/pregao.php';
+            $service = new PregaoEventExplorerService(
+                Database::getInstance(),
+                (bool) ($config['seed_enabled'] ?? false)
+            );
+            echo json_encode([
+                'success' => true,
+                'error' => null,
+                'message' => 'Eventos carregados',
+                'data' => $service->listForAccount($accountId, $filters),
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        } catch (InvalidArgumentException) {
+            http_response_code(422);
+            echo json_encode([
+                'success' => false,
+                'error' => 'Filtros inválidos',
+                'message' => 'Revise os filtros do histórico',
+                'data' => null,
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+        } catch (Throwable) {
+            log_error('Pregao event explorer failed', ['reason' => 'event_explorer_exception']);
+            http_response_code(500);
+            echo json_encode([
+                'success' => false,
+                'error' => 'Histórico indisponível',
+                'message' => 'Não foi possível consultar os eventos',
+                'data' => null,
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         }
     }
 

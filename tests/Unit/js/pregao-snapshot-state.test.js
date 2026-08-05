@@ -13,7 +13,7 @@ const bootMarker = '    /* ---------- BOOT ---------- */';
 const bootOffset = source.indexOf(bootMarker);
 assert.ok(bootOffset > 0, 'bloco BOOT do Pregão deve existir');
 source = source.slice(0, bootOffset)
-    + "    let __testEventMs = Date.now(); window.__pregaoTest = { loadSnapshot: loadSnapshot, handleEvent: function (event) { __testEventMs += 1000; handleEvent({ v: 2, ts: new Date(__testEventMs).toISOString(), source: 'live', account_id: accountId, ...event }); }, refreshAgentFreshness: refreshAgentFreshness, resetState: function () { candles = []; currentDate = null; open0 = null; cur = { o: null, c: null, h: null, l: null }; indexWatermarkMs = null; candleWatermarks.clear(); }, state: function () { return { candles: candles, cur: cur, open0: open0, currentDate: currentDate, indexWatermarkMs: indexWatermarkMs }; } };\n})();\n";
+    + "    let __testEventMs = Date.now(); window.__pregaoTest = { loadSnapshot: loadSnapshot, loadEventExplorer: typeof loadEventExplorer === 'function' ? loadEventExplorer : null, handleEvent: function (event) { __testEventMs += 1000; handleEvent({ v: 2, ts: new Date(__testEventMs).toISOString(), source: 'live', account_id: accountId, ...event }); }, refreshAgentFreshness: refreshAgentFreshness, resetState: function () { candles = []; currentDate = null; open0 = null; cur = { o: null, c: null, h: null, l: null }; indexWatermarkMs = null; candleWatermarks.clear(); }, state: function () { return { candles: candles, cur: cur, open0: open0, currentDate: currentDate, indexWatermarkMs: indexWatermarkMs }; } };\n})();\n";
 
 const elements = new Map();
 const context2d = new Proxy({}, {
@@ -34,6 +34,8 @@ function element(id) {
             textContent: '',
             innerHTML: '',
             className: '',
+            value: '',
+            disabled: false,
             style: {},
             classList: { add() {}, remove() {}, toggle() {} },
             clientWidth: 600,
@@ -42,6 +44,7 @@ function element(id) {
             height: 380,
             children: [],
             appendChild(child) { this.children.push(child); },
+            addEventListener() {},
             setAttribute() {},
             getContext() { return context2d; }
         });
@@ -50,6 +53,8 @@ function element(id) {
 }
 
 let nextSnapshot = null;
+let nextEvents = null;
+let lastFetch = null;
 function snapshotData(data) {
     return {
         metrics: null,
@@ -65,7 +70,7 @@ function snapshotData(data) {
 }
 
 const sandbox = {
-    window: { PREGAO_BOOT: { snapshotUrl: '/snapshot', accountId: 1335 } },
+    window: { PREGAO_BOOT: { snapshotUrl: '/snapshot', eventsUrl: '/events', accountId: 1335 } },
     document: {
         documentElement: {},
         getElementById: element,
@@ -79,7 +84,14 @@ const sandbox = {
     clearTimeout() {},
     devicePixelRatio: 1,
     getComputedStyle: () => ({ getPropertyValue: () => 'monospace' }),
-    fetch: async () => {
+    fetch: async (url, options) => {
+        lastFetch = { url: String(url), options: options || {} };
+        if (String(url).startsWith('/events')) {
+            assert.ok(nextEvents, 'eventos do teste devem ser definidos antes da consulta');
+            const events = nextEvents;
+            nextEvents = null;
+            return { ok: true, json: async () => events };
+        }
         assert.ok(nextSnapshot, 'snapshot do teste deve ser definido antes de loadSnapshot');
         const snapshot = nextSnapshot;
         nextSnapshot = null;
@@ -96,6 +108,7 @@ const sandbox = {
     Set,
     Promise,
     JSON,
+    URLSearchParams,
     encodeURIComponent
 };
 sandbox.globalThis = sandbox;
@@ -743,7 +756,7 @@ test('mantém o cache-busting do cliente corrigido', () => {
     const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
     assert.match(source, /iconNode\.textContent = String\(icon\)/, 'ícone do feed deve usar textContent');
     assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
-    assert.match(view, /\/js\/pregao\.js\?v=38/, 'view deve invalidar o cache do cliente corrigido');
+    assert.match(view, /\/js\/pregao\.js\?v=39/, 'view deve invalidar o cache do cliente corrigido');
 });
 
 test('view expõe fontes, freshness e transporte read-only', () => {
@@ -755,4 +768,66 @@ test('view expõe fontes, freshness e transporte read-only', () => {
     assert.match(view, /SOMENTE LEITURA/);
     assert.match(source, /renderObservability\(d\.observability\)/);
     assert.doesNotMatch(source, /dataSources[\s\S]{0,200}innerHTML\s*=/);
+});
+
+test('event explorer consulta GET account-scoped e ignora detalhes não permitidos', async () => {
+    const loadEvents = sandbox.window.__pregaoTest.loadEventExplorer;
+    assert.strictEqual(typeof loadEvents, 'function', 'cliente deve expor carregamento paginado de eventos');
+
+    element('eventType').value = 'agent.status';
+    element('eventSource').value = 'live';
+    element('eventFrom').value = '2026-08-01';
+    element('eventTo').value = '2026-08-05';
+    element('eventExplorerList').children = [];
+    nextEvents = {
+        success: true,
+        data: {
+            read_only: true,
+            items: [{
+                id: 99,
+                type: 'agent.status',
+                ts: new Date(Date.now() - 1000).toISOString(),
+                source: 'live',
+                details: {
+                    agent: 'collector', status: 'success', reason: 'legacy_read_complete',
+                    attempts: 1, correlation_id: 'agent24x7-20260805T120000Z-0123abcd:1335',
+                    state_changed: false, ml_write_automation: false,
+                    secret: 'não pode aparecer'
+                }
+            }],
+            pagination: {
+                page: 2, per_page: 25, total: 51, pages: 3,
+                has_previous: true, has_next: true
+            }
+        }
+    };
+
+    await loadEvents(2);
+
+    assert.match(lastFetch.url, /^\/events\?/);
+    for (const expected of [
+        'account_id=1335', 'page=2', 'per_page=25', 'type=agent.status',
+        'source=live', 'from=2026-08-01', 'to=2026-08-05'
+    ]) {
+        assert.match(lastFetch.url, new RegExp(expected.replace('.', '\\.')));
+    }
+    assert.strictEqual(lastFetch.options.method, undefined, 'consulta deve permanecer GET');
+    assert.strictEqual(element('eventPageLabel').textContent, 'Página 2 de 3 · 51 eventos');
+    assert.strictEqual(element('eventExplorerList').children.length, 1);
+    const rendered = JSON.stringify(element('eventExplorerList').children);
+    assert.match(rendered, /collector/);
+    assert.match(rendered, /success/);
+    assert.doesNotMatch(rendered, /não pode aparecer/);
+});
+
+test('view expõe Event Explorer somente leitura e filtros paginados', () => {
+    const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
+    for (const id of [
+        'eventExplorerPanel', 'eventType', 'eventSource', 'eventFrom', 'eventTo',
+        'eventApply', 'eventReset', 'eventExplorerList', 'eventPrev', 'eventNext', 'eventPageLabel'
+    ]) {
+        assert.match(view, new RegExp('id="' + id + '"'));
+    }
+    assert.match(view, /eventsUrl:\s*'\/api\/pregao\/events'/);
+    assert.doesNotMatch(source, /fetch\([^\n]+method:\s*['"](?:POST|PUT|PATCH|DELETE)/i);
 });

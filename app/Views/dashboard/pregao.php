@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/css/pregao.css?v=6">
+<link rel="stylesheet" href="/css/pregao.css?v=7">
 
 <div id="pregao-root" data-account-id="<?= (int)($pregaoAccountId ?? 0) ?>" data-read-only="1">
     <header class="pg-header">
@@ -140,6 +140,47 @@
                     <span>Modo <b>SOMENTE LEITURA</b></span>
                 </div>
             </section>
+
+            <section class="panel event-explorer-panel" id="eventExplorerPanel" aria-labelledby="eventExplorerTitle">
+                <div class="p-head" id="eventExplorerTitle">
+                    🧾 HISTÓRICO DE EVENTOS
+                    <span class="event-explorer-status" id="eventExplorerStatus" role="status">somente leitura</span>
+                </div>
+                <div class="event-filters" aria-label="Filtros do histórico">
+                    <label>Tipo
+                        <select id="eventType">
+                            <option value="">Todos</option>
+                            <option value="account.semaforo">Semáforo</option>
+                            <option value="agent.status">Agentes</option>
+                            <option value="index.candle">Candle</option>
+                            <option value="index.tick">Índice</option>
+                            <option value="keyword.rank">Ranks</option>
+                            <option value="metric.update">Métricas</option>
+                            <option value="op">Operações</option>
+                            <option value="qa.status">QA</option>
+                            <option value="sale">Vendas</option>
+                        </select>
+                    </label>
+                    <label>Origem
+                        <select id="eventSource">
+                            <option value="">Todas reais</option>
+                            <option value="live">Live</option>
+                        </select>
+                    </label>
+                    <label>De <input id="eventFrom" type="date"></label>
+                    <label>Até <input id="eventTo" type="date"></label>
+                    <button id="eventApply" type="button">FILTRAR</button>
+                    <button id="eventReset" type="button" class="is-secondary">LIMPAR</button>
+                </div>
+                <div class="event-explorer-list" id="eventExplorerList">
+                    <div class="event-explorer-empty">Carregando histórico real…</div>
+                </div>
+                <nav class="event-pagination" aria-label="Paginação do histórico">
+                    <button id="eventPrev" type="button" disabled>← ANTERIOR</button>
+                    <span id="eventPageLabel">Página —</span>
+                    <button id="eventNext" type="button" disabled>PRÓXIMA →</button>
+                </nav>
+            </section>
         </div>
 
         <div class="right">
@@ -177,10 +218,11 @@
     window.PREGAO_BOOT = {
         accountId: <?= (int)($pregaoAccountId ?? 0) ?>,
         snapshotUrl: '/api/pregao/snapshot',
+        eventsUrl: '/api/pregao/events',
         streamUrl: '/api/pregao/stream',
         ticketUrl: '/api/pregao/ticket',
         wsPath: '/ws/pregao'
     };
 </script>
 <script src="/js/pregao-chart-layout.js?v=1"></script>
-<script src="/js/pregao.js?v=38" defer></script>
+<script src="/js/pregao.js?v=39" defer></script>

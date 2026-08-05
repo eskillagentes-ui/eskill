@@ -46,4 +46,39 @@ final class PregaoControllerAccountScopeContractTest extends TestCase
             strpos($streamSource, 'if ($accountId === null)')
         );
     }
+
+    public function testEventExplorerÉGetAutenticadoAccountScopedESanitizaErros(): void
+    {
+        $source = file_get_contents(dirname(__DIR__, 3) . '/app/Controllers/PregaoController.php');
+        self::assertIsString($source);
+        self::assertStringContainsString('use App\\Services\\Pregao\\PregaoEventExplorerService;', $source);
+
+        $eventsStart = strpos($source, 'public function events(): void');
+        $streamStart = strpos($source, 'public function stream(): void');
+        self::assertIsInt($eventsStart);
+        self::assertIsInt($streamStart);
+        $eventsSource = substr($source, $eventsStart, $streamStart - $eventsStart);
+        self::assertStringContainsString('$this->requireAuthJson()', $eventsSource);
+        self::assertStringContainsString('$accountId = $this->resolveAccountId()', $eventsSource);
+        self::assertStringContainsString('new PregaoEventExplorerService(', $eventsSource);
+        self::assertLessThan(
+            strpos($eventsSource, 'new PregaoEventExplorerService('),
+            strpos($eventsSource, '$accountId = $this->resolveAccountId()')
+        );
+        self::assertStringContainsString(
+            "foreach (['page', 'per_page', 'type', 'source', 'from', 'to'] as \$filter)",
+            $eventsSource
+        );
+        self::assertStringContainsString('$this->request->get($filter)', $eventsSource);
+        self::assertStringContainsString("['reason' => 'event_explorer_exception']", $eventsSource);
+        self::assertStringNotContainsString('getMessage()', $eventsSource);
+
+        $routes = file_get_contents(dirname(__DIR__, 3) . '/app/Routes/api/pregao.php');
+        self::assertIsString($routes);
+        self::assertStringContainsString(
+            '$router->get(\'api/pregao/events\', PregaoController::class, \'events\');',
+            $routes
+        );
+        self::assertStringNotContainsString('$router->post(\'api/pregao/events\'', $routes);
+    }
 }

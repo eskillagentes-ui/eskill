@@ -4,7 +4,8 @@
  */
 /* eslint-env browser */
 /* global window, document, matchMedia, setInterval, devicePixelRatio, getComputedStyle,
-          addEventListener, fetch, setTimeout, clearTimeout, location, WebSocket, EventSource, console */
+          addEventListener, fetch, setTimeout, clearTimeout, location, WebSocket, EventSource, console,
+          URLSearchParams */
 (function () {
     'use strict';
 
@@ -65,7 +66,37 @@
         unavailable: 'indisponível',
         watchlist_empty: 'watchlist vazia'
     };
+    const eventExplorerTypes = new Set([
+        'account.semaforo', 'agent.status', 'index.candle', 'index.tick', 'keyword.rank',
+        'metric.update', 'op', 'qa.status', 'sale'
+    ]);
+    const eventExplorerLabels = {
+        'account.semaforo': 'SEMÁFORO DA CONTA',
+        'agent.status': 'STATUS DE AGENTE',
+        'index.candle': 'CANDLE DO ÍNDICE',
+        'index.tick': 'ATUALIZAÇÃO DO ÍNDICE',
+        'keyword.rank': 'POSIÇÃO ORGÂNICA',
+        'metric.update': 'ATUALIZAÇÃO DE MÉTRICA',
+        op: 'OPERAÇÃO',
+        'qa.status': 'STATUS DE QA',
+        sale: 'VENDA'
+    };
+    const eventDetailKeys = {
+        'account.semaforo': ['status'],
+        'agent.status': [
+            'agent', 'attempts', 'correlation_id', 'ml_write_automation',
+            'reason', 'state_changed', 'status'
+        ],
+        'index.candle': ['c', 'date', 'h', 'l', 'o'],
+        'index.tick': ['factors_active', 'factors_total', 'label', 'value'],
+        'keyword.rank': ['delta', 'kw', 'pos'],
+        'metric.update': ['available', 'flash', 'key', 'message', 'reason', 'source', 'value'],
+        op: ['heartbeat', 'icon', 'level', 'msg', 'robot'],
+        'qa.status': ['result', 'running', 'suite', 'test'],
+        sale: ['currency_id', 'item_id', 'quantity', 'sku', 'total']
+    };
     let observabilityConsolidatedMs = null;
+    let eventExplorerPage = 1;
     const agentStaleAfterMs = 600 * 1000;
     const agentState = Object.create(null);
 
@@ -1078,6 +1109,134 @@
         freshness.className = 'source-freshness' + (ageSeconds > 300 ? ' is-stale' : '');
     }
 
+    /* ---------- EVENT EXPLORER ---------- */
+    function isValidEventExplorerItem(item) {
+        if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+        const keys = Object.keys(item).sort();
+        return JSON.stringify(keys) === JSON.stringify(['details', 'id', 'source', 'ts', 'type'])
+            && Number.isInteger(item.id)
+            && item.id > 0
+            && typeof item.type === 'string'
+            && eventExplorerTypes.has(item.type)
+            && (item.source === 'live' || item.source === 'seed')
+            && isCanonicalAgentTimestamp(item.ts)
+            && item.details
+            && typeof item.details === 'object'
+            && !Array.isArray(item.details);
+    }
+
+    function eventDetailText(item) {
+        const details = item.details || {};
+        const parts = [];
+        (eventDetailKeys[item.type] || []).forEach((key) => {
+            if (!Object.prototype.hasOwnProperty.call(details, key)) return;
+            const value = details[key];
+            if (value === null || !['string', 'number', 'boolean'].includes(typeof value)) return;
+            parts.push(key.replace(/_/g, ' ') + ': ' + String(value));
+        });
+        return parts.length ? parts.join(' · ') : 'sem detalhes públicos';
+    }
+
+    function renderEventExplorer(data) {
+        const list = $('eventExplorerList');
+        const status = $('eventExplorerStatus');
+        const pageLabel = $('eventPageLabel');
+        const prev = $('eventPrev');
+        const next = $('eventNext');
+        if (!list || !status || !pageLabel || !prev || !next
+            || !data || typeof data !== 'object' || data.read_only !== true) return;
+
+        list.textContent = '';
+        const items = Array.isArray(data.items) ? data.items.filter(isValidEventExplorerItem) : [];
+        items.forEach((item) => {
+            const row = document.createElement('article');
+            row.className = 'event-row';
+            const head = document.createElement('div');
+            head.className = 'event-row-head';
+            const type = document.createElement('b');
+            type.textContent = eventExplorerLabels[item.type] || item.type;
+            const timestamp = document.createElement('span');
+            timestamp.textContent = new Date(item.ts).toLocaleString('pt-BR', {
+                day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
+            }) + ' · ' + item.source;
+            head.appendChild(type);
+            head.appendChild(timestamp);
+            const detail = document.createElement('div');
+            detail.className = 'event-row-detail';
+            detail.textContent = eventDetailText(item);
+            row.appendChild(head);
+            row.appendChild(detail);
+            list.appendChild(row);
+        });
+
+        if (!items.length) {
+            const empty = document.createElement('div');
+            empty.className = 'event-explorer-empty';
+            empty.textContent = 'Nenhum evento real encontrado para os filtros';
+            list.appendChild(empty);
+        }
+
+        const pagination = data.pagination && typeof data.pagination === 'object' ? data.pagination : {};
+        const page = Number.isInteger(pagination.page) && pagination.page > 0 ? pagination.page : 1;
+        const pages = Number.isInteger(pagination.pages) && pagination.pages >= 0 ? pagination.pages : 0;
+        const total = Number.isInteger(pagination.total) && pagination.total >= 0 ? pagination.total : 0;
+        eventExplorerPage = page;
+        pageLabel.textContent = 'Página ' + page + ' de ' + pages + ' · ' + total + ' eventos';
+        prev.disabled = pagination.has_previous !== true;
+        next.disabled = pagination.has_next !== true;
+        status.textContent = total + ' eventos · somente leitura';
+    }
+
+    async function loadEventExplorer(page) {
+        const requestedPage = Number.isInteger(page) && page > 0 ? page : 1;
+        const params = new URLSearchParams({
+            account_id: String(accountId),
+            page: String(requestedPage),
+            per_page: '25'
+        });
+        const type = $('eventType') ? $('eventType').value : '';
+        const source = $('eventSource') ? $('eventSource').value : '';
+        const from = $('eventFrom') ? $('eventFrom').value : '';
+        const to = $('eventTo') ? $('eventTo').value : '';
+        if (eventExplorerTypes.has(type)) params.set('type', type);
+        if (source === 'live') params.set('source', source);
+        if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(from)) params.set('from', from);
+        if (/^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(to)) params.set('to', to);
+
+        const status = $('eventExplorerStatus');
+        if (status) status.textContent = 'consultando…';
+        const response = await fetch((boot.eventsUrl || '/api/pregao/events') + '?' + params.toString(), {
+            credentials: 'same-origin',
+            headers: { Accept: 'application/json' }
+        });
+        if (!response.ok) throw new Error('event explorer HTTP ' + response.status);
+        const body = await response.json();
+        if (!body || body.success !== true || !body.data || body.data.read_only !== true) {
+            throw new Error('event explorer fail');
+        }
+        renderEventExplorer(body.data);
+    }
+
+    function bindEventExplorer() {
+        const apply = $('eventApply');
+        const reset = $('eventReset');
+        const prev = $('eventPrev');
+        const next = $('eventNext');
+        const fail = () => {
+            const status = $('eventExplorerStatus');
+            if (status) status.textContent = 'histórico indisponível';
+        };
+        if (apply) apply.addEventListener('click', () => loadEventExplorer(1).catch(fail));
+        if (reset) reset.addEventListener('click', () => {
+            ['eventType', 'eventSource', 'eventFrom', 'eventTo'].forEach((id) => {
+                if ($(id)) $(id).value = '';
+            });
+            loadEventExplorer(1).catch(fail);
+        });
+        if (prev) prev.addEventListener('click', () => loadEventExplorer(eventExplorerPage - 1).catch(fail));
+        if (next) next.addEventListener('click', () => loadEventExplorer(eventExplorerPage + 1).catch(fail));
+    }
+
     /* ---------- SNAPSHOT ---------- */
     async function loadSnapshot() {
         const url = (boot.snapshotUrl || '/api/pregao/snapshot') + (accountId ? ('?account_id=' + accountId) : '');
@@ -1298,6 +1457,12 @@
     }
 
     /* ---------- BOOT ---------- */
+    bindEventExplorer();
+    loadEventExplorer(1).catch((err) => {
+        console.error('[pregao] events', err);
+        const status = $('eventExplorerStatus');
+        if (status) status.textContent = 'histórico indisponível';
+    });
     loadSnapshot()
         .then(() => connectRealtime())
         .catch((err) => {
