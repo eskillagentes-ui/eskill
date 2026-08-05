@@ -125,6 +125,21 @@
                 </div>
                 <div class="agents-readonly">Somente leitura · nenhuma alteração automática no Mercado Livre</div>
             </section>
+
+            <section class="panel source-panel" id="sourcePanel" aria-labelledby="sourceTitle">
+                <div class="p-head" id="sourceTitle">
+                    🔎 FONTES E FRESHNESS
+                    <span class="source-freshness" id="sourceFreshness" role="status">aguardando snapshot</span>
+                </div>
+                <div class="source-grid" id="dataSources">
+                    <div class="source-empty">Carregando origem das métricas…</div>
+                </div>
+                <div class="source-runtime">
+                    <span>Transporte <b id="sourceTransport">OFFLINE</b></span>
+                    <span>Último evento <b id="sourceLastEvent">—</b></span>
+                    <span>Modo <b>SOMENTE LEITURA</b></span>
+                </div>
+            </section>
         </div>
 
         <div class="right">
@@ -168,4 +183,4 @@
     };
 </script>
 <script src="/js/pregao-chart-layout.js?v=1"></script>
-<script src="/js/pregao.js?v=36" defer></script>
+<script src="/js/pregao.js?v=37" defer></script>

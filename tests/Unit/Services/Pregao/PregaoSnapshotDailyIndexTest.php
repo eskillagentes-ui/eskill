@@ -32,7 +32,7 @@ final class PregaoSnapshotDailyIndexTest extends TestCase
                 tacos REAL,
                 indice_atual REAL,
                 metrics_meta TEXT,
-                updated_at TEXT DEFAULT \'2026-08-04 12:00:00\'
+                updated_at TEXT DEFAULT \'2026-08-04 15:00:00\'
             )'
         );
         $this->db->exec(
@@ -52,7 +52,7 @@ final class PregaoSnapshotDailyIndexTest extends TestCase
                 h REAL,
                 l REAL,
                 c REAL,
-                updated_at TEXT DEFAULT \'2026-08-04 12:00:00\'
+                updated_at TEXT DEFAULT \'2026-08-04 15:00:00\'
             )'
         );
         $this->db->exec(
@@ -110,6 +110,9 @@ final class PregaoSnapshotDailyIndexTest extends TestCase
         $this->assertSame(min(950.0, $live), (float) $snapshot['index']['low']);
         $this->assertArrayHasKey('agents', $snapshot);
         $this->assertCount(5, $snapshot['agents']['items']);
+        $this->assertArrayHasKey('observability', $snapshot);
+        $this->assertTrue($snapshot['observability']['read_only']);
+        $this->assertCount(7, $snapshot['observability']['items']);
         self::assertSame('2026-08-04T12:00:00-03:00', $snapshot['index']['updated_at']);
         self::assertSame('2026-08-04T12:00:00-03:00', $snapshot['candles'][0]['updated_at']);
     }

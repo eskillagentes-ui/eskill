@@ -743,5 +743,16 @@ test('mantém o cache-busting do cliente corrigido', () => {
     const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
     assert.match(source, /iconNode\.textContent = String\(icon\)/, 'ícone do feed deve usar textContent');
     assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
-    assert.match(view, /\/js\/pregao\.js\?v=36/, 'view deve invalidar o cache do cliente corrigido');
+    assert.match(view, /\/js\/pregao\.js\?v=37/, 'view deve invalidar o cache do cliente corrigido');
+});
+
+test('view expõe fontes, freshness e transporte read-only', () => {
+    const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
+
+    for (const id of ['sourcePanel', 'sourceFreshness', 'dataSources', 'sourceTransport', 'sourceLastEvent']) {
+        assert.match(view, new RegExp('id="' + id + '"'));
+    }
+    assert.match(view, /SOMENTE LEITURA/);
+    assert.match(source, /renderObservability\(d\.observability\)/);
+    assert.doesNotMatch(source, /dataSources[\s\S]{0,200}innerHTML\s*=/);
 });

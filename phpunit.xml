@@ -54,9 +54,11 @@
             <file>tests/Unit/Services/DashboardServiceTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoAccountAuthorizerTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoAgentStatusServiceTest.php</file>
+            <file>tests/Unit/Services/Pregao/PregaoDataSourceStatusServiceTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoEmitServiceTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoMetricsCollectorAgentActionsContractTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoSnapshotDailyIndexTest.php</file>
+            <file>tests/Unit/Services/Pregao/PregaoStreamServiceAgentEventFilterTest.php</file>
             <file>tests/Unit/Services/TwoFactorServiceTest.php</file>
             <file>tests/Unit/Controllers/SeoKeywordsControllerTest.php</file>
             <file>tests/Unit/Services/KeywordResearchServiceTest.php</file>

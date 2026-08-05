@@ -55,12 +55,21 @@
         'agent', 'attempts', 'correlation_id', 'ml_write_automation',
         'reason', 'state_changed', 'status'
     ];
+    const sourceKeys = new Set(['sales', 'ads', 'visits', 'health', 'reputation', 'questions', 'ranks']);
+    const sourceReasons = {
+        rank_tracker_disabled: 'desativado por segurança',
+        ml_search_forbidden: 'busca bloqueada pelo Mercado Livre',
+        seller_not_found_in_search: 'seller não encontrado',
+        unavailable: 'indisponível'
+    };
+    let observabilityConsolidatedMs = null;
     const agentStaleAfterMs = 600 * 1000;
     const agentState = Object.create(null);
 
     setInterval(() => {
         if ($('clock')) $('clock').textContent = new Date().toLocaleTimeString('pt-BR');
         refreshAgentFreshness(Date.now());
+        refreshObservabilityFreshness(Date.now());
     }, 1000);
 
     function fmtMoney(n) {
@@ -932,6 +941,13 @@
 
     function handleEvent(ev) {
         if (!isValidRealtimeEvent(ev)) return;
+        const lastEvent = $('sourceLastEvent');
+        if (lastEvent) {
+            const parsed = new Date(ev.ts);
+            lastEvent.textContent = Number.isNaN(parsed.getTime())
+                ? '—'
+                : parsed.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        }
         switch (ev.type) {
             case 'index.tick':
                 applyIndexTick(ev.payload && ev.payload.value, ev.ts);
@@ -976,10 +992,84 @@
 
     function setConn(mode) {
         const el = $('conn');
-        if (!el) return;
-        el.className = 'conn ' + mode;
-        el.textContent = mode === 'ws' ? 'WS' : mode === 'sse' ? 'SSE' : '●';
-        el.title = mode;
+        if (el) {
+            el.className = 'conn ' + mode;
+            el.textContent = mode === 'ws' ? 'WS' : mode === 'sse' ? 'SSE' : '●';
+            el.title = mode;
+        }
+        const transport = $('sourceTransport');
+        if (transport) {
+            transport.textContent = mode === 'ws' ? 'WEBSOCKET' : mode === 'sse' ? 'SSE' : 'OFFLINE';
+            transport.className = mode === 'ws' ? 'is-ok' : mode === 'sse' ? 'is-warn' : 'is-off';
+        }
+    }
+
+    function renderObservability(data) {
+        const list = $('dataSources');
+        const freshness = $('sourceFreshness');
+        if (!list || !freshness || !data || typeof data !== 'object' || data.read_only !== true) return;
+        const items = Array.isArray(data.items) ? data.items : [];
+        list.textContent = '';
+
+        items.forEach((item) => {
+            if (!item || typeof item !== 'object' || !sourceKeys.has(item.key)
+                || typeof item.label !== 'string' || typeof item.available !== 'boolean') return;
+            const card = document.createElement('article');
+            card.className = 'source-card ' + (item.available ? 'is-ok' : 'is-off');
+            const head = document.createElement('div');
+            head.className = 'source-card-head';
+            const label = document.createElement('b');
+            label.textContent = item.label;
+            const status = document.createElement('span');
+            status.textContent = item.available ? 'DISPONÍVEL' : 'N/D';
+            head.appendChild(label);
+            head.appendChild(status);
+            const detail = document.createElement('div');
+            detail.className = 'source-card-detail';
+            const reason = typeof item.reason === 'string' ? sourceReasons[item.reason] : null;
+            let detailText = item.available
+                ? (typeof item.source === 'string' ? item.source : 'fonte confirmada')
+                : (reason || 'indisponível');
+            const observed = typeof item.observed_at === 'string' ? new Date(item.observed_at) : null;
+            if (observed && !Number.isNaN(observed.getTime())) {
+                detailText += ' · ' + observed.toLocaleString('pt-BR', {
+                    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+                });
+            }
+            detail.textContent = detailText;
+            card.appendChild(head);
+            card.appendChild(detail);
+            list.appendChild(card);
+        });
+
+        if (!list.children.length) {
+            const empty = document.createElement('div');
+            empty.className = 'source-empty';
+            empty.textContent = 'Metadados de origem indisponíveis';
+            list.appendChild(empty);
+        }
+
+        const consolidated = typeof data.consolidated_at === 'string' ? Date.parse(data.consolidated_at) : NaN;
+        observabilityConsolidatedMs = Number.isNaN(consolidated) ? null : consolidated;
+        refreshObservabilityFreshness(Date.now());
+    }
+
+    function refreshObservabilityFreshness(nowMs) {
+        const freshness = $('sourceFreshness');
+        if (!freshness) return;
+        if (observabilityConsolidatedMs === null) {
+            freshness.textContent = 'horário indisponível';
+            freshness.className = 'source-freshness is-stale';
+            return;
+        }
+        const referenceMs = Number.isFinite(Number(nowMs)) ? Number(nowMs) : Date.now();
+        const ageSeconds = Math.max(0, Math.floor((referenceMs - observabilityConsolidatedMs) / 1000));
+        const consolidated = new Date(observabilityConsolidatedMs);
+        const time = consolidated.toLocaleTimeString('pt-BR', {
+            hour: '2-digit', minute: '2-digit', second: '2-digit'
+        });
+        freshness.textContent = 'consolidado ' + time + ' · ' + ageSeconds + 's atrás';
+        freshness.className = 'source-freshness' + (ageSeconds > 300 ? ' is-stale' : '');
     }
 
     /* ---------- SNAPSHOT ---------- */
@@ -1087,6 +1177,7 @@
         renderTape(d.ranks != null ? d.ranks : d.keywords, d.rank_tracker_enabled);
         applyQa(d.qa);
         applyAgents(d.agents);
+        renderObservability(d.observability);
 
         seenOps.clear();
         $('feed').innerHTML = '';

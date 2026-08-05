@@ -1,0 +1,139 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\Pregao;
+
+use DateTimeImmutable;
+use DateTimeZone;
+
+/**
+ * Projeta somente metadados seguros de origem/disponibilidade para o dashboard.
+ * Detalhes de erro e payloads internos nunca atravessam este contrato.
+ */
+final class PregaoDataSourceStatusService
+{
+    /** @var array<string, array{label: string, meta_key: string}> */
+    private const DEFINITIONS = [
+        'sales' => ['label' => 'Vendas e receita', 'meta_key' => 'vendas_hoje'],
+        'ads' => ['label' => 'Ads / TACOS', 'meta_key' => 'tacos'],
+        'visits' => ['label' => 'Visitas', 'meta_key' => 'visitas_7d'],
+        'health' => ['label' => 'Saúde dos anúncios', 'meta_key' => 'health_medio'],
+        'reputation' => ['label' => 'Reputação', 'meta_key' => 'reputacao'],
+        'questions' => ['label' => 'Perguntas', 'meta_key' => 'perguntas_7d'],
+        'ranks' => ['label' => 'Posição orgânica', 'meta_key' => 'posicao_media'],
+    ];
+
+    /** @var list<string> */
+    private const SAFE_SOURCES = [
+        'AdsMetricsCollector',
+        'account_health_history',
+        'items_visits',
+        'keyword_ranks',
+        'ml_api',
+        'ml_orders',
+        'seller_reputation',
+    ];
+
+    /** @var list<string> */
+    private const SAFE_REASONS = [
+        'ml_search_forbidden',
+        'rank_tracker_disabled',
+        'seller_not_found_in_search',
+        'unavailable',
+    ];
+
+    /**
+     * @param array<string, mixed> $meta
+     * @return array{
+     *   consolidated_at: string|null,
+     *   age_seconds: int|null,
+     *   items: list<array{key:string,label:string,available:bool,source:string|null,observed_at:string|null,reason:string|null}>,
+     *   read_only: true
+     * }
+     */
+    public function build(
+        array $meta,
+        ?string $metricsUpdatedAt,
+        ?DateTimeImmutable $now = null
+    ): array {
+        $timezone = new DateTimeZone('America/Sao_Paulo');
+        $clock = ($now ?? new DateTimeImmutable('now', $timezone))->setTimezone($timezone);
+        $consolidated = $this->parseDatabaseTimestamp($metricsUpdatedAt, $timezone, $clock);
+        $metricMeta = is_array($meta['metrics'] ?? null) ? $meta['metrics'] : [];
+        $items = [];
+
+        foreach (self::DEFINITIONS as $key => $definition) {
+            $entry = is_array($metricMeta[$definition['meta_key']] ?? null)
+                ? $metricMeta[$definition['meta_key']]
+                : [];
+            $available = ($entry['available'] ?? false) === true;
+            $source = is_string($entry['source'] ?? null)
+                && in_array($entry['source'], self::SAFE_SOURCES, true)
+                ? $entry['source']
+                : null;
+            $reason = null;
+            if (!$available) {
+                $candidate = is_string($entry['reason'] ?? null) ? $entry['reason'] : 'unavailable';
+                $reason = in_array($candidate, self::SAFE_REASONS, true) ? $candidate : 'unavailable';
+            }
+
+            $observed = null;
+            if ($available && isset($entry['collected_at']) && is_numeric($entry['collected_at'])) {
+                $observed = (new DateTimeImmutable('@' . (string) ((int) $entry['collected_at'])))
+                    ->setTimezone($timezone);
+                if ($observed->getTimestamp() > $clock->getTimestamp() + 60) {
+                    $observed = null;
+                }
+            } elseif ($available && is_string($entry['as_of'] ?? null)) {
+                $observed = $this->parseDatabaseTimestamp($entry['as_of'], $timezone, $clock);
+            }
+
+            $items[] = [
+                'key' => $key,
+                'label' => $definition['label'],
+                'available' => $available,
+                'source' => $source,
+                'observed_at' => $observed?->format('Y-m-d\TH:i:sP'),
+                'reason' => $reason,
+            ];
+        }
+
+        return [
+            'consolidated_at' => $consolidated?->format('Y-m-d\TH:i:sP'),
+            'age_seconds' => $consolidated !== null
+                ? max(0, $clock->getTimestamp() - $consolidated->getTimestamp())
+                : null,
+            'items' => $items,
+            'read_only' => true,
+        ];
+    }
+
+    private function parseDatabaseTimestamp(
+        ?string $value,
+        DateTimeZone $displayTimezone,
+        DateTimeImmutable $clock
+    ): ?DateTimeImmutable {
+        if ($value === null || trim($value) === '') {
+            return null;
+        }
+
+        $value = trim($value);
+        $storageTimezone = new DateTimeZone('UTC');
+        $parsed = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value, $storageTimezone);
+        $errors = DateTimeImmutable::getLastErrors();
+        if ($parsed === false || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))) {
+            try {
+                $parsed = new DateTimeImmutable($value, $storageTimezone);
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+        $parsed = $parsed->setTimezone($displayTimezone);
+        if ($parsed->getTimestamp() > $clock->getTimestamp() + 60) {
+            return null;
+        }
+
+        return $parsed;
+    }
+}

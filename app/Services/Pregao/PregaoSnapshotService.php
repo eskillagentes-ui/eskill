@@ -17,6 +17,7 @@ final class PregaoSnapshotService
     private PDO $db;
     private AccountIndexCalculator $calculator;
     private PregaoAgentStatusService $agentStatusService;
+    private PregaoDataSourceStatusService $dataSourceStatusService;
 
     /** @var array<string, mixed> */
     private array $config;
@@ -25,12 +26,14 @@ final class PregaoSnapshotService
         ?PDO $db = null,
         ?AccountIndexCalculator $calculator = null,
         ?array $config = null,
-        ?PregaoAgentStatusService $agentStatusService = null
+        ?PregaoAgentStatusService $agentStatusService = null,
+        ?PregaoDataSourceStatusService $dataSourceStatusService = null
     ) {
         $this->db = $db ?? Database::getInstance();
         $this->calculator = $calculator ?? new AccountIndexCalculator();
         $this->config = $config ?? (require dirname(__DIR__, 3) . '/config/pregao.php');
         $this->agentStatusService = $agentStatusService ?? new PregaoAgentStatusService($this->db);
+        $this->dataSourceStatusService = $dataSourceStatusService ?? new PregaoDataSourceStatusService();
     }
 
     /**
@@ -97,7 +100,7 @@ final class PregaoSnapshotService
             'index' => [
                 'symbol' => 'ESKL11',
                 'updated_at' => isset($metrics['updated_at'])
-                    ? $this->mysqlToIso((string) $metrics['updated_at'])
+                    ? $this->mysqlTimestampToIso((string) $metrics['updated_at'])
                     : null,
                 'value' => $indexValue !== null ? round($indexValue, 2) : null,
                 'change_pct' => $changePct !== null ? round($changePct, 2) : null,
@@ -118,6 +121,11 @@ final class PregaoSnapshotService
             'keywords' => $ranks,
             'qa' => $qa,
             'agents' => $agents,
+            'observability' => $this->dataSourceStatusService->build(
+                $meta,
+                isset($metrics['updated_at']) ? (string) $metrics['updated_at'] : null,
+                $now
+            ),
             'semaforo' => $semaforo,
             'baselines' => $baselines,
             'sentinela' => $this->loadSentinelaSummary($accountId),
@@ -230,7 +238,7 @@ final class PregaoSnapshotService
                 'l' => (float) $r['l'],
                 'c' => (float) $r['c'],
                 'updated_at' => isset($r['updated_at'])
-                    ? $this->mysqlToIso((string) $r['updated_at'])
+                    ? $this->mysqlTimestampToIso((string) $r['updated_at'])
                     : null,
             ];
         }, $rows);
@@ -617,6 +625,28 @@ final class PregaoSnapshotService
                 && $parsed->format($format) === $mysqlTs
             ) {
                 $futureLimit = new \DateTimeImmutable('+60 seconds', $timezone);
+                if ($parsed > $futureLimit) {
+                    return null;
+                }
+                return $parsed->format('Y-m-d\TH:i:sP');
+            }
+        }
+        return null;
+    }
+
+    private function mysqlTimestampToIso(string $mysqlTs): ?string
+    {
+        $storageTimezone = new \DateTimeZone('UTC');
+        $displayTimezone = new \DateTimeZone('America/Sao_Paulo');
+        foreach (['Y-m-d H:i:s', 'Y-m-d H:i:s.u'] as $format) {
+            $parsed = \DateTimeImmutable::createFromFormat('!' . $format, $mysqlTs, $storageTimezone);
+            $errors = \DateTimeImmutable::getLastErrors();
+            if ($parsed !== false
+                && ($errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0))
+                && $parsed->format($format) === $mysqlTs
+            ) {
+                $parsed = $parsed->setTimezone($displayTimezone);
+                $futureLimit = new \DateTimeImmutable('+60 seconds', $displayTimezone);
                 if ($parsed > $futureLimit) {
                     return null;
                 }

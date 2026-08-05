@@ -820,6 +820,102 @@ a.card.sn-card:hover {
     padding: 0 12px 12px;
 }
 
+.source-panel {
+    margin-top: 14px;
+}
+
+.source-freshness {
+    margin-left: auto;
+    color: var(--mut);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0;
+}
+
+.source-freshness.is-stale {
+    color: var(--down);
+}
+
+.source-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    gap: 8px;
+    padding: 12px;
+}
+
+.source-card {
+    min-width: 0;
+    padding: 9px 10px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--panel2);
+}
+
+.source-card.is-ok {
+    border-color: rgba(22, 199, 132, 0.3);
+}
+
+.source-card.is-off {
+    border-color: rgba(234, 57, 67, 0.35);
+}
+
+.source-card-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 10px;
+}
+
+.source-card-head span {
+    color: var(--mut);
+    font-family: var(--mono);
+    font-size: 8px;
+}
+
+.source-card.is-ok .source-card-head span,
+.source-runtime .is-ok {
+    color: var(--up);
+}
+
+.source-card.is-off .source-card-head span,
+.source-runtime .is-off {
+    color: var(--down);
+}
+
+.source-runtime .is-warn {
+    color: var(--ml);
+}
+
+.source-card-detail,
+.source-empty,
+.source-runtime {
+    color: var(--mut);
+    font-size: 10px;
+}
+
+.source-card-detail {
+    margin-top: 5px;
+    overflow-wrap: anywhere;
+}
+
+.source-empty {
+    padding: 4px;
+}
+
+.source-runtime {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px 18px;
+    padding: 0 12px 12px;
+    font-family: var(--mono);
+}
+
+.source-runtime b {
+    color: var(--txt);
+    font-weight: 600;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .tape-in {
         animation: none
