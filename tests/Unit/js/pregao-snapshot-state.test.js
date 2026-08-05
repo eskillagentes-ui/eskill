@@ -743,7 +743,43 @@ test('mantém o cache-busting do cliente corrigido', () => {
     const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
     assert.match(source, /iconNode\.textContent = String\(icon\)/, 'ícone do feed deve usar textContent');
     assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
-    assert.match(view, /\/js\/pregao\.js\?v=39/, 'view deve invalidar o cache do cliente corrigido');
+    assert.match(view, /\/js\/pregao\.js\?v=40/, 'view deve invalidar o cache do cliente corrigido');
+});
+
+test('semáforos são nomeados como Saúde da conta e Sentinela operacional', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        semaforo: {
+            status: 'verde',
+            indicadores: { reclamacoes_pct: 0.1, atrasos_pct: 1.0, cancelamentos_pct: 0.2 },
+            limites: { reclamacoes_pct: 2.0, atrasos_pct: 15.0, cancelamentos_pct: 2.5 }
+        }
+    });
+    assert.match(element('semaText').textContent, /SAÚDE DA CONTA/, 'semáforo do header deve ser nomeado Saúde da conta');
+
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        semaforo: { status: null, indicadores: null, limites: {} }
+    });
+    assert.match(element('semaText').textContent, /SAÚDE DA CONTA/, 'sem status também deve manter o nome do semáforo');
+
+    const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
+    assert.match(view, /SENTINELA OPERACIONAL/, 'card do Sentinela deve ser renomeado');
+    assert.match(view, /critérios distintos/, 'view deve explicar que os semáforos medem critérios distintos');
+    assert.match(
+        view,
+        /id="sema"[^>]*title="/,
+        'semáforo do header deve explicar seu critério via tooltip'
+    );
+    assert.match(
+        view,
+        /id="cSentinela"[^>]*title="/,
+        'card do Sentinela deve explicar seu critério via tooltip'
+    );
 });
 
 test('fonte disponível sem observed_at mostra horário indisponível, nunca zero', async () => {

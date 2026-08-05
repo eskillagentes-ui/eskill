@@ -12,7 +12,7 @@
             <span class="chg up" id="chg">▲ +0,00%</span>
         </div>
         <div class="spacer"></div>
-        <div class="sema" id="sema">
+        <div class="sema" id="sema" title="Saúde da conta: reclamações, atrasos e cancelamentos versus os limites do Mercado Livre. Pode mostrar cor diferente do Sentinela operacional porque os dois medem critérios distintos.">
             <div class="s" id="semaDot"></div>
             <span id="semaText">CONECTANDO…</span>
         </div>
@@ -84,8 +84,8 @@
                     <div class="vl" id="vAcoes">—</div>
                     <div class="sb" id="sAcoes">somente leitura · zero escrita ML</div>
                 </div>
-                <a class="card sn-card" id="cSentinela" href="/dashboard/sentinela" data-metric="sentinela">
-                    <div class="lb">SENTINELA</div>
+                <a class="card sn-card" id="cSentinela" href="/dashboard/sentinela" data-metric="sentinela" title="Sentinela operacional: semáforo dos riscos operacionais monitorados. Pode mostrar cor diferente da Saúde da conta (header) porque os dois medem critérios distintos.">
+                    <div class="lb">SENTINELA OPERACIONAL</div>
                     <div class="vl" id="vSentinela">—</div>
                     <div class="sb" id="sSentinela">abrindo painel de riscos…</div>
                 </a>
@@ -222,5 +222,5 @@
     };
 </script>
 <script src="/js/pregao-chart-layout.js?v=1"></script>
-<script src="/js/pregao.js?v=39" defer></script>
+<script src="/js/pregao.js?v=40" defer></script>
 <script src="/js/pregao-events.js?v=1" defer></script>

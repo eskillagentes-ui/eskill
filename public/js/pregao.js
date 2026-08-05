@@ -382,18 +382,18 @@
         if (!s || s.status == null) {
             const el = $('sema');
             if (el) el.className = 'sema';
-            if ($('semaText')) $('semaText').textContent = 'SEMÁFORO n/d';
+            if ($('semaText')) $('semaText').textContent = 'SAÚDE DA CONTA · n/d';
             return;
         }
         const status = s.status || 'verde';
         const el = $('sema');
         el.className = 'sema ' + status;
         const labels = {
-            verde: 'CONTA VERDE · TODOS OS LIMITES <50%',
-            amarelo: 'CONTA AMARELA · ATENÇÃO 50–80%',
-            vermelho: 'CONTA VERMELHA · ACIMA DE 80% DO LIMITE'
+            verde: 'SAÚDE DA CONTA VERDE · TODOS OS LIMITES <50%',
+            amarelo: 'SAÚDE DA CONTA AMARELA · ATENÇÃO 50–80%',
+            vermelho: 'SAÚDE DA CONTA VERMELHA · ACIMA DE 80% DO LIMITE'
         };
-        $('semaText').textContent = labels[status] || status.toUpperCase();
+        $('semaText').textContent = labels[status] || 'SAÚDE DA CONTA · ' + status.toUpperCase();
     }
 
     function renderTape(ranks, rankTrackerEnabled) {
