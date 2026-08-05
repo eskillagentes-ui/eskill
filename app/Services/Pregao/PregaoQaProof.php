@@ -6,6 +6,9 @@ namespace App\Services\Pregao;
 
 final class PregaoQaProof
 {
+    private const STATUS_MAX_AGE_SECONDS = 86400;
+    private const STATUS_FUTURE_SKEW_SECONDS = 60;
+
     private const MANIFEST_KEYS = [
         'account_id', 'created_at', 'expires_at', 'manifest_hash', 'run_id', 'signature', 'user_id',
     ];
@@ -107,7 +110,9 @@ final class PregaoQaProof
         $unsigned = $status;
         $signature = $unsigned['signature'];
         unset($unsigned['signature']);
-        if (!$this->isStatusBaseValid($unsigned, $accountId)) {
+        if (!$this->isStatusBaseValid($unsigned, $accountId)
+            || !$this->isStatusFresh($unsigned['observed_at'])
+        ) {
             return false;
         }
         $expected = hash_hmac(
@@ -180,6 +185,17 @@ final class PregaoQaProof
             && is_string($status['manifest_hash'])
             && preg_match('/\A[a-f0-9]{64}\z/D', $status['manifest_hash']) === 1
             && self::isIsoTimestamp($status['observed_at']);
+    }
+
+    private function isStatusFresh(string $observedAt): bool
+    {
+        $observedEpoch = strtotime($observedAt);
+        if ($observedEpoch === false) {
+            return false;
+        }
+        $now = time();
+        return $observedEpoch >= $now - self::STATUS_MAX_AGE_SECONDS
+            && $observedEpoch <= $now + self::STATUS_FUTURE_SKEW_SECONDS;
     }
 
     private static function isIsoTimestamp(mixed $value): bool

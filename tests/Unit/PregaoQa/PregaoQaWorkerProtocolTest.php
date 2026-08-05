@@ -9,6 +9,48 @@ use PHPUnit\Framework\TestCase;
 
 final class PregaoQaWorkerProtocolTest extends TestCase
 {
+    public function testAcceptsOnlyTheExactFiveStepStateMachine(): void
+    {
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $steps = ['dashboard', 'snapshot', 'realtime', 'event_explorer', 'console_http'];
+        $previousSequence = 0;
+        $previousResult = null;
+
+        foreach ($steps as $index => $step) {
+            $sequence = $index + 1;
+            $result = $sequence === 5 ? 'passed' : 'running';
+            $record = $this->record($runId, $sequence, $step, $result);
+            self::assertSame(
+                $record,
+                PregaoQaWorkerProtocol::decode(
+                    json_encode($record, JSON_THROW_ON_ERROR),
+                    $runId,
+                    $previousSequence,
+                    $previousResult
+                )
+            );
+            $previousSequence = $sequence;
+            $previousResult = $result;
+        }
+
+        self::assertNull($this->decode($this->record($runId, 1, 'console_http', 'passed'), 0, null));
+        self::assertNull($this->decode($this->record($runId, 1, 'dashboard', 'passed'), 0, null));
+        self::assertNull($this->decode($this->record($runId, 5, 'console_http', 'running'), 4, 'running'));
+        self::assertNull($this->decode($this->record($runId, 2, 'realtime', 'running'), 1, 'running'));
+    }
+
+    public function testFailedAndBlockedTerminateAtExpectedStepAndRejectLaterEvents(): void
+    {
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $failed = $this->record($runId, 2, 'snapshot', 'failed');
+        self::assertSame($failed, $this->decode($failed, 1, 'running'));
+        self::assertNull($this->decode($this->record($runId, 3, 'realtime', 'running'), 2, 'failed'));
+
+        $blocked = $this->record($runId, 1, 'dashboard', 'blocked');
+        self::assertSame($blocked, $this->decode($blocked, 0, null));
+        self::assertNull($this->decode($this->record($runId, 2, 'snapshot', 'running'), 1, 'blocked'));
+    }
+
     public function testAcceptsExactNodeProtocolAndRejectsExtraOrHostileFields(): void
     {
         $valid = [
@@ -68,5 +110,30 @@ final class PregaoQaWorkerProtocolTest extends TestCase
         self::assertStringContainsString('$runs->releaseActive(', $source);
         self::assertStringNotContainsString("'--session-id'", $source);
         self::assertStringNotContainsString('curl', $source);
+    }
+
+    /** @return array<string,mixed> */
+    private function record(string $runId, int $sequence, string $step, string $result): array
+    {
+        return [
+            'run_id' => $runId,
+            'sequence' => $sequence,
+            'step' => $step,
+            'result' => $result,
+            'screenshot' => null,
+            'cursor' => null,
+            'observed_at' => (new \DateTimeImmutable())->format(DATE_ATOM),
+        ];
+    }
+
+    /** @param array<string,mixed> $record @return array<string,mixed>|null */
+    private function decode(array $record, int $previousSequence, ?string $previousResult): ?array
+    {
+        return PregaoQaWorkerProtocol::decode(
+            json_encode($record, JSON_THROW_ON_ERROR),
+            $record['run_id'],
+            $previousSequence,
+            $previousResult
+        );
     }
 }

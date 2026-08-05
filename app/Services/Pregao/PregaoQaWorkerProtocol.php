@@ -14,7 +14,12 @@ final class PregaoQaWorkerProtocol
     private const KEYS = ['cursor', 'observed_at', 'result', 'run_id', 'screenshot', 'sequence', 'step'];
 
     /** @return array<string,mixed>|null */
-    public static function decode(string $line, string $expectedRunId, int $previousSequence): ?array
+    public static function decode(
+        string $line,
+        string $expectedRunId,
+        int $previousSequence,
+        ?string $previousResult = null
+    ): ?array
     {
         if (strlen($line) > 16384 || preg_match(PregaoQaRunService::RUN_ID_PATTERN, $expectedRunId) !== 1) {
             return null;
@@ -25,14 +30,22 @@ final class PregaoQaWorkerProtocol
         }
         $keys = array_keys($data);
         sort($keys, SORT_STRING);
+        $sequence = $data['sequence'] ?? null;
+        $result = $data['result'] ?? null;
         if ($keys !== self::KEYS
             || ($data['run_id'] ?? null) !== $expectedRunId
-            || !is_int($data['sequence'])
-            || $data['sequence'] !== $previousSequence + 1
+            || !is_int($sequence)
+            || $sequence < 1
+            || $sequence > count(self::STEPS)
+            || $sequence !== $previousSequence + 1
             || !is_string($data['step'])
-            || !in_array($data['step'], self::STEPS, true)
-            || !is_string($data['result'])
-            || !in_array($data['result'], self::RESULTS, true)
+            || $data['step'] !== self::STEPS[$sequence - 1]
+            || !is_string($result)
+            || !in_array($result, self::RESULTS, true)
+            || ($result === 'running' && $sequence === count(self::STEPS))
+            || ($result === 'passed' && $sequence !== count(self::STEPS))
+            || ($previousResult !== null && !in_array($previousResult, self::RESULTS, true))
+            || in_array($previousResult, ['passed', 'failed', 'blocked'], true)
             || !in_array($data['screenshot'], [null, 'latest.png'], true)
             || !self::validCursor($data['cursor'])
             || !self::validTimestamp($data['observed_at'])

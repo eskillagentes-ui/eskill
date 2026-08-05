@@ -17,12 +17,14 @@ final class PregaoQaProofProducerTest extends TestCase
     public function testTrustedProducerEmitsOnlyEvidenceBoundToManifestAndAccount(): void
     {
         $proof = new PregaoQaProof(str_repeat('p', 32));
+        $observedAt = new \DateTimeImmutable();
+        $startedAt = $observedAt->modify('-1 minute');
         $manifest = $proof->signManifest([
             'run_id' => '123e4567-e89b-42d3-a456-426614174000',
             'account_id' => 1335,
             'user_id' => 77,
-            'created_at' => '2026-08-05T12:00:00+00:00',
-            'expires_at' => '2099-08-05T12:15:00+00:00',
+            'created_at' => $startedAt->format(DATE_ATOM),
+            'expires_at' => $observedAt->modify('+14 minutes')->format(DATE_ATOM),
         ]);
         $protocol = [
             'run_id' => $manifest['run_id'],
@@ -31,7 +33,7 @@ final class PregaoQaProofProducerTest extends TestCase
             'result' => 'running',
             'screenshot' => 'latest.png',
             'cursor' => ['x' => 10, 'y' => 20],
-            'observed_at' => '2026-08-05T12:01:00+00:00',
+            'observed_at' => $observedAt->format(DATE_ATOM),
         ];
 
         $stmt = $this->createMock(PDOStatement::class);
