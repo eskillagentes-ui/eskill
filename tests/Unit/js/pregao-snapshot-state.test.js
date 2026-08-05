@@ -743,7 +743,7 @@ test('mantém o cache-busting do cliente corrigido', () => {
     const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
     assert.match(source, /iconNode\.textContent = String\(icon\)/, 'ícone do feed deve usar textContent');
     assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
-    assert.match(view, /\/js\/pregao\.js\?v=37/, 'view deve invalidar o cache do cliente corrigido');
+    assert.match(view, /\/js\/pregao\.js\?v=38/, 'view deve invalidar o cache do cliente corrigido');
 });
 
 test('view expõe fontes, freshness e transporte read-only', () => {

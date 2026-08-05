@@ -43,13 +43,14 @@ final class PregaoDataSourceStatusServiceTest extends TestCase
         $result = (new PregaoDataSourceStatusService())->build(
             $meta,
             '2026-08-05 08:27:27',
-            $now
+            $now,
+            ['count' => 0, 'last_checked_at' => null]
         );
         $items = array_column($result['items'], null, 'key');
 
         self::assertSame('2026-08-05T05:27:27-03:00', $result['consolidated_at']);
         self::assertSame(33, $result['age_seconds']);
-        self::assertCount(7, $items);
+        self::assertCount(8, $items);
         self::assertSame('ml_orders', $items['sales']['source']);
         self::assertTrue($items['ads']['available']);
         self::assertSame('account_health_history', $items['health']['source']);
@@ -57,6 +58,9 @@ final class PregaoDataSourceStatusServiceTest extends TestCase
         self::assertFalse($items['ranks']['available']);
         self::assertSame('rank_tracker_disabled', $items['ranks']['reason']);
         self::assertNull($items['ranks']['observed_at']);
+        self::assertFalse($items['watchlist']['available']);
+        self::assertSame('watchlist_empty', $items['watchlist']['reason']);
+        self::assertSame(0, $items['watchlist']['count']);
         self::assertStringNotContainsString('segredo interno', json_encode($result, JSON_THROW_ON_ERROR));
         self::assertStringNotContainsString('não deve vazar', json_encode($result, JSON_THROW_ON_ERROR));
     }

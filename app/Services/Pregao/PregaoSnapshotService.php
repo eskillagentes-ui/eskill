@@ -53,6 +53,7 @@ final class PregaoSnapshotService
             $accountId,
             (bool) ($this->config['seed_enabled'] ?? false)
         );
+        $watchlist = $this->loadWatchlistStatus($accountId);
         $semaforo = $this->buildSemaforo($metrics, $meta);
 
         $calc = $this->calculator->calculate([
@@ -124,7 +125,8 @@ final class PregaoSnapshotService
             'observability' => $this->dataSourceStatusService->build(
                 $meta,
                 isset($metrics['updated_at']) ? (string) $metrics['updated_at'] : null,
-                $now
+                $now,
+                $watchlist
             ),
             'semaforo' => $semaforo,
             'baselines' => $baselines,
@@ -153,6 +155,34 @@ final class PregaoSnapshotService
                 'href' => '/dashboard/sentinela',
                 'pode_expandir' => false,
             ];
+        }
+    }
+
+    /**
+     * @return array{count:int,last_checked_at:string|null}
+     */
+    private function loadWatchlistStatus(int $accountId): array
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT COUNT(*) AS item_count, MAX(last_checked_at) AS last_checked_at
+                 FROM competitor_items
+                 WHERE account_id = ? AND COALESCE(active, 1) = 1'
+            );
+            $stmt->execute([$accountId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+            return [
+                'count' => max(0, (int) ($row['item_count'] ?? 0)),
+                'last_checked_at' => isset($row['last_checked_at'])
+                    ? (string) $row['last_checked_at']
+                    : null,
+            ];
+        } catch (Throwable) {
+            log_warning('PregaoSnapshotService: watchlist indisponível', [
+                'account_id' => $accountId,
+                'reason' => 'watchlist_status_unavailable',
+            ]);
+            return ['count' => 0, 'last_checked_at' => null];
         }
     }
 

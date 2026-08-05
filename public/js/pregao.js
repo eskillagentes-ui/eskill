@@ -55,12 +55,15 @@
         'agent', 'attempts', 'correlation_id', 'ml_write_automation',
         'reason', 'state_changed', 'status'
     ];
-    const sourceKeys = new Set(['sales', 'ads', 'visits', 'health', 'reputation', 'questions', 'ranks']);
+    const sourceKeys = new Set([
+        'sales', 'ads', 'visits', 'health', 'reputation', 'questions', 'ranks', 'watchlist'
+    ]);
     const sourceReasons = {
         rank_tracker_disabled: 'desativado por segurança',
         ml_search_forbidden: 'busca bloqueada pelo Mercado Livre',
         seller_not_found_in_search: 'seller não encontrado',
-        unavailable: 'indisponível'
+        unavailable: 'indisponível',
+        watchlist_empty: 'watchlist vazia'
     };
     let observabilityConsolidatedMs = null;
     const agentStaleAfterMs = 600 * 1000;
@@ -1030,6 +1033,9 @@
             let detailText = item.available
                 ? (typeof item.source === 'string' ? item.source : 'fonte confirmada')
                 : (reason || 'indisponível');
+            if (Number.isInteger(item.count) && item.count >= 0) {
+                detailText += ' · ' + item.count + ' itens';
+            }
             const observed = typeof item.observed_at === 'string' ? new Date(item.observed_at) : null;
             if (observed && !Number.isNaN(observed.getTime())) {
                 detailText += ' · ' + observed.toLocaleString('pt-BR', {

@@ -112,7 +112,7 @@ final class PregaoSnapshotDailyIndexTest extends TestCase
         $this->assertCount(5, $snapshot['agents']['items']);
         $this->assertArrayHasKey('observability', $snapshot);
         $this->assertTrue($snapshot['observability']['read_only']);
-        $this->assertCount(7, $snapshot['observability']['items']);
+        $this->assertCount(8, $snapshot['observability']['items']);
         self::assertSame('2026-08-04T12:00:00-03:00', $snapshot['index']['updated_at']);
         self::assertSame('2026-08-04T12:00:00-03:00', $snapshot['candles'][0]['updated_at']);
     }

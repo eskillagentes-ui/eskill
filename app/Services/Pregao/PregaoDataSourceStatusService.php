@@ -28,6 +28,7 @@ final class PregaoDataSourceStatusService
     private const SAFE_SOURCES = [
         'AdsMetricsCollector',
         'account_health_history',
+        'items_multiget',
         'items_visits',
         'keyword_ranks',
         'ml_api',
@@ -41,21 +42,24 @@ final class PregaoDataSourceStatusService
         'rank_tracker_disabled',
         'seller_not_found_in_search',
         'unavailable',
+        'watchlist_empty',
     ];
 
     /**
      * @param array<string, mixed> $meta
+     * @param array{count?:int,last_checked_at?:string|null}|null $watchlist
      * @return array{
      *   consolidated_at: string|null,
      *   age_seconds: int|null,
-     *   items: list<array{key:string,label:string,available:bool,source:string|null,observed_at:string|null,reason:string|null}>,
+     *   items: list<array{key:string,label:string,available:bool,source:string|null,observed_at:string|null,reason:string|null,count:int|null}>,
      *   read_only: true
      * }
      */
     public function build(
         array $meta,
         ?string $metricsUpdatedAt,
-        ?DateTimeImmutable $now = null
+        ?DateTimeImmutable $now = null,
+        ?array $watchlist = null
     ): array {
         $timezone = new DateTimeZone('America/Sao_Paulo');
         $clock = ($now ?? new DateTimeImmutable('now', $timezone))->setTimezone($timezone);
@@ -96,8 +100,23 @@ final class PregaoDataSourceStatusService
                 'source' => $source,
                 'observed_at' => $observed?->format('Y-m-d\TH:i:sP'),
                 'reason' => $reason,
+                'count' => null,
             ];
         }
+
+        $watchlistCount = max(0, (int) ($watchlist['count'] ?? 0));
+        $watchlistObserved = $watchlistCount > 0 && is_string($watchlist['last_checked_at'] ?? null)
+            ? $this->parseDatabaseTimestamp($watchlist['last_checked_at'], $timezone, $clock)
+            : null;
+        $items[] = [
+            'key' => 'watchlist',
+            'label' => 'Concorrentes',
+            'available' => $watchlistCount > 0,
+            'source' => $watchlistCount > 0 ? 'items_multiget' : null,
+            'observed_at' => $watchlistObserved?->format('Y-m-d\TH:i:sP'),
+            'reason' => $watchlistCount > 0 ? null : 'watchlist_empty',
+            'count' => $watchlistCount,
+        ];
 
         return [
             'consolidated_at' => $consolidated?->format('Y-m-d\TH:i:sP'),
