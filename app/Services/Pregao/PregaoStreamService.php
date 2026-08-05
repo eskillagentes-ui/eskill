@@ -33,11 +33,28 @@ LUA;
         'metric.update', 'op', 'qa.status', 'sale',
     ];
 
+    private ?PregaoQaProof $qaProof;
+    private ?PregaoQaRunService $qaRuns;
+
+    public function __construct(?PregaoQaProof $qaProof = null, ?PregaoQaRunService $qaRuns = null)
+    {
+        $this->qaProof = $qaProof ?? PregaoQaProof::fromEnvironment();
+        $this->qaRuns = $qaRuns;
+        if ($this->qaRuns === null && $this->qaProof !== null) {
+            try {
+                $this->qaRuns = new PregaoQaRunService(PregaoQaRunService::connectRedis(), $this->qaProof);
+            } catch (Throwable) {
+                $this->qaRuns = null;
+            }
+        }
+    }
+
     /** @param array<string, mixed> $event */
     public static function isEventAllowedForAccount(
         array $event,
         int $accountId,
-        ?PregaoQaProof $qaProof = null
+        ?PregaoQaProof $qaProof = null,
+        ?PregaoQaRunService $qaRuns = null
     ): bool
     {
         if ($accountId <= 0) {
@@ -70,7 +87,9 @@ LUA;
         }
         if ($type === 'qa.status') {
             $qaProof = $qaProof ?? PregaoQaProof::fromEnvironment();
-            return $qaProof !== null && $qaProof->verifyStatus($event['payload'], $accountId);
+            return $qaProof !== null
+                && $qaRuns !== null
+                && $qaRuns->isStatusAuthoritative($event['payload'], $accountId);
         }
         return true;
     }
@@ -156,7 +175,12 @@ LUA;
                     if (!is_array($event)) {
                         return;
                     }
-                    if ($accountId === null || !self::isEventAllowedForAccount($event, $accountId)) {
+                    if ($accountId === null || !self::isEventAllowedForAccount(
+                        $event,
+                        $accountId,
+                        $this->qaProof,
+                        $this->qaRuns
+                    )) {
                         return;
                     }
                     echo 'id: ' . md5($message) . "\n";

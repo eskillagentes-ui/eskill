@@ -8,11 +8,16 @@ final class PregaoQaStatusProducer
 {
     private PregaoEmitService $emitter;
     private PregaoQaProof $proof;
+    private PregaoQaRunService $runs;
 
-    public function __construct(PregaoEmitService $emitter, PregaoQaProof $proof)
-    {
+    public function __construct(
+        PregaoEmitService $emitter,
+        PregaoQaProof $proof,
+        PregaoQaRunService $runs
+    ) {
         $this->emitter = $emitter;
         $this->proof = $proof;
+        $this->runs = $runs;
     }
 
     /**
@@ -22,21 +27,20 @@ final class PregaoQaStatusProducer
      */
     public function emit(array $manifest, array $protocol): array
     {
+        $expiresAt = strtotime((string) ($manifest['expires_at'] ?? ''));
+        $observedAt = strtotime((string) ($protocol['observed_at'] ?? ''));
         if (!$this->proof->verifyManifest($manifest)
-            || strtotime((string) $manifest['expires_at']) < time()
+            || $expiresAt === false
+            || $observedAt === false
+            || $observedAt > $expiresAt
             || ($protocol['run_id'] ?? null) !== $manifest['run_id']
         ) {
             throw new \InvalidArgumentException('Manifesto QA inválido ou expirado');
         }
-        $encoded = json_encode($protocol, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-        $validated = PregaoQaWorkerProtocol::decode(
-            $encoded,
-            $manifest['run_id'],
-            is_int($protocol['sequence'] ?? null) ? $protocol['sequence'] - 1 : -2
-        );
-        if ($validated === null) {
-            throw new \InvalidArgumentException('Protocolo QA inválido');
+        if (!$this->runs->protocolMatchesPersistedState($manifest, $protocol)) {
+            throw new \InvalidArgumentException('Protocolo QA sem progressão durável correspondente');
         }
+        $validated = $protocol;
         $frameUrl = $validated['screenshot'] === 'latest.png'
             ? '/qa/frame/' . $manifest['run_id']
             : null;
@@ -55,6 +59,62 @@ final class PregaoQaStatusProducer
             'started_at' => $manifest['created_at'],
             'manifest_hash' => $manifest['manifest_hash'],
         ], $manifest['account_id']);
-        return $this->emitter->emitTrustedQaStatus($payload, $manifest['account_id'], $this->proof);
+        $receipt = $this->runs->receiptForStatus($payload, (int) $manifest['account_id']);
+        if ($receipt !== null) {
+            return $this->eventFromReceipt($payload, (int) $manifest['account_id'], $receipt);
+        }
+        $emitted = $this->emitter->emitTrustedQaStatusWithReceipt(
+            $payload,
+            (int) $manifest['account_id'],
+            $this->proof
+        );
+        if (!$this->runs->confirmEvidence($manifest, $payload, $emitted['event_id'], $emitted['event']['ts'])) {
+            throw new \RuntimeException('Falha ao confirmar evidência QA');
+        }
+        return $emitted['event'];
+    }
+
+    /** @param array<string,mixed> $manifest @param array<string,mixed> $state */
+    public function repairEvidence(array $manifest, array $state): bool
+    {
+        if (!in_array($state['status'] ?? null, ['passed', 'failed', 'blocked'], true)) {
+            return false;
+        }
+        $screenshotUrl = $state['screenshot_url'] ?? null;
+        if ($screenshotUrl !== null && $screenshotUrl !== '/qa/frame/' . ($manifest['run_id'] ?? '')) {
+            return false;
+        }
+        $protocol = [
+            'run_id' => $state['run_id'] ?? null,
+            'sequence' => $state['sequence'] ?? null,
+            'step' => $state['step'] ?? null,
+            'result' => $state['status'],
+            'screenshot' => $screenshotUrl === null ? null : 'latest.png',
+            'cursor' => $state['cursor'] ?? null,
+            'observed_at' => $state['observed_at'] ?? null,
+        ];
+        try {
+            $this->emit($manifest, $protocol);
+            return true;
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @param array<string,mixed> $receipt
+     * @return array<string,mixed>
+     */
+    private function eventFromReceipt(array $payload, int $accountId, array $receipt): array
+    {
+        return [
+            'v' => PregaoEmitService::VERSION,
+            'type' => 'qa.status',
+            'ts' => $receipt['event_ts'],
+            'payload' => $payload,
+            'source' => 'live',
+            'account_id' => $accountId,
+        ];
     }
 }

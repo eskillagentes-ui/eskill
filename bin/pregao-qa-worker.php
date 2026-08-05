@@ -38,9 +38,12 @@ if (!in_array($baseScheme, ['http', 'https'], true)
 
 $redis = PregaoQaRunService::connectRedis();
 $runs = new PregaoQaRunService($redis, $proof);
+$producer = new PregaoQaStatusProducer(new PregaoEmitService(null, $redis), $proof, $runs);
 $privateRoot = $root . '/storage/private/pregao-qa';
 PregaoQaRunService::purgeExpiredFrames($privateRoot);
-$runs->recoverPending();
+$runs->recoverPending(
+    static fn (array $manifest, array $state): bool => $producer->repairEvidence($manifest, $state)
+);
 $claim = $runs->claimNext();
 if ($claim === null) {
     exit(0);
@@ -54,7 +57,6 @@ $sessionPrefix = (string) ($_ENV['PREGAO_QA_SESSION_PREFIX'] ?? 'PHPREDIS_SESSIO
 $sessions = new PregaoQaSessionService($redis, $sessionPrefix);
 $sessionId = '';
 $process = null;
-$producer = new PregaoQaStatusProducer(new PregaoEmitService(null, $redis), $proof);
 $previousSequence = 0;
 $previousResult = null;
 $terminalResult = null;

@@ -137,11 +137,20 @@ final class PregaoQaProof
         $running = $status['result'] === 'running';
         return [
             'trusted' => true,
+            'executed' => true,
+            'running' => $running,
+            'suite' => $status['suite'],
+            'test' => $status['test'],
+            'video_url' => $status['video_url'],
+            'stream_url' => $status['stream_url'],
             'run_id' => $status['run_id'],
+            'sequence' => $status['sequence'],
             'status' => $status['result'],
             'step' => $status['step'],
+            'observed_at' => $status['observed_at'],
             'elapsed_ms' => ($observed - $started) * 1000,
             'result' => $running ? null : $status['result'],
+            'log' => [],
         ];
     }
 
