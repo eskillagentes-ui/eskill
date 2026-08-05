@@ -143,7 +143,9 @@ final class PregaoEmitService
             if ($validatedQa === null) {
                 throw new \InvalidArgumentException('Payload qa.status inválido');
             }
-            $payload = $validatedQa;
+            throw new \RuntimeException(
+                'qa.status bloqueado: produtor confiável com evidência verificável não configurado'
+            );
         }
 
         $source = $source === 'seed' ? 'seed' : 'live';

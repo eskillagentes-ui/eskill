@@ -89,6 +89,25 @@ final class PregaoStreamServiceAgentEventFilterTest extends TestCase
         self::assertFalse(PregaoStreamService::isEventAllowedForAccount($invalidDelta, 1335));
     }
 
+    public function testQaStatusNaoFazFanoutSemProdutorConfiavel(): void
+    {
+        $event = [
+            'v' => 2,
+            'type' => 'qa.status',
+            'ts' => (new \DateTimeImmutable())->format(DATE_ATOM),
+            'payload' => [
+                'running' => false,
+                'suite' => 'smoke',
+                'test' => 'login',
+                'result' => 'passed',
+            ],
+            'source' => 'live',
+            'account_id' => 1335,
+        ];
+
+        self::assertFalse(PregaoStreamService::isEventAllowedForAccount($event, 1335));
+    }
+
     public function testGatewayWebSocketUsaOFiltroCanonico(): void
     {
         $source = file_get_contents(dirname(__DIR__, 4) . '/bin/pregao-ws-gateway.php');

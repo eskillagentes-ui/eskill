@@ -810,6 +810,23 @@ test('QA limpa mídia anterior e rejeita URLs fora dos caminhos permitidos', asy
     assert.strictEqual(element('qaStream').hidden, true);
 });
 
+test('QA realtime é ignorado enquanto não existe produtor confiável', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        qa: { executed: false, running: false, result: null, video_url: null, stream_url: null, log: [] }
+    });
+
+    sandbox.window.__pregaoTest.handleEvent({
+        type: 'qa.status',
+        payload: { running: false, suite: 'smoke', test: 'login', result: 'passed' }
+    });
+
+    assert.strictEqual(element('qaLive').textContent, 'NÃO EXECUTADO');
+    assert.strictEqual(element('qalog').textContent, '▶ não executado');
+});
+
 test('semáforos são nomeados como Saúde da conta e Sentinela operacional', async () => {
     await runSnapshot({
         server_ts: '2026-08-04T12:00:00-03:00',

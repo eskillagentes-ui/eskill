@@ -80,7 +80,7 @@ class PregaoEmitServiceTest extends TestCase
         }
     }
 
-    public function testQaStatusValidatorAceitaSomenteContratoSeguro(): void
+    public function testQaStatusBemFormadoContinuaBloqueadoSemProdutorConfiavel(): void
     {
         $payload = [
             'running' => false,
@@ -90,10 +90,12 @@ class PregaoEmitServiceTest extends TestCase
             'video_url' => '/storage/qa/run-1.mp4',
         ];
 
-        self::assertSame(
-            $payload + ['stream_url' => null],
-            PregaoEmitService::validateQaStatusPayload($payload)
-        );
+        self::assertSame($payload + ['stream_url' => null], PregaoEmitService::validateQaStatusPayload($payload));
+
+        $service = new PregaoEmitService($this->createMock(PDO::class), $this->createMock(Redis::class));
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('produtor confiável');
+        $service->emit('qa.status', $payload, 1335);
     }
 
     public function testFalhaDeConexaoRedisNaoExpoeMensagemBrutaNoLog(): void

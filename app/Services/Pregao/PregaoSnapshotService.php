@@ -423,56 +423,9 @@ final class PregaoSnapshotService
      */
     private function loadLatestQa(int $accountId): array
     {
-        $seedOn = (bool) ($this->config['seed_enabled'] ?? false);
-        $hasSource = $this->columnExists('pregao_events', 'source');
-        $sourceFilter = ($hasSource && !$seedOn) ? " AND source <> 'seed'" : '';
-
-        $stmt = $this->db->prepare(
-            "SELECT payload, ts FROM pregao_events
-             WHERE type = ? AND account_id = ?{$sourceFilter}
-             ORDER BY ts DESC LIMIT 1"
-        );
-        $stmt->execute(['qa.status', $accountId]);
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$row) {
-            // Sem qa.status real: declara "não executado" — nunca inventa resultado/log.
-            return $this->emptyQaState();
-        }
-        $payload = PregaoEmitService::validateQaStatusPayload($row['payload'] ?? null);
-        if ($payload === null) {
-            return $this->emptyQaState();
-        }
-
-        $logStmt = $this->db->prepare(
-            "SELECT payload, ts FROM pregao_events
-             WHERE type = ? AND account_id = ?{$sourceFilter}
-             ORDER BY ts DESC LIMIT 12"
-        );
-        $logStmt->execute(['qa.status', $accountId]);
-        $log = [];
-        foreach ($logStmt->fetchAll(PDO::FETCH_ASSOC) as $lr) {
-            $p = PregaoEmitService::validateQaStatusPayload($lr['payload'] ?? null);
-            if ($p === null) {
-                continue;
-            }
-            $log[] = [
-                'ts' => $this->mysqlToIso((string) $lr['ts']),
-                'test' => $p['test'],
-                'result' => $p['result'],
-                'suite' => $p['suite'],
-            ];
-        }
-
-        return [
-            'executed' => true,
-            'running' => $payload['running'],
-            'suite' => $payload['suite'],
-            'test' => $payload['test'],
-            'result' => $payload['result'],
-            'video_url' => $payload['video_url'],
-            'stream_url' => $payload['stream_url'],
-            'log' => $log,
-        ];
+        // Uma linha qa.status isolada não comprova que um comando foi executado.
+        // Até existir produtor autenticado com evidência verificável, falha fechado.
+        return $this->emptyQaState();
     }
 
     /** @return array{executed:false,running:false,suite:null,test:null,result:null,video_url:null,stream_url:null,log:array{}} */

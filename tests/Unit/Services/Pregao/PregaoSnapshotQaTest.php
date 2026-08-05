@@ -65,7 +65,7 @@ final class PregaoSnapshotQaTest extends TestCase
         self::assertSame([], $qa['log'], 'nenhum log artificial deve ser criado');
     }
 
-    public function testComEventoQaStatusRealMarcaExecutedTrue(): void
+    public function testLinhaQaBemFormadaNaoProvaExecucaoSemProdutorConfiavel(): void
     {
         $db = $this->makeDb();
         $payload = [
@@ -79,11 +79,11 @@ final class PregaoSnapshotQaTest extends TestCase
 
         $qa = $this->loadLatestQa($db, 1335);
 
-        self::assertTrue($qa['executed'], 'evento real registrado deve marcar executed=true');
-        self::assertSame('passed', $qa['result']);
-        self::assertSame('smoke', $qa['suite']);
-        self::assertSame('/qa/stream/session-1', $qa['stream_url']);
-        self::assertCount(1, $qa['log']);
+        self::assertFalse($qa['executed'], 'linha persistida isolada não deve provar execução');
+        self::assertNull($qa['result']);
+        self::assertNull($qa['suite']);
+        self::assertNull($qa['stream_url']);
+        self::assertSame([], $qa['log']);
     }
 
     public function testPayloadQaVazioMalformadoOuComCampoExtraFalhaFechado(): void

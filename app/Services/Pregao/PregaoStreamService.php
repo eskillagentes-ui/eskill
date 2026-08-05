@@ -64,6 +64,10 @@ LUA;
         if ($type === 'keyword.rank') {
             return PregaoEmitService::isKeywordRankPayloadValid($event['payload']);
         }
+        if ($type === 'qa.status') {
+            // Não propaga QA até existir produtor autenticado com evidência verificável.
+            return false;
+        }
         return true;
     }
 

@@ -970,6 +970,7 @@
                 );
         }
         if (type === 'keyword.rank') return isValidKeywordRankPayload(payload);
+        if (type === 'qa.status') return false;
         return true;
     }
 
