@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './helpers/mutation-guard';
 
 /**
  * Mercado Livre Integration — E2E

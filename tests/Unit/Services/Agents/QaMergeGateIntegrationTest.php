@@ -1,0 +1,56 @@
+<?php
+
+declare(strict_types=1);
+
+namespace Tests\Unit\Services\Agents;
+
+use App\Services\Agents\AgentContext;
+use App\Services\Agents\AgentResult;
+use App\Services\Agents\QaAgent;
+use App\Services\Agents\QaMergeGate;
+use PHPUnit\Framework\TestCase;
+use RuntimeException;
+
+/**
+ * @covers \App\Services\Agents\QaAgent
+ * @covers \App\Services\Agents\QaMergeGate
+ */
+final class QaMergeGateIntegrationTest extends TestCase
+{
+    public function testResultadoQaFabricadoNaoSatisfazGateSemEvidenciaDoProcesso(): void
+    {
+        $variables = [
+            'QA_GATE_PHP_LINT',
+            'QA_GATE_PHPUNIT_AGENTS',
+            'QA_GATE_PHPUNIT_UNIT',
+            'QA_GATE_PLAYWRIGHT_READONLY',
+        ];
+        $original = [];
+        foreach ($variables as $variable) {
+            $original[$variable] = getenv($variable);
+            putenv($variable);
+        }
+
+        try {
+            $checks = [];
+            foreach (QaMergeGate::REQUIRED_CHECK_IDS as $id) {
+                $checks[$id] = static fn (AgentContext $context): AgentResult => AgentResult::success(
+                    $id,
+                    'forged_success'
+                );
+            }
+            $forgedQaResult = (new QaAgent($checks))->run(
+                new AgentContext(1, 'local', 'qa-forgery-test', false)
+            );
+            self::assertSame('success', $forgedQaResult->status());
+
+            $this->expectException(RuntimeException::class);
+            $this->expectExceptionMessage('qa_merge_gate_rejected');
+            (new QaMergeGate())->assertPasses();
+        } finally {
+            foreach ($original as $variable => $value) {
+                putenv($value === false ? $variable : $variable . '=' . $value);
+            }
+        }
+    }
+}

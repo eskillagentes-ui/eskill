@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './helpers/mutation-guard';
 import { requireMutationAllowed } from './helpers/mutation-guard';
 
 requireMutationAllowed('render.spec');

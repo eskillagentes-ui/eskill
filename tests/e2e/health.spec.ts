@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './helpers/mutation-guard';
 
 test.describe('Health Check', () => {
     test('should respond to health endpoint', async ({ request }) => {

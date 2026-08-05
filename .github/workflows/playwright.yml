@@ -101,6 +101,12 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Ensure Playwright executable bit is set
+        # Bug mitigacao: install via npm como root omite +x em
+        # node_modules/@playwright/test/cli.js, gerando 'sh: 1: playwright:
+        # Permission denied' no PATH lookup. Restaurar aqui e idempotente.
+        run: chmod +x node_modules/.bin/playwright node_modules/@playwright/test/cli.js
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium
 
@@ -213,6 +219,12 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Ensure Playwright executable bit is set
+        # Bug mitigacao: install via npm como root omite +x em
+        # node_modules/@playwright/test/cli.js, gerando 'sh: 1: playwright:
+        # Permission denied' no PATH lookup. Restaurar aqui e idempotente.
+        run: chmod +x node_modules/.bin/playwright node_modules/@playwright/test/cli.js
+
       - name: Install Playwright browsers
         run: npx playwright install --with-deps ${{ matrix.project }}
 
@@ -258,47 +270,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: playwright-full-${{ matrix.project }}
-          path: |
-            playwright-report
-            test-results
-          retention-days: 14
-
-  # Validação contra produção real (https://eskill.com.br). Não roda automaticamente:
-  # só via "Run workflow" manual, com PROD_EMAIL/PROD_PASSWORD configurados como secrets.
-  production-validation:
-    name: Production Validation (manual)
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    timeout-minutes: 20
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: npm
-
-      - name: Install Node dependencies
-        run: npm ci
-
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps chromium
-
-      - name: Run production validation
-        run: npx playwright test production-validation --project=chromium
-        env:
-          CI: true
-          RUN_PROD_VALIDATION: '1'
-          PLAYWRIGHT_SKIP_WEBSERVER: '1'
-          PROD_EMAIL: ${{ secrets.PROD_EMAIL }}
-          PROD_PASSWORD: ${{ secrets.PROD_PASSWORD }}
-
-      - name: Upload Playwright artifacts (Production)
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: playwright-production-validation
           path: |
             playwright-report
             test-results

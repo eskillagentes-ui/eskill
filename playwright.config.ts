@@ -1,4 +1,5 @@
 import { defineConfig, devices } from '@playwright/test';
+import { assertSafePlaywrightTarget } from './tests/e2e/helpers/mutation-guard';
 
 /**
  * Read environment variables from file.
@@ -10,47 +11,30 @@ import { defineConfig, devices } from '@playwright/test';
 
 const PORT = process.env.PLAYWRIGHT_PORT || '8080';
 const BASE_URL = process.env.PLAYWRIGHT_BASE_URL || `http://127.0.0.1:${PORT}`;
+assertSafePlaywrightTarget(BASE_URL);
 
 /**
- * production-validation.spec.ts roda contra https://eskill.com.br real e exige
- * credenciais dedicadas (PROD_EMAIL/PROD_PASSWORD). Fica de fora do pipeline
- * padrão (PR/full) e só é executado quando RUN_PROD_VALIDATION=1.
+ * production-validation.spec.ts usa URLs absolutas de produção e permanece
+ * desabilitado em todos os projetos. Produção aceita somente auditoria manual
+ * read-only fora deste harness mutante.
  */
-const runProdValidation = process.env.RUN_PROD_VALIDATION === '1';
 
-/**
- * Subconjunto seguro (npm run test:e2e:readonly): exclui os 6 specs com
- * POST/DELETE (31 pontos mutantes) — seo, render, exports, ai-center,
- * functional_ai_mcp, production-validation. Use em produção / fora de staging.
- */
+/** Sem autorização mutante, somente specs explicitamente auditados são coletados. */
 const e2eReadonly = process.env.E2E_READONLY === '1';
-const mutatingSpecs = [
-  '**/seo.spec.ts',
-  '**/render.spec.ts',
-  '**/exports.spec.ts',
-  '**/ai-center.spec.ts',
-  '**/functional_ai_mcp.spec.ts',
-  '**/production-validation.spec.ts',
+const mutationAllowed = process.env.E2E_ALLOW_MUTATION === 'true';
+const READONLY_SPEC_ALLOWLIST = [
+  'mutation-guard.spec.ts',
+  'pregao-overflow.spec.ts',
 ];
-
-const testIgnore: string[] = [];
-if (!runProdValidation) {
-  testIgnore.push('**/production-validation.spec.ts');
-}
-if (e2eReadonly) {
-  for (const pattern of mutatingSpecs) {
-    if (!testIgnore.includes(pattern)) {
-      testIgnore.push(pattern);
-    }
-  }
-}
+const testMatch = e2eReadonly || !mutationAllowed ? READONLY_SPEC_ALLOWLIST : undefined;
 
 /**
  * See https://playwright.dev/docs/test-configuration.
  */
 export default defineConfig({
   testDir: './tests/e2e',
-  testIgnore: testIgnore.length > 0 ? testIgnore : undefined,
+  testMatch,
+  testIgnore: ['**/production-validation.spec.ts'],
   /* Run tests in files in parallel */
   fullyParallel: true,
   /* Fail the build on CI if you accidentally left test.only in the source code. */
@@ -63,8 +47,10 @@ export default defineConfig({
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
   use: {
-    /* Base URL to use in actions like `await page.goto('/login')`. */
+    /* Base URL to use in actions like await page.goto('/login'). */
     baseURL: BASE_URL,
+    /* Service workers poderiam escapar da interceptação context.route. */
+    serviceWorkers: 'block',
 
     /* Collect trace when retrying the failed test. See https://playwright.dev/docs/trace-viewer */
     trace: 'on-first-retry',
@@ -87,7 +73,7 @@ export default defineConfig({
       name: 'webkit',
       use: { ...devices['Desktop Safari'] },
     },
-    /** Tag @readonly — npm run test:e2e:readonly (E2E_READONLY=1 já ignora mutantes) */
+    /** Tag @readonly — npm run test:e2e:readonly executa somente casos auditados. */
     {
       name: 'readonly',
       use: { ...devices['Desktop Chrome'] },

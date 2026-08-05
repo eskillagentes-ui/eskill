@@ -2,7 +2,7 @@
  * Fixture visual do Pregão — overflow horizontal em 380×844.
  * Carrega CSS real; falha se scrollWidth > clientWidth no root.
  */
-import { test, expect } from '@playwright/test';
+import { test, expect } from './helpers/mutation-guard';
 import path from 'path';
 import fs from 'fs';
 

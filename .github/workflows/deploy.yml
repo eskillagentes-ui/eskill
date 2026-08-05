@@ -29,6 +29,12 @@ jobs:
       with:
         # composer.lock exige PHP ^8.4 (doctrine/instantiator 2.1.0).
         php-version: '8.4'
+
+    - name: Setup Node.js for QA gate
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+        cache: 'npm'
     
     - name: Install Dependencies (with dev, for tests)
       # phpunit é dependência dev-only: precisa estar presente para o passo de
@@ -56,7 +62,17 @@ jobs:
           echo "DB_PASS=root"
         } >> .env
         cp .env .env.testing
+        find app/ -name "*.php" -print0 | xargs -0 -n1 php -l
         ./vendor/bin/phpunit --testsuite Unit
+        ./vendor/bin/phpunit tests/Unit/Services/Agents
+        npm ci --ignore-scripts
+        npx playwright install --with-deps chromium
+        npm run test:e2e:readonly
+        QA_GATE_PHP_LINT=passed \
+        QA_GATE_PHPUNIT_AGENTS=passed \
+        QA_GATE_PHPUNIT_UNIT=passed \
+        QA_GATE_PLAYWRIGHT_READONLY=passed \
+          php bin/qa-merge-gate.php
 
     - name: Install Dependencies (production, no-dev)
       if: success()
