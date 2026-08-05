@@ -80,6 +80,7 @@
             <file>tests/Unit/Services/CloneHealthMonitorServiceTest.php</file>
             <file>tests/Unit/Services/CloneSyncServiceTest.php</file>
             <file>tests/Unit/Services/OrderServiceTest.php</file>
+            <file>tests/Unit/Services/JobServiceRunAgentStatusTest.php</file>
             <file>tests/Unit/Services/MercadoLivreWebhookServiceTest.php</file>
             <file>tests/Unit/Services/ClawdbotWebhookServiceTest.php</file>
             <file>tests/Unit/Services/MercadoLivreWebhookReplayServiceTest.php</file>
