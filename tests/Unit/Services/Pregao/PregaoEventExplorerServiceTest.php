@@ -207,14 +207,19 @@ final class PregaoEventExplorerServiceTest extends TestCase
         $result = $this->makeService($db)->list(1335);
         $message = $result['events'][0]['payload']['msg'];
 
-        self::assertStringNotContainsString('TOP_SECRET_MARKER', $message);
-        self::assertStringNotContainsString('dXNlcjpwYXNz', $message);
-        self::assertStringNotContainsString('CLIENT SECRET MARKER', $message);
-        self::assertStringNotContainsString('ID TOKEN MARKER', $message);
-        self::assertStringNotContainsString('PRIVATE TOKEN MARKER', $message);
-        self::assertStringNotContainsString('ESCAPED SECRET MARKER', $message);
-        self::assertLessThanOrEqual(500, strlen($message));
-        self::assertStringContainsString('[REDACTED]', $message);
+        self::assertSame('[REDACTED]', $message, 'campo com credencial deve ser ocultado por inteiro');
+    }
+
+    public function testPayloadLimitaCampoLivreSemCredencial(): void
+    {
+        $db = $this->makeDb();
+        $this->insertEvent($db, 1335, 'op', '2026-08-04 10:00:00', [
+            'msg' => str_repeat('x', 700),
+        ]);
+
+        $result = $this->makeService($db)->list(1335);
+
+        self::assertSame(500, strlen($result['events'][0]['payload']['msg']));
     }
 
     public function testAgentStatusReutilizaValidacaoExistente(): void

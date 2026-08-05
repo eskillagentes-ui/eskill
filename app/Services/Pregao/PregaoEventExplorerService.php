@@ -271,24 +271,15 @@ final class PregaoEventExplorerService
             return '[INVALID TEXT]';
         }
 
-        $secretValue = '(?:"(?:\\\\.|[^"\\\\])*"|\'(?:\\\\.|[^\'\\\\])*\'|[^\s,;]+)';
         $secretKey = '(?:authorization|api[_-]?key|(?:[a-z0-9]+[_-])*(?:token|secret|password))';
-        $redacted = preg_replace(
-            '/\bAuthorization\s*:\s*(?:Basic|Bearer)\s+' . $secretValue . '/iu',
-            'Authorization: [REDACTED]',
-            $value
-        );
-        $redacted = preg_replace(
-            '/\b(?:Basic|Bearer)\s+' . $secretValue . '/iu',
-            '[REDACTED]',
-            $redacted ?? ''
-        );
-        $redacted = preg_replace(
-            '/\b(' . $secretKey . ')\s*[:=]\s*' . $secretValue . '/iu',
-            '$1=[REDACTED]',
-            $redacted ?? ''
-        );
-        $redacted ??= '';
+        if (preg_match('/\b' . $secretKey . '\s*[:=]/iu', $value) === 1
+            || preg_match('/\bAuthorization\s*:/iu', $value) === 1
+            || preg_match('/\b(?:Basic|Bearer)\s+\S/iu', $value) === 1
+        ) {
+            return '[REDACTED]';
+        }
+
+        $redacted = $value;
 
         if (strlen($redacted) <= self::MAX_PAYLOAD_STRING_BYTES) {
             return $redacted;
