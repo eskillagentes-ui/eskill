@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit;
 
+use InvalidArgumentException;
 use Tests\TestCase;
 use App\Core\Request;
 
@@ -33,6 +34,15 @@ class RequestTest extends TestCase
 
         $this->assertNull($req->get('nonexistent'));
         $this->assertSame('fallback', $req->get('nonexistent', 'fallback'));
+    }
+
+    public function testGetRejectsArrayInputInsteadOfRaisingTypeError(): void
+    {
+        $_GET['page'] = ['2'];
+        $req = new Request();
+
+        $this->expectException(InvalidArgumentException::class);
+        $req->get('page');
     }
 
     public function testGetIntCastsToInteger(): void

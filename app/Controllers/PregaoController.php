@@ -109,14 +109,14 @@ class PregaoController extends BaseController
             return;
         }
 
-        $accountId = $this->resolveAccountId();
-        if ($accountId === null) {
-            http_response_code(403);
-            echo json_encode(['success' => false, 'error' => 'Conta indisponível', 'data' => null]);
-            return;
-        }
-
         try {
+            $accountId = $this->resolveAccountId();
+            if ($accountId === null) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'error' => 'Conta indisponível', 'data' => null]);
+                return;
+            }
+
             $service = new PregaoEventExplorerService();
             $data = $service->list($accountId, [
                 'type' => $this->request->get('type'),

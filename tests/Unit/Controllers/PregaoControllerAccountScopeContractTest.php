@@ -46,4 +46,22 @@ final class PregaoControllerAccountScopeContractTest extends TestCase
             strpos($streamSource, 'if ($accountId === null)')
         );
     }
+
+    public function testEventsIncluiResolucaoDaContaNoBoundaryDeFiltroInvalido(): void
+    {
+        $source = file_get_contents(__DIR__ . '/../../../app/Controllers/PregaoController.php');
+        self::assertIsString($source);
+
+        $eventsStart = strpos($source, 'public function events(): void');
+        $eventsEnd = strpos($source, 'public function stream(): void', $eventsStart);
+        self::assertIsInt($eventsStart);
+        self::assertIsInt($eventsEnd);
+        $events = substr($source, $eventsStart, $eventsEnd - $eventsStart);
+
+        self::assertLessThan(
+            strpos($events, '$this->resolveAccountId()'),
+            strpos($events, 'try {')
+        );
+        self::assertStringContainsString('catch (\\InvalidArgumentException)', $events);
+    }
 }

@@ -76,6 +76,27 @@ final class PregaoEventExplorerServiceTest extends TestCase
         self::assertSame(100, $result['pagination']['per_page']);
     }
 
+    /**
+     * @dataProvider invalidPaginationProvider
+     * @param array<string, mixed> $filters
+     */
+    public function testPaginacaoInvalidaFalhaFechado(array $filters): void
+    {
+        $this->expectException(InvalidArgumentException::class);
+        $this->makeService($this->makeDb())->list(1335, $filters);
+    }
+
+    /** @return array<string, array{array<string, mixed>}> */
+    public static function invalidPaginationProvider(): array
+    {
+        return [
+            'page texto' => [['page' => 'abc']],
+            'page array' => [['page' => ['2']]],
+            'per_page texto' => [['per_page' => 'abc']],
+            'per_page array' => [['per_page' => ['25']]],
+        ];
+    }
+
     public function testPaginacaoServerSideComMetadados(): void
     {
         $db = $this->makeDb();
@@ -174,6 +195,22 @@ final class PregaoEventExplorerServiceTest extends TestCase
         self::assertStringNotContainsString('stream_url', $json);
         self::assertStringNotContainsString('token', $json);
         self::assertStringNotContainsString('pergunta privada', $json);
+    }
+
+    public function testPayloadRedigeCredenciaisELimitaCamposLivres(): void
+    {
+        $db = $this->makeDb();
+        $this->insertEvent($db, 1335, 'op', '2026-08-04 10:00:00', [
+            'msg' => 'Authorization: Bearer TOP_SECRET_MARKER token=abc123 ' . str_repeat('x', 700),
+        ]);
+
+        $result = $this->makeService($db)->list(1335);
+        $message = $result['events'][0]['payload']['msg'];
+
+        self::assertStringNotContainsString('TOP_SECRET_MARKER', $message);
+        self::assertStringNotContainsString('abc123', $message);
+        self::assertLessThanOrEqual(500, strlen($message));
+        self::assertStringContainsString('[REDACTED]', $message);
     }
 
     public function testAgentStatusReutilizaValidacaoExistente(): void

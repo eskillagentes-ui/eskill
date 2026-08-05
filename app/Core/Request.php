@@ -40,6 +40,10 @@ class Request
     public function get(string $key, ?string $default = null): ?string
     {
         $value = $this->query[$key] ?? $default;
+        if ($value !== null && !is_string($value)) {
+            throw new \InvalidArgumentException("Query parameter '{$key}' must be scalar");
+        }
+
         return $value !== null ? $this->sanitizeString($value) : null;
     }
 

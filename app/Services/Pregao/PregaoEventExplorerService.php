@@ -20,6 +20,7 @@ final class PregaoEventExplorerService
 {
     public const MAX_PER_PAGE = 100;
     public const DEFAULT_PER_PAGE = 25;
+    private const MAX_PAYLOAD_STRING_BYTES = 500;
 
     /** @var list<string> */
     private const SOURCES = ['live', 'seed'];
@@ -66,12 +67,15 @@ final class PregaoEventExplorerService
             throw new InvalidArgumentException('Conta inválida para o Event Explorer');
         }
 
-        $page = max(1, (int) ($filters['page'] ?? 1));
-        $perPage = (int) ($filters['per_page'] ?? self::DEFAULT_PER_PAGE);
-        if ($perPage < 1) {
-            $perPage = self::DEFAULT_PER_PAGE;
-        }
-        $perPage = min(self::MAX_PER_PAGE, $perPage);
+        $page = $this->normalizePositiveInteger($filters['page'] ?? null, 1, 'page');
+        $perPage = min(
+            self::MAX_PER_PAGE,
+            $this->normalizePositiveInteger(
+                $filters['per_page'] ?? null,
+                self::DEFAULT_PER_PAGE,
+                'per_page'
+            )
+        );
 
         $type = $this->normalizeType($filters['type'] ?? null);
         $source = $this->normalizeSource($filters['source'] ?? null);
@@ -200,6 +204,28 @@ final class PregaoEventExplorerService
         return $parsed->format('Y-m-d') . ($endOfDay ? ' 23:59:59.999' : ' 00:00:00');
     }
 
+    private function normalizePositiveInteger(mixed $value, int $default, string $field): int
+    {
+        if ($value === null || $value === '') {
+            return $default;
+        }
+
+        if (is_int($value) && $value > 0) {
+            return $value;
+        }
+
+        if (is_string($value)) {
+            $validated = filter_var($value, FILTER_VALIDATE_INT, [
+                'options' => ['min_range' => 1],
+            ]);
+            if (is_int($validated)) {
+                return $validated;
+            }
+        }
+
+        throw new InvalidArgumentException("Filtro {$field} inválido");
+    }
+
     /**
      * @return array<string, mixed>|null
      */
@@ -225,10 +251,41 @@ final class PregaoEventExplorerService
             }
             $value = $payload[$key];
             if ($value === null || is_scalar($value)) {
-                $safe[$key] = $value;
+                $safe[$key] = $this->sanitizePayloadValue($value);
             }
         }
         return $safe;
+    }
+
+    private function sanitizePayloadValue(mixed $value): mixed
+    {
+        if (!is_string($value)) {
+            return $value;
+        }
+
+        if (preg_match('//u', $value) !== 1) {
+            return '[INVALID TEXT]';
+        }
+
+        $redacted = preg_replace(
+            '/\bBearer\s+[A-Za-z0-9._~+\/=:-]+/iu',
+            'Bearer [REDACTED]',
+            $value
+        );
+        $redacted = preg_replace(
+            '/\b(access[_-]?token|refresh[_-]?token|api[_-]?key|authorization|password|secret|token)\s*[:=]\s*[^\s,;]+/iu',
+            '$1=[REDACTED]',
+            $redacted ?? ''
+        );
+        $redacted ??= '';
+
+        if (strlen($redacted) <= self::MAX_PAYLOAD_STRING_BYTES) {
+            return $redacted;
+        }
+
+        return function_exists('mb_strcut')
+            ? mb_strcut($redacted, 0, self::MAX_PAYLOAD_STRING_BYTES, 'UTF-8')
+            : substr($redacted, 0, self::MAX_PAYLOAD_STRING_BYTES);
     }
 
     private function mysqlToIso(string $mysqlTs): ?string
