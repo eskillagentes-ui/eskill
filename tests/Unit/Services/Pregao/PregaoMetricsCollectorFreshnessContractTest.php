@@ -113,4 +113,46 @@ final class PregaoMetricsCollectorFreshnessContractTest extends TestCase
         self::assertIsNumeric($epoch);
         self::assertGreaterThan(0, (int) $epoch);
     }
+
+    public function testColetaHealthCompletaPersisteFreshnessNoSqlite(): void
+    {
+        $db = new PDO('sqlite::memory:');
+        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $db->exec(
+            'CREATE TABLE account_health_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER NOT NULL,
+                overall_score REAL NOT NULL,
+                created_at TEXT NOT NULL
+            )'
+        );
+        $db->exec('CREATE TABLE account_index_metrics (account_id INTEGER PRIMARY KEY, health_medio REAL)');
+        $db->exec(
+            'CREATE TABLE pregao_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER,
+                type TEXT,
+                ts TEXT,
+                payload TEXT
+            )'
+        );
+        $db->exec(
+            "INSERT INTO account_health_history (account_id, overall_score, created_at)
+             VALUES (1335, 82, '2026-08-04 12:00:00')"
+        );
+
+        $collector = new PregaoMetricsCollector($db, null, null, []);
+        $method = new ReflectionMethod(PregaoMetricsCollector::class, 'collectHealth');
+        $method->setAccessible(true);
+        $meta = ['available' => [], 'metrics' => []];
+        $result = $method->invokeArgs($collector, [1335, &$meta]);
+
+        self::assertTrue($result['ok']);
+        self::assertSame(0.82, $result['health_medio']);
+        self::assertTrue($meta['available']['Fh']);
+        self::assertGreaterThan(0, $meta['metrics']['health_medio']['collected_at']);
+        self::assertSame(0.82, (float) $db->query(
+            'SELECT health_medio FROM account_index_metrics WHERE account_id = 1335'
+        )->fetchColumn());
+    }
 }

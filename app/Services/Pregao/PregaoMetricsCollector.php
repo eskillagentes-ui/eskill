@@ -361,11 +361,7 @@ final class PregaoMetricsCollector
             $overall = (float) $row['overall_score'];
             $health = round(max(0.0, min(1.0, $overall / 100.0)), 4);
 
-            $this->db->prepare(
-                'INSERT INTO account_index_metrics (account_id, health_medio)
-                 VALUES (?, ?)
-                 ON DUPLICATE KEY UPDATE health_medio = VALUES(health_medio)'
-            )->execute([$accountId, $health]);
+            $this->db->prepare($this->healthUpsertSql())->execute([$accountId, $health]);
 
             $meta['available']['Fh'] = true;
             $meta['metrics']['health_medio'] = [
@@ -399,6 +395,19 @@ final class PregaoMetricsCollector
             'mysql' => 'UNIX_TIMESTAMP(created_at)',
             'sqlite' => "CAST(strftime('%s', created_at) AS INTEGER)",
             default => throw new \RuntimeException('Driver sem conversão segura de timestamp para health'),
+        };
+    }
+
+    private function healthUpsertSql(): string
+    {
+        return match ((string) $this->db->getAttribute(PDO::ATTR_DRIVER_NAME)) {
+            'mysql' => 'INSERT INTO account_index_metrics (account_id, health_medio)
+                        VALUES (?, ?)
+                        ON DUPLICATE KEY UPDATE health_medio = VALUES(health_medio)',
+            'sqlite' => 'INSERT INTO account_index_metrics (account_id, health_medio)
+                         VALUES (?, ?)
+                         ON CONFLICT(account_id) DO UPDATE SET health_medio = excluded.health_medio',
+            default => throw new \RuntimeException('Driver sem upsert seguro para health'),
         };
     }
 
