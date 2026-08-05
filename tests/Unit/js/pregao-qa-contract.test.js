@@ -67,6 +67,8 @@ test('modo parede remove chrome, amplia leitura e mitiga burn-in sem esconder es
     assert.strictEqual(wall.deriveState({ semaClass: 'sema verde', agentsClass: 'agents-summary is-attention' }), 'warning');
     assert.strictEqual(wall.deriveState({ semaClass: 'sema verde', semaText: 'FALHA NO SNAPSHOT', agentsClass: 'agents-summary is-healthy' }), 'unknown');
     assert.strictEqual(wall.deriveState({ semaClass: 'sema', agentsClass: 'agents-summary is-waiting' }), 'unknown');
+    assert.strictEqual(wall.compactAgents('5/5 reportando · 5 saudáveis'), '5/5 reportando');
+    assert.strictEqual(wall.compactAgents(''), '0/5 reportando');
     assert.strictEqual(wall.isWallRequested('?wall=1'), true);
     assert.strictEqual(wall.isWallRequested('?wall=0'), false);
     assert.deepStrictEqual(wall.burnInOffset(0), { x: -3, y: -2 });
