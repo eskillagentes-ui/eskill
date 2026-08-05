@@ -48,6 +48,7 @@ final class PregaoDataSourceStatusService
     /**
      * @param array<string, mixed> $meta
      * @param array{count?:int,last_checked_at?:string|null}|null $watchlist
+     * @param array<string, string|null> $metricObservedAt
      * @return array{
      *   consolidated_at: string|null,
      *   age_seconds: int|null,
@@ -59,7 +60,8 @@ final class PregaoDataSourceStatusService
         array $meta,
         ?string $metricsUpdatedAt,
         ?DateTimeImmutable $now = null,
-        ?array $watchlist = null
+        ?array $watchlist = null,
+        array $metricObservedAt = []
     ): array {
         $timezone = new DateTimeZone('America/Sao_Paulo');
         $clock = ($now ?? new DateTimeImmutable('now', $timezone))->setTimezone($timezone);
@@ -83,7 +85,11 @@ final class PregaoDataSourceStatusService
             }
 
             $observed = null;
-            if ($available && isset($entry['collected_at']) && is_numeric($entry['collected_at'])) {
+            $specificObservedAt = $metricObservedAt[$definition['meta_key']] ?? null;
+            if ($available && is_string($specificObservedAt)) {
+                $observed = $this->parseObservedTimestamp($specificObservedAt, $timezone, $clock);
+            }
+            if ($observed === null && $available && isset($entry['collected_at']) && is_numeric($entry['collected_at'])) {
                 $observed = (new DateTimeImmutable('@' . (string) ((int) $entry['collected_at'])))
                     ->setTimezone($timezone);
                 if ($observed->getTimestamp() > $clock->getTimestamp() + 60) {
@@ -147,6 +153,28 @@ final class PregaoDataSourceStatusService
             } catch (\Throwable) {
                 return null;
             }
+        }
+        $parsed = $parsed->setTimezone($displayTimezone);
+        if ($parsed->getTimestamp() > $clock->getTimestamp() + 60) {
+            return null;
+        }
+
+        return $parsed;
+    }
+
+    private function parseObservedTimestamp(
+        string $value,
+        DateTimeZone $displayTimezone,
+        DateTimeImmutable $clock
+    ): ?DateTimeImmutable {
+        $value = trim($value);
+        $parsed = DateTimeImmutable::createFromFormat('!Y-m-d\TH:i:sP', $value);
+        $errors = DateTimeImmutable::getLastErrors();
+        if ($parsed === false
+            || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))
+            || $parsed->format('Y-m-d\TH:i:sP') !== $value
+        ) {
+            return null;
         }
         $parsed = $parsed->setTimezone($displayTimezone);
         if ($parsed->getTimestamp() > $clock->getTimestamp() + 60) {

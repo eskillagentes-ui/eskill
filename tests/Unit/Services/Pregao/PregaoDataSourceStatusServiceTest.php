@@ -44,7 +44,13 @@ final class PregaoDataSourceStatusServiceTest extends TestCase
             $meta,
             '2026-08-05 08:27:27',
             $now,
-            ['count' => 0, 'last_checked_at' => null]
+            ['count' => 0, 'last_checked_at' => null],
+            [
+                'vendas_hoje' => '2026-08-05T05:26:01-03:00',
+                'visitas_7d' => '2026-08-05T05:25:02-03:00',
+                'reputacao' => '2026-08-05T05:24:03-03:00',
+                'perguntas_7d' => '2026-08-05T05:23:04-03:00',
+            ]
         );
         $items = array_column($result['items'], null, 'key');
 
@@ -52,9 +58,13 @@ final class PregaoDataSourceStatusServiceTest extends TestCase
         self::assertSame(33, $result['age_seconds']);
         self::assertCount(8, $items);
         self::assertSame('ml_orders', $items['sales']['source']);
+        self::assertSame('2026-08-05T05:26:01-03:00', $items['sales']['observed_at']);
         self::assertTrue($items['ads']['available']);
+        self::assertSame('2026-08-05T05:25:02-03:00', $items['visits']['observed_at']);
         self::assertSame('account_health_history', $items['health']['source']);
         self::assertSame('2026-08-04T20:50:26-03:00', $items['health']['observed_at']);
+        self::assertSame('2026-08-05T05:24:03-03:00', $items['reputation']['observed_at']);
+        self::assertSame('2026-08-05T05:23:04-03:00', $items['questions']['observed_at']);
         self::assertFalse($items['ranks']['available']);
         self::assertSame('rank_tracker_disabled', $items['ranks']['reason']);
         self::assertNull($items['ranks']['observed_at']);
@@ -78,13 +88,16 @@ final class PregaoDataSourceStatusServiceTest extends TestCase
         $result = (new PregaoDataSourceStatusService())->build(
             $meta,
             '2026-08-05 09:00:00',
-            $now
+            $now,
+            null,
+            ['vendas_hoje' => '2099-01-01T00:00:00-03:00']
         );
         $items = array_column($result['items'], null, 'key');
 
         self::assertNull($result['consolidated_at']);
         self::assertNull($result['age_seconds']);
         self::assertNull($items['sales']['source']);
+        self::assertNull($items['sales']['observed_at']);
         self::assertSame('unavailable', $items['ranks']['reason']);
     }
 }

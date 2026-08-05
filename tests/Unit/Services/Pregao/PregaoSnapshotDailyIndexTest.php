@@ -60,7 +60,8 @@ final class PregaoSnapshotDailyIndexTest extends TestCase
                 account_id INTEGER,
                 type TEXT,
                 ts TEXT,
-                payload TEXT
+                payload TEXT,
+                source TEXT DEFAULT \'live\'
             )'
         );
     }
@@ -214,6 +215,81 @@ final class PregaoSnapshotDailyIndexTest extends TestCase
         $source = file_get_contents(dirname(__DIR__, 4) . '/app/Services/Pregao/PregaoSnapshotService.php');
         self::assertIsString($source);
         self::assertStringNotContainsString('account_id IS NULL', $source);
+    }
+
+    public function testObservabilityUsaUltimoEventoRealDeCadaMetrica(): void
+    {
+        $accountId = 83;
+        $timezone = new DateTimeZone('America/Sao_Paulo');
+        $base = new DateTimeImmutable('-10 minutes', $timezone);
+        $meta = json_encode([
+            'available' => ['Fv' => true, 'Fe' => true, 'Fr' => true],
+            'metrics' => [
+                'vendas_hoje' => ['available' => true, 'source' => 'ml_orders'],
+                'visitas_7d' => ['available' => true, 'source' => 'items_visits'],
+                'reputacao' => ['available' => true, 'source' => 'seller_reputation'],
+                'perguntas_7d' => ['available' => true, 'source' => 'ml_api'],
+            ],
+        ], JSON_THROW_ON_ERROR);
+        $this->db->prepare(
+            'INSERT INTO account_index_metrics
+             (account_id, vendas_7d, visitas_7d, health_medio, reputacao_cor, tacos, indice_atual, metrics_meta)
+             VALUES (?, 1, 1, 0, \'verde\', NULL, NULL, ?)'
+        )->execute([$accountId, $meta]);
+        $this->db->prepare(
+            'INSERT INTO account_index_baselines
+             (account_id, vendas_7d_baseline, pos_baseline, visitas_baseline, tacos_baseline)
+             VALUES (?, 1, 1, 1, 1)'
+        )->execute([$accountId]);
+
+        $insert = $this->db->prepare(
+            'INSERT INTO pregao_events (account_id, type, ts, payload, source) VALUES (?, ?, ?, ?, ?)'
+        );
+        $times = [];
+        foreach (
+            [
+                'vendas_hoje' => 0,
+                'visitas_7d' => 1,
+                'reputacao' => 2,
+                'perguntas_7d' => 3,
+            ] as $key => $minutes
+        ) {
+            $time = $base->modify('-' . $minutes . ' minutes');
+            $times[$key] = $time->format('Y-m-d\TH:i:sP');
+            $insert->execute([
+                $accountId,
+                'metric.update',
+                $time->format('Y-m-d H:i:s.000'),
+                json_encode(['key' => $key, 'value' => 1], JSON_THROW_ON_ERROR),
+                'live',
+            ]);
+        }
+        $insert->execute([
+            $accountId,
+            'metric.update',
+            $base->modify('+1 minute')->format('Y-m-d H:i:s.000'),
+            json_encode(['key' => 'vendas_hoje', 'value' => 999], JSON_THROW_ON_ERROR),
+            'seed',
+        ]);
+        $insert->execute([
+            999,
+            'metric.update',
+            $base->modify('+2 minutes')->format('Y-m-d H:i:s.000'),
+            json_encode(['key' => 'vendas_hoje', 'value' => 999], JSON_THROW_ON_ERROR),
+            'live',
+        ]);
+
+        $snapshot = (new PregaoSnapshotService(
+            $this->db,
+            new AccountIndexCalculator(),
+            ['seed_enabled' => false, 'rank_tracker_enabled' => false]
+        ))->getSnapshot($accountId);
+        $items = array_column($snapshot['observability']['items'], null, 'key');
+
+        self::assertSame($times['vendas_hoje'], $items['sales']['observed_at']);
+        self::assertSame($times['visitas_7d'], $items['visits']['observed_at']);
+        self::assertSame($times['reputacao'], $items['reputation']['observed_at']);
+        self::assertSame($times['perguntas_7d'], $items['questions']['observed_at']);
     }
 
     public function testWatermarksComDataImpossivelFalhamFechado(): void

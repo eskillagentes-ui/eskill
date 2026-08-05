@@ -14,6 +14,14 @@ use Throwable;
  */
 final class PregaoSnapshotService
 {
+    /** @var list<string> */
+    private const OBSERVABILITY_METRIC_KEYS = [
+        'vendas_hoje',
+        'visitas_7d',
+        'reputacao',
+        'perguntas_7d',
+    ];
+
     private PDO $db;
     private AccountIndexCalculator $calculator;
     private PregaoAgentStatusService $agentStatusService;
@@ -54,6 +62,7 @@ final class PregaoSnapshotService
             (bool) ($this->config['seed_enabled'] ?? false)
         );
         $watchlist = $this->loadWatchlistStatus($accountId);
+        $metricObservedAt = $this->loadMetricObservedAt($accountId);
         $semaforo = $this->buildSemaforo($metrics, $meta);
 
         $calc = $this->calculator->calculate([
@@ -126,7 +135,8 @@ final class PregaoSnapshotService
                 $meta,
                 isset($metrics['updated_at']) ? (string) $metrics['updated_at'] : null,
                 $now,
-                $watchlist
+                $watchlist,
+                $metricObservedAt
             ),
             'semaforo' => $semaforo,
             'baselines' => $baselines,
@@ -321,6 +331,41 @@ final class PregaoSnapshotService
             ];
         }
         return $out;
+    }
+
+    /** @return array<string, string|null> */
+    private function loadMetricObservedAt(int $accountId): array
+    {
+        $hasSource = $this->columnExists('pregao_events', 'source');
+        $seedOn = (bool) ($this->config['seed_enabled'] ?? false);
+        $sourceFilter = ($hasSource && !$seedOn) ? " AND source <> 'seed'" : '';
+        $driver = (string) $this->db->getAttribute(PDO::ATTR_DRIVER_NAME);
+        $jsonKeyExpression = $driver === 'mysql'
+            ? "JSON_UNQUOTE(JSON_EXTRACT(payload, '$.key'))"
+            : "json_extract(payload, '$.key')";
+        $columns = [];
+        foreach (self::OBSERVABILITY_METRIC_KEYS as $key) {
+            $columns[] = "MAX(CASE WHEN {$jsonKeyExpression} = ? THEN ts END) AS `{$key}`";
+        }
+        $stmt = $this->db->prepare(
+            'SELECT ' . implode(', ', $columns) . '
+             FROM pregao_events
+             WHERE account_id = ?
+               AND type = ?' . $sourceFilter
+        );
+        $params = self::OBSERVABILITY_METRIC_KEYS;
+        $params[] = $accountId;
+        $params[] = 'metric.update';
+        $stmt->execute($params);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $observedAt = [];
+        foreach (self::OBSERVABILITY_METRIC_KEYS as $key) {
+            $observedAt[$key] = is_string($row[$key] ?? null)
+                ? $this->mysqlToIso((string) $row[$key])
+                : null;
+        }
+        return $observedAt;
     }
 
     /**
@@ -647,7 +692,7 @@ final class PregaoSnapshotService
     private function mysqlToIso(string $mysqlTs): ?string
     {
         $timezone = new \DateTimeZone('America/Sao_Paulo');
-        foreach (['Y-m-d H:i:s', 'Y-m-d H:i:s.u'] as $format) {
+        foreach (['Y-m-d H:i:s', 'Y-m-d H:i:s.v', 'Y-m-d H:i:s.u'] as $format) {
             $parsed = \DateTimeImmutable::createFromFormat('!' . $format, $mysqlTs, $timezone);
             $errors = \DateTimeImmutable::getLastErrors();
             if ($parsed !== false
@@ -668,7 +713,7 @@ final class PregaoSnapshotService
     {
         $storageTimezone = new \DateTimeZone('UTC');
         $displayTimezone = new \DateTimeZone('America/Sao_Paulo');
-        foreach (['Y-m-d H:i:s', 'Y-m-d H:i:s.u'] as $format) {
+        foreach (['Y-m-d H:i:s', 'Y-m-d H:i:s.v', 'Y-m-d H:i:s.u'] as $format) {
             $parsed = \DateTimeImmutable::createFromFormat('!' . $format, $mysqlTs, $storageTimezone);
             $errors = \DateTimeImmutable::getLastErrors();
             if ($parsed !== false
