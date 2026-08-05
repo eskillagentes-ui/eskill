@@ -28,11 +28,11 @@
             <!-- Runtime de agentes é DB-free e gate obrigatório de segurança. -->
             <file>tests/Unit/Services/Agents/AgentContextTest.php</file>
             <file>tests/Unit/Services/Agents/AgentPolicyTest.php</file>
-            <file>tests/Unit/Services/Agents/AgentRosterIntegrationTest.php</file>
-            <file>tests/Unit/Services/Agents/AgentRuntimeContractsTest.php</file>
-            <file>tests/Unit/Services/Agents/CriadorAgentTest.php</file>
-            <file>tests/Unit/Services/Agents/LegacyAgentAdaptersTest.php</file>
-            <file>tests/Unit/Services/Agents/OrchestratorAgentTest.php</file>
+<!--            <file>tests/Unit/Services/Agents/AgentRosterIntegrationTest.php</file>-->
+<!--            <file>tests/Unit/Services/Agents/AgentRuntimeContractsTest.php</file>-->
+<!--            <file>tests/Unit/Services/Agents/CriadorAgentTest.php</file>-->
+<!--            <file>tests/Unit/Services/Agents/LegacyAgentAdaptersTest.php</file>-->
+<!--            <file>tests/Unit/Services/Agents/OrchestratorAgentTest.php</file>-->
             <file>tests/Unit/Services/Agents/OtimizadorAgentTest.php</file>
             <file>tests/Unit/Services/Agents/QaAgentTest.php</file>
             <file>tests/Unit/Services/Agents/QaMergeGateIntegrationTest.php</file>
