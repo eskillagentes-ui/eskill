@@ -208,7 +208,7 @@
                 <div class="qa-stage" id="stage">
                     <div id="qaMedia">
                         <div class="qa-idle" id="qaIdle">Aguardando uma execução QA read-only confiável…</div>
-                        <iframe id="qaStream" class="qa-frame" hidden sandbox="" referrerpolicy="no-referrer" title="QA read-only ao vivo"></iframe>
+                        <iframe id="qaStream" class="qa-frame" hidden sandbox="allow-scripts" referrerpolicy="no-referrer" title="QA read-only ao vivo"></iframe>
                     </div>
                     <div class="qa-log" id="qalog">▶ não executado</div>
                 </div>
@@ -219,7 +219,7 @@
     <footer class="pg-foot">ESKILL PREGÃO · read-only · sem escrita no Mercado Livre · ML_WRITE_AUTOMATION intocado</footer>
 </div>
 
-<script>
+<script nonce="<?= htmlspecialchars((string) (defined('CSP_NONCE') ? CSP_NONCE : ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">
     window.PREGAO_BOOT = {
         accountId: <?= (int)($pregaoAccountId ?? 0) ?>,
         snapshotUrl: '/api/pregao/snapshot',

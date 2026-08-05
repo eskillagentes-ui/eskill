@@ -60,9 +60,10 @@ final class PregaoQaWorkerProtocolTest extends TestCase
         self::assertStringContainsString('$sessions->create(', $source);
         self::assertStringContainsString('$sessions->destroy(', $source);
         self::assertStringContainsString('finally', $source);
-        self::assertStringContainsString("['PREGAO_QA_SESSION_COOKIE']", $source);
-        self::assertStringContainsString("['PREGAO_QA_OUTPUT_DIR']", $source);
-        self::assertStringContainsString("['PREGAO_QA_BASE_URL']", $source);
+        self::assertStringContainsString("'PREGAO_QA_SESSION_COOKIE' =>", $source);
+        self::assertStringContainsString("'PREGAO_QA_OUTPUT_DIR' =>", $source);
+        self::assertStringContainsString("'PREGAO_QA_BASE_URL' =>", $source);
+        self::assertStringContainsString('PregaoQaWorkerEnvironment::build', $source);
         self::assertStringContainsString('PREGAO_QA_ALLOW_PRODUCTION_READONLY', $source);
         self::assertStringContainsString('stream_set_timeout($pipes[1], 120)', $source);
         self::assertStringContainsString('$runs->releaseActive(', $source);
