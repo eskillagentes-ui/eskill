@@ -151,14 +151,20 @@ final class PregaoDataSourceStatusService
 
         $value = trim($value);
         $storageTimezone = new DateTimeZone('UTC');
-        $parsed = DateTimeImmutable::createFromFormat('!Y-m-d H:i:s', $value, $storageTimezone);
-        $errors = DateTimeImmutable::getLastErrors();
-        if ($parsed === false || ($errors !== false && ($errors['warning_count'] > 0 || $errors['error_count'] > 0))) {
-            try {
-                $parsed = new DateTimeImmutable($value, $storageTimezone);
-            } catch (\Throwable) {
-                return null;
+        $parsed = null;
+        foreach (['Y-m-d H:i:s', 'Y-m-d H:i:s.v', 'Y-m-d H:i:s.u'] as $format) {
+            $candidate = DateTimeImmutable::createFromFormat('!' . $format, $value, $storageTimezone);
+            $errors = DateTimeImmutable::getLastErrors();
+            if ($candidate !== false
+                && ($errors === false || ($errors['warning_count'] === 0 && $errors['error_count'] === 0))
+                && $candidate->format($format) === $value
+            ) {
+                $parsed = $candidate;
+                break;
             }
+        }
+        if ($parsed === null) {
+            return null;
         }
         $parsed = $parsed->setTimezone($displayTimezone);
         if ($parsed->getTimestamp() > $clock->getTimestamp() + 60) {

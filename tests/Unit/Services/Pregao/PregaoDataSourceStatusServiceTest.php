@@ -132,6 +132,24 @@ final class PregaoDataSourceStatusServiceTest extends TestCase
         self::assertNull($items['health']['observed_at']);
     }
 
+    public function testDataCalendarioImpossivelNaoEhNormalizada(): void
+    {
+        $timezone = new DateTimeZone('America/Sao_Paulo');
+        $now = new DateTimeImmutable('2026-04-05 12:00:00', $timezone);
+
+        $result = (new PregaoDataSourceStatusService())->build(
+            [],
+            '2026-02-30 12:00:00',
+            $now,
+            ['count' => 1, 'last_checked_at' => '2026-02-30 12:00:00']
+        );
+        $items = array_column($result['items'], null, 'key');
+
+        self::assertNull($result['consolidated_at']);
+        self::assertNull($result['age_seconds']);
+        self::assertNull($items['watchlist']['observed_at']);
+    }
+
     public function testEpochConsolidadoTemPrecedenciaSobreTimestampDaSessao(): void
     {
         $timezone = new DateTimeZone('America/Sao_Paulo');
