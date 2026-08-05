@@ -111,35 +111,35 @@ final class PregaoEventExplorerService
         $countStmt = $this->db->prepare("SELECT COUNT(*) FROM pregao_events WHERE {$where}");
         $countStmt->execute($params);
         $total = (int) $countStmt->fetchColumn();
-
-        $stmt = $this->db->prepare(
-            "SELECT id, type, ts, source, payload
-             FROM pregao_events
-             WHERE {$where}
-             ORDER BY ts DESC, id DESC
-             LIMIT ? OFFSET ?"
-        );
-        $position = 1;
-        foreach ($params as $param) {
-            $stmt->bindValue($position++, $param, is_int($param) ? PDO::PARAM_INT : PDO::PARAM_STR);
-        }
-        $stmt->bindValue($position++, $perPage, PDO::PARAM_INT);
-        $stmt->bindValue($position, ($page - 1) * $perPage, PDO::PARAM_INT);
-        $stmt->execute();
-
-        $events = [];
-        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
-            $rowType = (string) $row['type'];
-            $events[] = [
-                'id' => (int) $row['id'],
-                'type' => $rowType,
-                'source' => (string) ($row['source'] ?? 'live'),
-                'ts' => $this->mysqlToIso((string) $row['ts']),
-                'payload' => $this->sanitizePayload($rowType, $row['payload'], $accountId),
-            ];
-        }
-
         $pages = $total > 0 ? (int) ceil($total / $perPage) : 0;
+        $events = [];
+        if ($page <= $pages) {
+            $stmt = $this->db->prepare(
+                "SELECT id, type, ts, source, payload
+                 FROM pregao_events
+                 WHERE {$where}
+                 ORDER BY ts DESC, id DESC
+                 LIMIT ? OFFSET ?"
+            );
+            $position = 1;
+            foreach ($params as $param) {
+                $stmt->bindValue($position++, $param, is_int($param) ? PDO::PARAM_INT : PDO::PARAM_STR);
+            }
+            $stmt->bindValue($position++, $perPage, PDO::PARAM_INT);
+            $stmt->bindValue($position, ($page - 1) * $perPage, PDO::PARAM_INT);
+            $stmt->execute();
+
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $rowType = (string) $row['type'];
+                $events[] = [
+                    'id' => (int) $row['id'],
+                    'type' => $rowType,
+                    'source' => (string) ($row['source'] ?? 'live'),
+                    'ts' => $this->mysqlToIso((string) $row['ts']),
+                    'payload' => $this->sanitizePayload($rowType, $row['payload'], $accountId),
+                ];
+            }
+        }
 
         return [
             'events' => $events,

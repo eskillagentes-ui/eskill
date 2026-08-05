@@ -278,4 +278,19 @@ final class PregaoEventExplorerServiceTest extends TestCase
         $this->expectException(InvalidArgumentException::class);
         $this->makeService($db)->list(0);
     }
+
+    public function testPaginaForaDoTotalNaoCalculaOffsetExcessivo(): void
+    {
+        $db = $this->makeDb();
+        $this->insertEvent($db, 1335, 'op', '2026-08-04 10:00:00', ['msg' => 'ok']);
+
+        $result = $this->makeService($db)->list(1335, [
+            'page' => (string) PHP_INT_MAX,
+            'per_page' => '100',
+        ]);
+
+        self::assertSame([], $result['events']);
+        self::assertSame(PHP_INT_MAX, $result['pagination']['page']);
+        self::assertSame(1, $result['pagination']['pages']);
+    }
 }
