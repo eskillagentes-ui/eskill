@@ -12,7 +12,7 @@ final class PregaoQaRunService
     public const PENDING_KEY = 'pregao:qa:pending';
     public const RUN_ID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/D';
     public const RUN_TTL_SECONDS = 900;
-    public const LOCK_TTL_SECONDS = 180;
+    public const LOCK_TTL_SECONDS = 240;
     public const EVIDENCE_TTL_SECONDS = 86400;
     private const ACTIVE_PREFIX = 'pregao:qa:active:';
 
@@ -308,6 +308,20 @@ LUA;
         if ($updated !== 1) {
             throw new \InvalidArgumentException('Progressão QA atual inválida ou concorrente');
         }
+    }
+
+    public function renew(string $runId, string $token): bool
+    {
+        if (preg_match(self::RUN_ID_PATTERN, $runId) !== 1 || preg_match('/\A[a-f0-9]{48}\z/D', $token) !== 1) {
+            return false;
+        }
+        // Lua constante: chave, token e TTL passam somente por KEYS/ARGV.
+        $lua = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('EXPIRE', KEYS[1], ARGV[2]) else return 0 end";
+        return $this->redis->eval(
+            $lua,
+            [self::lockKey($runId), $token, self::LOCK_TTL_SECONDS],
+            1
+        ) === 1;
     }
 
     public function release(string $runId, string $token): void

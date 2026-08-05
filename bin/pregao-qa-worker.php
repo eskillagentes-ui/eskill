@@ -9,7 +9,12 @@ use App\Services\Pregao\PregaoQaRunService;
 use App\Services\Pregao\PregaoQaSessionService;
 use App\Services\Pregao\PregaoQaStatusProducer;
 use App\Services\Pregao\PregaoQaWorkerEnvironment;
+use App\Services\Pregao\PregaoQaWorkerProcess;
 use App\Services\Pregao\PregaoQaWorkerProtocol;
+use App\Services\Pregao\PregaoQaWorkerSignals;
+
+const BROWSER_TIMEOUT_SECONDS = 120;
+const LOCK_RENEW_INTERVAL_SECONDS = 30;
 
 require dirname(__DIR__) . '/vendor/autoload.php';
 
@@ -35,11 +40,23 @@ if (!in_array($baseScheme, ['http', 'https'], true)
     fwrite(STDERR, "pregao-qa-worker: PREGAO_QA_BASE_URL inválida ou produção sem gate read-only\n");
     exit(1);
 }
+if (!function_exists('pcntl_async_signals') || !function_exists('pcntl_signal')) {
+    fwrite(STDERR, "pregao-qa-worker: suporte a sinais indisponível\n");
+    exit(1);
+}
+
+$privateRoot = (string) ($_ENV['PREGAO_QA_PRIVATE_ROOT'] ?? getenv('PREGAO_QA_PRIVATE_ROOT') ?: '');
+if ($privateRoot === '') {
+    $privateRoot = $root . '/storage/private/pregao-qa';
+}
+if (!is_dir($privateRoot) && !mkdir($privateRoot, 0700, true) && !is_dir($privateRoot)) {
+    fwrite(STDERR, "pregao-qa-worker: diretório privado indisponível\n");
+    exit(1);
+}
 
 $redis = PregaoQaRunService::connectRedis();
 $runs = new PregaoQaRunService($redis, $proof);
 $producer = new PregaoQaStatusProducer(new PregaoEmitService(null, $redis), $proof, $runs);
-$privateRoot = $root . '/storage/private/pregao-qa';
 PregaoQaRunService::purgeExpiredFrames($privateRoot);
 $runs->recoverPending(
     static fn (array $manifest, array $state): bool => $producer->repairEvidence($manifest, $state)
@@ -57,12 +74,21 @@ $sessionPrefix = (string) ($_ENV['PREGAO_QA_SESSION_PREFIX'] ?? 'PHPREDIS_SESSIO
 $sessions = new PregaoQaSessionService($redis, $sessionPrefix);
 $sessionId = '';
 $process = null;
+$pipes = [];
 $previousSequence = 0;
 $previousResult = null;
 $terminalResult = null;
 $workerExitCode = 0;
+$shutdownRequested = false;
+$preservePending = false;
+$nextLockRenewalAt = microtime(true) + LOCK_RENEW_INTERVAL_SECONDS;
+$signals = new PregaoQaWorkerSignals();
+$signals->install();
 
 try {
+    if (!$runs->renew($runId, $lockToken)) {
+        throw new RuntimeException('qa_worker_lock_lost');
+    }
     $existingState = $runs->loadState($runId, (int) $manifest['account_id']);
     if (!is_array($existingState)
         || !is_int($existingState['sequence'] ?? null)
@@ -90,10 +116,7 @@ try {
     if (!is_file($runner)) {
         throw new RuntimeException('qa_browser_runner_unavailable');
     }
-    $command = [
-        'node',
-        $runner,
-    ];
+    $command = ['node', $runner];
     $descriptors = [
         0 => ['pipe', 'r'],
         1 => ['pipe', 'w'],
@@ -115,53 +138,73 @@ try {
     if (!is_resource($process)) {
         throw new RuntimeException('qa_browser_start_failed');
     }
+    $signals->track($process);
     fclose($pipes[0]);
-    stream_set_blocking($pipes[1], true);
-    stream_set_timeout($pipes[1], 120);
-    stream_set_blocking($pipes[2], false);
+    unset($pipes[0]);
 
-    while (($line = fgets($pipes[1])) !== false) {
-        $protocol = PregaoQaWorkerProtocol::decode($line, $runId, $previousSequence, $previousResult);
-        if ($protocol === null) {
-            proc_terminate($process);
-            throw new RuntimeException('qa_browser_protocol_invalid');
-        }
-        $previousSequence = $protocol['sequence'];
-        $previousResult = $protocol['result'];
-        if ($protocol['screenshot'] === 'latest.png') {
-            PregaoQaRunService::retainLatestFrame(
-                $outputDirectory . '/latest.png',
-                $privateRoot,
-                $runId
-            );
-        }
-        $runs->updateState($manifest, $protocol);
-        $producer->emit($manifest, $protocol);
-        if (in_array($protocol['result'], ['passed', 'failed', 'blocked'], true)) {
-            $terminalResult = $protocol['result'];
-        }
-    }
-    $stdoutMeta = stream_get_meta_data($pipes[1]);
-    if (($stdoutMeta['timed_out'] ?? false) === true) {
-        proc_terminate($process);
-        throw new RuntimeException('qa_browser_timeout');
-    }
-    fclose($pipes[1]);
-    $stderr = stream_get_contents($pipes[2], 4096);
-    fclose($pipes[2]);
-    $exitCode = proc_close($process);
+    $processResult = PregaoQaWorkerProcess::drain(
+        $process,
+        $pipes[1],
+        $pipes[2],
+        function (string $line) use (
+            $runId,
+            $manifest,
+            $runs,
+            $producer,
+            $outputDirectory,
+            $privateRoot,
+            &$previousSequence,
+            &$previousResult,
+            &$terminalResult
+        ): void {
+            $protocol = PregaoQaWorkerProtocol::decode($line, $runId, $previousSequence, $previousResult);
+            if ($protocol === null) {
+                throw new RuntimeException('qa_browser_protocol_invalid');
+            }
+            $previousSequence = $protocol['sequence'];
+            $previousResult = $protocol['result'];
+            if ($protocol['screenshot'] === 'latest.png') {
+                PregaoQaRunService::retainLatestFrame(
+                    $outputDirectory . '/latest.png',
+                    $privateRoot,
+                    $runId
+                );
+            }
+            $runs->updateState($manifest, $protocol);
+            $producer->emit($manifest, $protocol);
+            if (in_array($protocol['result'], ['passed', 'failed', 'blocked'], true)) {
+                $terminalResult = $protocol['result'];
+            }
+        },
+        function () use ($runs, $runId, $lockToken, &$nextLockRenewalAt): void {
+            if (microtime(true) < $nextLockRenewalAt) {
+                return;
+            }
+            if (!$runs->renew($runId, $lockToken)) {
+                throw new RuntimeException('qa_worker_lock_lost');
+            }
+            $nextLockRenewalAt = microtime(true) + LOCK_RENEW_INTERVAL_SECONDS;
+        },
+        static function () use ($signals): bool {
+            return $signals->isRequested();
+        },
+        BROWSER_TIMEOUT_SECONDS
+    );
     $process = null;
-    if ($exitCode !== 0 || $terminalResult === null) {
+    $pipes = [];
+    if ($processResult['exit_code'] !== 0 || $terminalResult === null) {
         log_error('Pregao QA browser failed', [
             'reason' => 'qa_browser_failed',
             'run_id' => $runId,
-            'exit_code' => $exitCode,
-            'stderr_present' => is_string($stderr) && trim($stderr) !== '',
+            'exit_code' => $processResult['exit_code'],
+            'stderr_present' => $processResult['stderr_present'],
         ]);
         throw new RuntimeException('qa_browser_failed');
     }
 } catch (Throwable) {
-    if ($terminalResult === null) {
+    $shutdownRequested = $signals->isRequested();
+    $preservePending = $shutdownRequested && $terminalResult === null;
+    if (!$preservePending && $terminalResult === null) {
         try {
             $blocked = [
                 'run_id' => $runId,
@@ -182,17 +225,25 @@ try {
             ]);
         }
     }
-    log_error('Pregao QA worker failed', ['reason' => 'qa_worker_failed', 'run_id' => $runId]);
-    $workerExitCode = 1;
+    log_error('Pregao QA worker failed', [
+        'reason' => $preservePending ? 'qa_worker_shutdown_requested' : 'qa_worker_failed',
+        'run_id' => $runId,
+    ]);
+    $workerExitCode = $preservePending ? 0 : 1;
 } finally {
+    PregaoQaWorkerProcess::terminate($process);
+    foreach ($pipes as $pipe) {
+        if (is_resource($pipe)) {
+            fclose($pipe);
+        }
+    }
     if (is_resource($process)) {
-        proc_terminate($process);
         proc_close($process);
     }
     if ($sessionId !== '') {
         $sessions->destroy($sessionId);
     }
-    if ($terminalResult !== null) {
+    if (!$preservePending && $terminalResult !== null) {
         $runs->releaseActive($manifest['account_id'], $runId);
         if (!$runs->ackPending($runId, $pendingJob)) {
             log_error('Pregao QA pending ack failed', ['reason' => 'qa_pending_ack_failed', 'run_id' => $runId]);

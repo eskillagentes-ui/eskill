@@ -12,7 +12,11 @@ WorkingDirectory=/home/eskill/htdocs/eskill.com.br
 Environment=PREGAO_QA_BASE_URL=https://eskill.com.br
 Environment=PREGAO_QA_ALLOW_PRODUCTION_READONLY=true
 Environment=PREGAO_QA_BROWSER_EXECUTABLE=/usr/bin/google-chrome-stable
-Environment=HOME=/tmp
+Environment=PREGAO_QA_PRIVATE_ROOT=/home/eskill/htdocs/eskill.com.br/storage/private/pregao-qa
+Environment=HOME=/run/pregao-qa
+RuntimeDirectory=pregao-qa
+RuntimeDirectoryMode=0700
+ExecStartPre=/usr/bin/test -d /home/eskill/htdocs/eskill.com.br/storage/private/pregao-qa
 ExecStart=/usr/bin/php /home/eskill/htdocs/eskill.com.br/bin/pregao-qa-worker.php
 Restart=always
 RestartSec=2
@@ -41,11 +45,11 @@ CapabilityBoundingSet=
 AmbientCapabilities=
 RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6
 SystemCallArchitectures=native
-ReadWritePaths=/home/eskill/htdocs/eskill.com.br/storage/private/pregao-qa /home/eskill/htdocs/eskill.com.br/storage/logs
+ReadWritePaths=/home/eskill/htdocs/eskill.com.br/storage/private/pregao-qa
 MemoryMax=1200M
 CPUQuota=150%
-StandardOutput=append:/home/eskill/htdocs/eskill.com.br/storage/logs/pregao-qa-worker.log
-StandardError=append:/home/eskill/htdocs/eskill.com.br/storage/logs/pregao-qa-worker.log
+StandardOutput=journal
+StandardError=journal
 
 [Install]
 WantedBy=multi-user.target
