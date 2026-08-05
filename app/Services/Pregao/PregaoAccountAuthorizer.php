@@ -19,11 +19,27 @@ final class PregaoAccountAuthorizer
                 return null;
             }
             $candidate = $requestedId;
+        } elseif ($activeId !== null && $activeId > 0) {
+            $candidate = $activeId;
         } else {
-            if ($activeId === null || $activeId <= 0) {
+            $candidate = null;
+            foreach ($userAccounts as $account) {
+                if (!isset($account['id'])) {
+                    continue;
+                }
+                $accountId = filter_var(
+                    $account['id'],
+                    FILTER_VALIDATE_INT,
+                    ['options' => ['min_range' => 1]]
+                );
+                if ($accountId !== false) {
+                    $candidate = $accountId;
+                    break;
+                }
+            }
+            if ($candidate === null) {
                 return null;
             }
-            $candidate = $activeId;
         }
 
         foreach ($userAccounts as $account) {

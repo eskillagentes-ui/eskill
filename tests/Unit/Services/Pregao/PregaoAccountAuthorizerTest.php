@@ -37,6 +37,13 @@ final class PregaoAccountAuthorizerTest extends TestCase
         self::assertNull($authorizer->resolve(null, 9999, $this->accounts));
     }
 
+    public function testUsaPrimeiraContaAutorizadaQuandoSessaoNaoTemContaAtiva(): void
+    {
+        $authorizer = new PregaoAccountAuthorizer();
+
+        self::assertSame(1335, $authorizer->resolve(null, null, $this->accounts));
+    }
+
     public function testFalhaFechadoComListaVaziaOuEntradaMalformada(): void
     {
         $authorizer = new PregaoAccountAuthorizer();

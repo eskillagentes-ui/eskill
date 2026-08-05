@@ -283,37 +283,4 @@ class PregaoController extends BaseController
         }
     }
 
-    /**
-     * Fallback: primeira conta ML ativa do usuário autenticado.
-     * Evita snapshot 400 + gráfico vazio quando a sessão não tem active_ml_account_id.
-     */
-    private function resolveFallbackAccountId(): ?int
-    {
-        $userId = $this->getUserId();
-        if ($userId === null || $userId <= 0) {
-            return null;
-        }
-
-        try {
-            $db = \App\Database::getInstance();
-            $stmt = $db->prepare(
-                "SELECT id FROM ml_accounts
-                 WHERE user_id = ?
-                   AND (status IN ('active', 'connected') OR status IS NULL)
-                 ORDER BY id ASC
-                 LIMIT 1"
-            );
-            $stmt->execute([$userId]);
-            $id = $stmt->fetchColumn();
-            if ($id === false || (int) $id <= 0) {
-                return null;
-            }
-            $accountId = (int) $id;
-            $_SESSION['active_ml_account_id'] = $accountId;
-            $_SESSION['account_id'] = $accountId;
-            return $accountId;
-        } catch (Throwable $e) {
-            return null;
-        }
-    }
 }
