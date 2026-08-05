@@ -119,6 +119,49 @@ final class PregaoAgentStatusServiceTest extends TestCase
         self::assertSame('attention', $summary['overall']);
     }
 
+    public function testAceitaTimestampMysqlComMilissegundos(): void
+    {
+        $db = new PDO('sqlite::memory:');
+        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $db->exec(
+            'CREATE TABLE pregao_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER,
+                type TEXT,
+                ts TEXT,
+                payload TEXT,
+                source TEXT
+            )'
+        );
+        $payload = [
+            'agent' => 'sentinela',
+            'status' => 'success',
+            'reason' => 'legacy_read_complete',
+            'correlation_id' => 'agent24x7-20260804T120000Z-0123abcd:1335',
+            'attempts' => 1,
+            'state_changed' => false,
+            'ml_write_automation' => false,
+        ];
+        $stmt = $db->prepare(
+            'INSERT INTO pregao_events (account_id, type, ts, payload, source) VALUES (?, ?, ?, ?, ?)'
+        );
+        $stmt->execute([
+            1335,
+            'agent.status',
+            '2026-08-04 12:00:00.123',
+            json_encode($payload, JSON_THROW_ON_ERROR),
+            'live',
+        ]);
+
+        $now = new DateTimeImmutable('2026-08-04 12:00:30', new DateTimeZone('America/Sao_Paulo'));
+        $result = (new PregaoAgentStatusService($db))->latestForAccount(1335, false, $now);
+        $items = array_column($result['items'], null, 'agent');
+
+        self::assertSame(1, $result['summary']['reporting']);
+        self::assertSame('success', $items['sentinela']['status']);
+        self::assertSame('2026-08-04T12:00:00-03:00', $items['sentinela']['updated_at']);
+    }
+
     public function testRetornaUltimoEstadoPorAgenteSemCruzarContaEMarcaStale(): void
     {
         $db = new PDO('sqlite::memory:');

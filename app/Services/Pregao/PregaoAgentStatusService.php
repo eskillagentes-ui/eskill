@@ -254,7 +254,7 @@ final class PregaoAgentStatusService
     private function parseTimestamp(string $timestamp): ?DateTimeImmutable
     {
         $timezone = new DateTimeZone('America/Sao_Paulo');
-        foreach (['Y-m-d H:i:s', 'Y-m-d H:i:s.u'] as $format) {
+        foreach (['Y-m-d H:i:s', 'Y-m-d H:i:s.v', 'Y-m-d H:i:s.u'] as $format) {
             $parsed = DateTimeImmutable::createFromFormat('!' . $format, $timestamp, $timezone);
             $errors = DateTimeImmutable::getLastErrors();
             if ($parsed !== false
