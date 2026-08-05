@@ -7,7 +7,11 @@
     'use strict';
 
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-    const PAYLOAD_KEYS = ['elapsed_ms', 'result', 'run_id', 'status', 'step', 'trusted'];
+    const TRIGGER_KEYS = ['elapsed_ms', 'result', 'run_id', 'status', 'step', 'trusted'];
+    const PROJECTION_KEYS = [
+        'elapsed_ms', 'executed', 'log', 'observed_at', 'result', 'run_id', 'running', 'sequence',
+        'status', 'step', 'stream_url', 'suite', 'test', 'trusted', 'video_url'
+    ];
     const SIGNED_KEYS = [
         'manifest_hash', 'observed_at', 'result', 'run_id', 'running', 'screenshot_url', 'sequence',
         'signature', 'started_at', 'step', 'stream_url', 'suite', 'test', 'video_url'
@@ -42,9 +46,9 @@
         return JSON.stringify(Object.keys(value).sort()) === JSON.stringify(keys);
     }
 
-    function validateProjection(value) {
+    function validateTrigger(value) {
         if (!value || typeof value !== 'object' || Array.isArray(value)
-            || !exactKeys(value, PAYLOAD_KEYS)
+            || !exactKeys(value, TRIGGER_KEYS)
             || value.trusted !== true
             || typeof value.run_id !== 'string' || !UUID_RE.test(value.run_id)
             || typeof value.status !== 'string' || !STATUSES.has(value.status)
@@ -60,8 +64,32 @@
         return true;
     }
 
+    function validateProjection(value, nowMs) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)
+            || !exactKeys(value, PROJECTION_KEYS)
+            || value.trusted !== true || value.executed !== true
+            || !Array.isArray(value.log) || value.log.length !== 0
+            || typeof value.run_id !== 'string' || !UUID_RE.test(value.run_id)
+            || typeof value.status !== 'string' || !STATUSES.has(value.status) || value.status === 'queued'
+            || typeof value.running !== 'boolean' || value.running !== (value.status === 'running')
+            || typeof value.step !== 'string' || !STEPS.has(value.step)
+            || value.suite !== 'pregao-live' || value.test !== value.step || value.video_url !== null
+            || !Number.isInteger(value.sequence) || value.sequence < 1
+            || typeof value.observed_at !== 'string'
+            || !Number.isInteger(value.elapsed_ms) || value.elapsed_ms < 0 || value.elapsed_ms > MAX_ELAPSED_MS) {
+            return false;
+        }
+        if (value.status === 'running' ? value.result !== null : value.result !== value.status) return false;
+        const expectedLive = '/qa/live/' + value.run_id;
+        if (![null, expectedLive].includes(value.stream_url)) return false;
+        const observed = Date.parse(value.observed_at);
+        return Number.isFinite(observed) && Number.isFinite(nowMs)
+            && observed >= nowMs - MAX_OBSERVED_AGE_MS && observed <= nowMs + MAX_FUTURE_SKEW_MS;
+    }
+
     function normalizeQaPayload(value, nowMs) {
-        if (validateProjection(value)) return value;
+        if (validateTrigger(value)) return { ...value, stream_url: '/qa/live/' + value.run_id };
+        if (validateProjection(value, nowMs)) return value;
         if (!value || typeof value !== 'object' || Array.isArray(value) || !exactKeys(value, SIGNED_KEYS)) return null;
         if (typeof value.run_id !== 'string' || !UUID_RE.test(value.run_id)
             || typeof value.step !== 'string' || !STEPS.has(value.step)
@@ -86,7 +114,10 @@
             status: value.result,
             step: value.step,
             elapsed_ms: observed - started,
-            result: value.result === 'running' ? null : value.result
+            result: value.result === 'running' ? null : value.result,
+            stream_url: value.stream_url,
+            observed_at: value.observed_at,
+            sequence: value.sequence
         };
     }
 
@@ -171,20 +202,22 @@
             }
             const signed = payload && typeof payload === 'object' && !Array.isArray(payload)
                 && exactKeys(payload, SIGNED_KEYS);
+            const projected = payload && typeof payload === 'object' && !Array.isArray(payload)
+                && exactKeys(payload, PROJECTION_KEYS);
             const normalized = normalizeQaPayload(payload, now());
             if (normalized === null) {
                 failClosed('Status QA não confiável rejeitado; nenhuma mídia foi aberta.');
                 return false;
             }
             const runState = runStates.get(normalized.run_id);
-            if (signed) {
-                const observedAt = Date.parse(payload.observed_at);
+            if (signed || projected) {
+                const observedAt = Date.parse(normalized.observed_at);
                 if ((runState && (runState.terminal || (runState.signed
-                    && (payload.sequence <= runState.sequence || observedAt < runState.observedAt))))
+                    && (normalized.sequence <= runState.sequence || observedAt < runState.observedAt))))
                     || (lastObservedAt !== null && observedAt < lastObservedAt)) return false;
-                runStates.set(payload.run_id, {
+                runStates.set(normalized.run_id, {
                     signed: true,
-                    sequence: payload.sequence,
+                    sequence: normalized.sequence,
                     observedAt,
                     terminal: TERMINAL_STATUSES.has(normalized.status)
                 });
@@ -227,12 +260,13 @@
 
             const stream = $('qaStream');
             const idle = $('qaIdle');
-            const livePath = '/qa/live/' + payload.run_id;
+            const livePath = typeof payload.stream_url === 'string' ? payload.stream_url : null;
             if (stream) {
-                stream.hidden = false;
-                if (stream.getAttribute('src') !== livePath) stream.setAttribute('src', livePath);
+                stream.hidden = livePath === null;
+                if (livePath === null) stream.removeAttribute('src');
+                else if (stream.getAttribute('src') !== livePath) stream.setAttribute('src', livePath);
             }
-            if (idle) idle.hidden = true;
+            if (idle) idle.hidden = livePath !== null;
             return true;
         }
 

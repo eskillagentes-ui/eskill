@@ -9,6 +9,39 @@ use PHPUnit\Framework\TestCase;
 
 final class PregaoQaProofFreshnessTest extends TestCase
 {
+    public function testDeclaresExactTrustedStatusProjectionSchema(): void
+    {
+        self::assertTrue(defined(PregaoQaProof::class . '::STATUS_PROJECTION_KEYS'));
+        self::assertSame([
+            'elapsed_ms', 'executed', 'log', 'observed_at', 'result', 'run_id', 'running', 'sequence',
+            'status', 'step', 'stream_url', 'suite', 'test', 'trusted', 'video_url',
+        ], PregaoQaProof::STATUS_PROJECTION_KEYS);
+    }
+
+    public function testProjectsTerminalReloadsWithExactSchemaAndTrustedMedia(): void
+    {
+        $proof = new PregaoQaProof(str_repeat('f', 32));
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+
+        foreach (['passed', 'failed', 'blocked'] as $result) {
+            $base = $this->terminalStatus(new \DateTimeImmutable('-1 minute'));
+            $base['result'] = $result;
+            $base['stream_url'] = '/qa/live/' . $runId;
+            $projection = $proof->projectStatus($proof->signStatus($base, 1335), 1335);
+
+            self::assertNotNull($projection);
+            self::assertSame(PregaoQaProof::STATUS_PROJECTION_KEYS, array_keys($projection));
+            self::assertTrue($projection['trusted']);
+            self::assertTrue($projection['executed']);
+            self::assertFalse($projection['running']);
+            self::assertSame($result, $projection['status']);
+            self::assertSame($result, $projection['result']);
+            self::assertSame('/qa/live/' . $runId, $projection['stream_url']);
+            self::assertNull($projection['video_url']);
+            self::assertSame([], $projection['log']);
+        }
+    }
+
     public function testRejectsTerminalEvidenceOlderThanTwentyFourHours(): void
     {
         $proof = new PregaoQaProof(str_repeat('f', 32));

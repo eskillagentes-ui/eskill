@@ -37,16 +37,46 @@
         return first || '0/5 reportando';
     }
 
+    function normalizedLabel(value) {
+        return String(value || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toUpperCase();
+    }
+
+    function normalizeQaState(value) {
+        const label = normalizedLabel(value);
+        if (label === 'APROVADO' || label === 'PASSED') return 'passed';
+        if (label === 'FALHOU' || label === 'FAILED') return 'failed';
+        if (label === 'BLOQUEADO' || label === 'BLOCKED') return 'blocked';
+        if (label === 'AO VIVO' || label === 'EM EXECUCAO' || label === 'RUNNING') return 'running';
+        if (label === 'NA FILA' || label === 'QUEUED') return 'queued';
+        if (label === 'INDISPONIVEL' || label === 'UNAVAILABLE') return 'unavailable';
+        if (label === 'NAO EXECUTADO' || label === 'NOT EXECUTED') return 'not_executed';
+        return 'unknown';
+    }
+
+    function normalizeFreshness(input) {
+        const freshnessClass = String(input && input.freshnessClass || '');
+        const label = normalizedLabel(input && input.freshnessText);
+        if (freshnessClass.includes('is-stale') || label === 'STALE') return 'stale';
+        if (label === 'FRESH') return 'fresh';
+        const age = label.match(/^CONSOLIDADO\s+.+\s+·\s+(\d+)S\s+ATRAS$/);
+        if (!age) return 'unknown';
+        return Number(age[1]) <= 300 ? 'fresh' : 'stale';
+    }
+
     function deriveState(input) {
         const semaClass = String(input && input.semaClass || '');
-        const semaText = String(input && input.semaText || '').toUpperCase();
+        const semaText = normalizedLabel(input && input.semaText);
         const agentsClass = String(input && input.agentsClass || '');
-        const qaText = String(input && input.qaText || '').toUpperCase();
+        const qaState = normalizeQaState(input && input.qaText);
+        const freshnessState = normalizeFreshness(input);
 
-        if (semaClass.includes('vermelho') || qaText.includes('FAILED')) return 'critical';
-        if (/FALHA|INDISPON|CONECTANDO|N\/D/.test(semaText)) return 'unknown';
-        if (semaClass.includes('amarelo') || agentsClass.includes('is-attention') || qaText.includes('BLOCKED')) return 'warning';
-        if (semaClass.includes('verde') && agentsClass.includes('is-healthy')) return 'healthy';
+        if (semaClass.includes('vermelho') || qaState === 'failed') return 'critical';
+        if (semaClass.includes('amarelo') || agentsClass.includes('is-attention')
+            || qaState === 'blocked' || qaState === 'running' || qaState === 'queued') return 'warning';
+        if (/FALHA|INDISPON|CONECTANDO|N\/D/.test(semaText)
+            || ['unknown', 'unavailable', 'not_executed'].includes(qaState)
+            || freshnessState !== 'fresh') return 'unknown';
+        if (semaClass.includes('verde') && agentsClass.includes('is-healthy') && qaState === 'passed') return 'healthy';
         return 'unknown';
     }
 
@@ -71,11 +101,14 @@
             const sema = byId('sema');
             const agents = byId('agentsSummary');
             const qa = byId('qaLive');
+            const freshness = byId('sourceFreshness');
             const state = deriveState({
                 semaClass: sema ? sema.className : '',
                 semaText: text('semaText', ''),
                 agentsClass: agents ? agents.className : '',
-                qaText: qa ? qa.textContent : ''
+                qaText: qa ? qa.textContent : '',
+                freshnessClass: freshness ? freshness.className : '',
+                freshnessText: freshness ? freshness.textContent : ''
             });
             const labels = {
                 healthy: 'OPERAÇÃO SAUDÁVEL',
@@ -154,5 +187,7 @@
         return { setWallMode, sync };
     }
 
-    return { burnInOffset, compactAgents, deriveState, init, isWallRequested };
+    return {
+        burnInOffset, compactAgents, deriveState, init, isWallRequested, normalizeFreshness, normalizeQaState
+    };
 }));
