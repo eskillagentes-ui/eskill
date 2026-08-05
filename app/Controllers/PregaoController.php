@@ -347,19 +347,19 @@ class PregaoController extends BaseController
                 return;
             }
             $root = dirname(__DIR__, 2) . '/storage/private/pregao-qa';
-            $frame = PregaoQaRunService::framePath($root, $runId);
-            if (!is_file($frame) || !is_readable($frame)) {
+            $frame = PregaoQaRunService::readLatestFrame($root, $runId);
+            if ($frame === null) {
                 http_response_code(404);
                 return;
             }
-            $info = @getimagesize($frame);
+            $info = @getimagesizefromstring($frame);
             if (!is_array($info) || ($info[2] ?? null) !== IMAGETYPE_PNG) {
                 http_response_code(404);
                 return;
             }
             header('Content-Type: image/png');
-            header('Content-Length: ' . (string) filesize($frame));
-            readfile($frame);
+            header('Content-Length: ' . (string) strlen($frame));
+            echo $frame;
         } catch (Throwable) {
             http_response_code(404);
         }
