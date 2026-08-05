@@ -60,6 +60,7 @@ function snapshotData(data) {
         qa: null,
         agents: null,
         operations: [],
+        account: null,
         ...data
     };
 }
@@ -743,7 +744,29 @@ test('mantém o cache-busting do cliente corrigido', () => {
     const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
     assert.match(source, /iconNode\.textContent = String\(icon\)/, 'ícone do feed deve usar textContent');
     assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
-    assert.match(view, /\/js\/pregao\.js\?v=41/, 'view deve invalidar o cache do cliente corrigido');
+    assert.match(view, /\/js\/pregao\.js\?v=42/, 'view deve invalidar o cache do cliente corrigido');
+});
+
+test('nome da loja no ML aparece destacado ao lado do título quando disponível', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        account: { id: 1335, nickname: 'AWAMOTOS' }
+    });
+    assert.strictEqual(element('storeName').textContent, 'AWAMOTOS');
+    assert.strictEqual(element('storeName').hidden, false);
+});
+
+test('nome da loja fica oculto quando indisponível, sem inventar texto', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        account: { id: 1335, nickname: null }
+    });
+    assert.strictEqual(element('storeName').hidden, true);
+    assert.strictEqual(element('storeName').textContent, '');
 });
 
 test('QA sem status real aparece como não executado, sem mídia artificial', async () => {

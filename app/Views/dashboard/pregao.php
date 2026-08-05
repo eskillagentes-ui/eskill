@@ -5,6 +5,7 @@
         <div class="brand">
             <div class="dot"></div>
             <h1>ESKILL <span>PREGÃO</span></h1>
+            <span class="store-name" id="storeName" hidden title="Loja no Mercado Livre"></span>
         </div>
         <div class="ticker-main">
             <span class="sym">ESKL11 · ÍNDICE DA CONTA</span>
@@ -222,5 +223,5 @@
     };
 </script>
 <script src="/js/pregao-chart-layout.js?v=1"></script>
-<script src="/js/pregao.js?v=41" defer></script>
+<script src="/js/pregao.js?v=42" defer></script>
 <script src="/js/pregao-events.js?v=1" defer></script>

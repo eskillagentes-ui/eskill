@@ -105,6 +105,18 @@
         if (v === null || v === undefined) return 'n/d';
         return formatter ? formatter(v) : String(v);
     }
+    function applyAccount(account) {
+        const el = $('storeName');
+        if (!el) return;
+        const nickname = account && typeof account.nickname === 'string' ? account.nickname.trim() : '';
+        if (!nickname) {
+            el.hidden = true;
+            el.textContent = '';
+            return;
+        }
+        el.textContent = nickname;
+        el.hidden = false;
+    }
     function setFactorsBadge(index) {
         const el = $('factorsBadge');
         if (!el) return;
@@ -1192,6 +1204,7 @@
         updateHeader();
         draw();
 
+        applyAccount(d.account);
         applyMetrics(d.metrics);
         window.__pregaoLastSentinela = d.sentinela || null;
         applySentinelaCard(window.__pregaoLastSentinela);

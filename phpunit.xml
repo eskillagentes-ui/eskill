@@ -59,6 +59,7 @@
             <file>tests/Unit/Services/Pregao/PregaoEventExplorerServiceTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoMetricsCollectorAgentActionsContractTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoMetricsCollectorFreshnessContractTest.php</file>
+            <file>tests/Unit/Services/Pregao/PregaoSnapshotAccountNicknameTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoSnapshotDailyIndexTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoSnapshotQaTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoSnapshotTimestampTest.php</file>

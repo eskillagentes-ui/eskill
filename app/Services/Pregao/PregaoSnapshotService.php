@@ -97,6 +97,10 @@ final class PregaoSnapshotService
 
         return [
             'account_id' => $accountId,
+            'account' => [
+                'id' => $accountId,
+                'nickname' => $this->loadAccountNickname($accountId),
+            ],
             'server_ts' => $now->format('Y-m-d\TH:i:sP'),
             'index' => [
                 'symbol' => 'ESKL11',
@@ -136,6 +140,29 @@ final class PregaoSnapshotService
             'read_only' => true,
             'v' => \App\Services\Pregao\PregaoEmitService::VERSION,
         ];
+    }
+
+    /**
+     * Nome público (nickname) da loja no Mercado Livre — somente leitura de ml_accounts.
+     * Nunca inventa texto: ausência/vazio retornam null.
+     */
+    private function loadAccountNickname(int $accountId): ?string
+    {
+        try {
+            $stmt = $this->db->prepare('SELECT nickname FROM ml_accounts WHERE id = ?');
+            $stmt->execute([$accountId]);
+            $nickname = $stmt->fetchColumn();
+            if (!is_string($nickname) || trim($nickname) === '') {
+                return null;
+            }
+            return trim($nickname);
+        } catch (Throwable) {
+            log_warning('PregaoSnapshotService: nickname da conta indisponível', [
+                'account_id' => $accountId,
+                'reason' => 'account_nickname_unavailable',
+            ]);
+            return null;
+        }
     }
 
     /**
