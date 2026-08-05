@@ -74,4 +74,21 @@ final class PregaoMetricsCollectorFreshnessContractTest extends TestCase
             );
         }
     }
+
+    public function testHealthConverteDatetimePersistidoParaEpochNaPropriaSessaoMySql(): void
+    {
+        $source = file_get_contents(
+            dirname(__DIR__, 4) . '/app/Services/Pregao/PregaoMetricsCollector.php'
+        );
+        self::assertIsString($source);
+        $window = $this->methodWindow(
+            $source,
+            'private function collectHealth',
+            'private function collectQuestions'
+        );
+
+        self::assertStringContainsString('UNIX_TIMESTAMP(created_at) AS created_at_epoch', $window);
+        self::assertStringContainsString("'collected_at' => (int) \$row['created_at_epoch']", $window);
+        self::assertStringNotContainsString("'as_of' =>", $window);
+    }
 }

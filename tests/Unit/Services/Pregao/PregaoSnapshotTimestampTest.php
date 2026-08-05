@@ -63,4 +63,17 @@ final class PregaoSnapshotTimestampTest extends TestCase
             $this->invokePrivate('mysqlTimestampToIso', '2026-08-04 12:00:00')
         );
     }
+
+    public function testLoadMetricsSelecionaEpochDoTimestampNaSessaoMySql(): void
+    {
+        $source = file_get_contents(
+            dirname(__DIR__, 4) . '/app/Services/Pregao/PregaoSnapshotService.php'
+        );
+        self::assertIsString($source);
+        self::assertStringContainsString(
+            'UNIX_TIMESTAMP(updated_at) AS updated_at_epoch',
+            $source
+        );
+        self::assertStringContainsString("\$metrics['updated_at_epoch']", $source);
+    }
 }

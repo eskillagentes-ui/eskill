@@ -59,11 +59,14 @@ final class PregaoDataSourceStatusService
         array $meta,
         ?string $metricsUpdatedAt,
         ?DateTimeImmutable $now = null,
-        ?array $watchlist = null
+        ?array $watchlist = null,
+        ?int $metricsUpdatedEpoch = null
     ): array {
         $timezone = new DateTimeZone('America/Sao_Paulo');
         $clock = ($now ?? new DateTimeImmutable('now', $timezone))->setTimezone($timezone);
-        $consolidated = $this->parseDatabaseTimestamp($metricsUpdatedAt, $timezone, $clock);
+        $consolidated = $metricsUpdatedEpoch !== null
+            ? $this->parseEpoch($metricsUpdatedEpoch, $timezone, $clock)
+            : $this->parseDatabaseTimestamp($metricsUpdatedAt, $timezone, $clock);
         $metricMeta = is_array($meta['metrics'] ?? null) ? $meta['metrics'] : [];
         $items = [];
 
@@ -83,14 +86,8 @@ final class PregaoDataSourceStatusService
             }
 
             $observed = null;
-            if ($available && isset($entry['collected_at']) && is_numeric($entry['collected_at'])) {
-                $observed = (new DateTimeImmutable('@' . (string) ((int) $entry['collected_at'])))
-                    ->setTimezone($timezone);
-                if ($observed->getTimestamp() > $clock->getTimestamp() + 60) {
-                    $observed = null;
-                }
-            } elseif ($available && is_string($entry['as_of'] ?? null)) {
-                $observed = $this->parseDatabaseTimestamp($entry['as_of'], $timezone, $clock);
+            if ($available && array_key_exists('collected_at', $entry)) {
+                $observed = $this->parseEpoch($entry['collected_at'], $timezone, $clock);
             }
 
             $items[] = [
@@ -126,6 +123,21 @@ final class PregaoDataSourceStatusService
             'items' => $items,
             'read_only' => true,
         ];
+    }
+
+    private function parseEpoch(
+        mixed $value,
+        DateTimeZone $displayTimezone,
+        DateTimeImmutable $clock
+    ): ?DateTimeImmutable {
+        if (is_string($value) && ctype_digit($value)) {
+            $value = (int) $value;
+        }
+        if (!is_int($value) || $value <= 0 || $value > $clock->getTimestamp() + 60) {
+            return null;
+        }
+
+        return (new DateTimeImmutable('@' . (string) $value))->setTimezone($displayTimezone);
     }
 
     private function parseDatabaseTimestamp(

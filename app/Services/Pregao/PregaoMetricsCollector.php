@@ -342,7 +342,8 @@ final class PregaoMetricsCollector
     {
         try {
             $stmt = $this->db->prepare(
-                'SELECT overall_score, created_at
+                'SELECT overall_score, created_at,
+                        UNIX_TIMESTAMP(created_at) AS created_at_epoch
                  FROM account_health_history
                  WHERE account_id = ?
                  ORDER BY id DESC
@@ -352,6 +353,9 @@ final class PregaoMetricsCollector
             $row = $stmt->fetch(PDO::FETCH_ASSOC);
             if (!$row) {
                 throw new \RuntimeException('account_health_history vazio');
+            }
+            if ((int) ($row['created_at_epoch'] ?? 0) <= 0) {
+                throw new \RuntimeException('account_health_history sem timestamp válido');
             }
 
             $overall = (float) $row['overall_score'];
@@ -368,7 +372,7 @@ final class PregaoMetricsCollector
                 'available' => true,
                 'source' => 'account_health_history',
                 'overall_score' => $overall,
-                'as_of' => (string) $row['created_at'],
+                'collected_at' => (int) $row['created_at_epoch'],
             ];
 
             $this->emitter->emit('metric.update', [

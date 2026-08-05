@@ -100,9 +100,7 @@ final class PregaoSnapshotService
             'server_ts' => $now->format('Y-m-d\TH:i:sP'),
             'index' => [
                 'symbol' => 'ESKL11',
-                'updated_at' => isset($metrics['updated_at'])
-                    ? $this->mysqlTimestampToIso((string) $metrics['updated_at'])
-                    : null,
+                'updated_at' => $this->metricsUpdatedAtIso($metrics),
                 'value' => $indexValue !== null ? round($indexValue, 2) : null,
                 'change_pct' => $changePct !== null ? round($changePct, 2) : null,
                 'open' => $openRef !== null ? round($openRef, 2) : null,
@@ -126,7 +124,10 @@ final class PregaoSnapshotService
                 $meta,
                 isset($metrics['updated_at']) ? (string) $metrics['updated_at'] : null,
                 $now,
-                $watchlist
+                $watchlist,
+                isset($metrics['updated_at_epoch']) && is_numeric($metrics['updated_at_epoch'])
+                    ? (int) $metrics['updated_at_epoch']
+                    : null
             ),
             'semaforo' => $semaforo,
             'baselines' => $baselines,
@@ -191,7 +192,12 @@ final class PregaoSnapshotService
      */
     private function loadMetrics(int $accountId): array
     {
-        $stmt = $this->db->prepare('SELECT * FROM account_index_metrics WHERE account_id = ?');
+        $epochSelect = $this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'mysql'
+            ? ', UNIX_TIMESTAMP(updated_at) AS updated_at_epoch'
+            : '';
+        $stmt = $this->db->prepare(
+            'SELECT *' . $epochSelect . ' FROM account_index_metrics WHERE account_id = ?'
+        );
         $stmt->execute([$accountId]);
         $row = $stmt->fetch(PDO::FETCH_ASSOC);
         if ($row) {
@@ -221,6 +227,32 @@ final class PregaoSnapshotService
             'factors_active' => 0,
             'factors_total' => 5,
         ];
+    }
+
+    /** @param array<string, mixed> $metrics */
+    private function metricsUpdatedAtIso(array $metrics): ?string
+    {
+        if (array_key_exists('updated_at_epoch', $metrics)) {
+            return $this->epochToIso($metrics['updated_at_epoch']);
+        }
+
+        return isset($metrics['updated_at'])
+            ? $this->mysqlTimestampToIso((string) $metrics['updated_at'])
+            : null;
+    }
+
+    private function epochToIso(mixed $epoch): ?string
+    {
+        if (is_string($epoch) && ctype_digit($epoch)) {
+            $epoch = (int) $epoch;
+        }
+        if (!is_int($epoch) || $epoch <= 0 || $epoch > time() + 60) {
+            return null;
+        }
+
+        return (new \DateTimeImmutable('@' . (string) $epoch))
+            ->setTimezone(new \DateTimeZone('America/Sao_Paulo'))
+            ->format('Y-m-d\TH:i:sP');
     }
 
     /**
