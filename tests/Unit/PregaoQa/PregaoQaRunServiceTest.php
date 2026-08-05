@@ -576,6 +576,81 @@ final class PregaoQaRunServiceTest extends TestCase
         self::assertNull((new PregaoQaRunService($redis2, $proof))->loadAuthorizedRun($manifest['run_id'], 1335));
     }
 
+    public function testTerminalMediaAuthorizationOutlivesActiveManifestButExpiresWithEvidence(): void
+    {
+        $now = time();
+        $clock = $now;
+        $proof = new PregaoQaProof(str_repeat('k', 32));
+        $records = $this->terminalMediaRecords($proof, $now);
+        $service = $this->mediaAuthorizationService($records, $clock, $proof);
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+
+        $clock += PregaoQaRunService::RUN_TTL_SECONDS + 1;
+        self::assertTrue($service->isMediaAuthorized($runId, 1335));
+        self::assertFalse($service->isMediaAuthorized($runId, 9999));
+
+        $clock = $now + PregaoQaRunService::EVIDENCE_TTL_SECONDS;
+        self::assertFalse($service->isMediaAuthorized($runId, 1335));
+    }
+
+    public function testTerminalMediaAuthorizationRequiresSignedRetainedManifestAndExactReceipt(): void
+    {
+        $now = time();
+        $clock = $now + PregaoQaRunService::RUN_TTL_SECONDS + 1;
+        $proof = new PregaoQaProof(str_repeat('k', 32));
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+
+        $records = $this->terminalMediaRecords($proof, $now);
+        unset($records[PregaoQaRunService::receiptKey($runId)]);
+        self::assertFalse($this->mediaAuthorizationService($records, $clock, $proof)->isMediaAuthorized($runId, 1335));
+
+        $records = $this->terminalMediaRecords($proof, $now);
+        $receiptKey = PregaoQaRunService::receiptKey($runId);
+        $records[$receiptKey]['value']['event_id'] = 42;
+        self::assertFalse($this->mediaAuthorizationService($records, $clock, $proof)->isMediaAuthorized($runId, 1335));
+
+        $records = $this->terminalMediaRecords($proof, $now);
+        $stateKey = PregaoQaRunService::stateKey($runId);
+        $records[$stateKey]['value']['manifest']['signature'] = str_repeat('0', 64);
+        self::assertFalse($this->mediaAuthorizationService($records, $clock, $proof)->isMediaAuthorized($runId, 1335));
+    }
+
+    public function testNonTerminalMediaAuthorizationStillRequiresActiveManifest(): void
+    {
+        $now = time();
+        $clock = $now;
+        $proof = new PregaoQaProof(str_repeat('k', 32));
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $manifest = $proof->signManifest([
+            'run_id' => $runId,
+            'account_id' => 1335,
+            'user_id' => 77,
+            'created_at' => gmdate(DATE_ATOM, $now - 60),
+            'expires_at' => gmdate(DATE_ATOM, $now + PregaoQaRunService::RUN_TTL_SECONDS - 60),
+        ]);
+        $records = [
+            PregaoQaRunService::manifestKey($runId) => [
+                'expires_at' => $now + PregaoQaRunService::RUN_TTL_SECONDS,
+                'value' => $manifest,
+            ],
+            PregaoQaRunService::stateKey($runId) => [
+                'expires_at' => $now + PregaoQaRunService::EVIDENCE_TTL_SECONDS,
+                'value' => [
+                    'run_id' => $runId,
+                    'account_id' => 1335,
+                    'manifest_hash' => $manifest['manifest_hash'],
+                    'status' => 'running',
+                    'sequence' => 1,
+                ],
+            ],
+        ];
+        $service = $this->mediaAuthorizationService($records, $clock, $proof);
+
+        self::assertTrue($service->isMediaAuthorized($runId, 1335));
+        $clock += PregaoQaRunService::RUN_TTL_SECONDS + 1;
+        self::assertFalse($service->isMediaAuthorized($runId, 1335));
+    }
+
     public function testWorkerLockTtlHasMarginBeyondRuntimeAndStopTimeout(): void
     {
         self::assertGreaterThan(180 + 15, PregaoQaRunService::LOCK_TTL_SECONDS);
@@ -627,5 +702,100 @@ final class PregaoQaRunServiceTest extends TestCase
             ->willReturn(0);
 
         (new PregaoQaRunService($redis, new PregaoQaProof(str_repeat('k', 32))))->releaseActive(1335, $runId);
+    }
+
+    /**
+     * @param array<string,array{expires_at:int,value:array<string,mixed>}> $records
+     */
+    private function mediaAuthorizationService(
+        array &$records,
+        int &$clock,
+        PregaoQaProof $proof
+    ): PregaoQaRunService {
+        $redis = $this->createMock(Redis::class);
+        $redis->method('get')->willReturnCallback(
+            static function (string $key) use (&$records, &$clock): string|false {
+                $record = $records[$key] ?? null;
+                if (!is_array($record) || $record['expires_at'] <= $clock) {
+                    return false;
+                }
+                return json_encode($record['value'], JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            }
+        );
+        return new PregaoQaRunService($redis, $proof);
+    }
+
+    /**
+     * @return array<string,array{expires_at:int,value:array<string,mixed>}>
+     */
+    private function terminalMediaRecords(PregaoQaProof $proof, int $now): array
+    {
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $manifest = $proof->signManifest([
+            'run_id' => $runId,
+            'account_id' => 1335,
+            'user_id' => 77,
+            'created_at' => gmdate(DATE_ATOM, $now - 60),
+            'expires_at' => gmdate(DATE_ATOM, $now + PregaoQaRunService::RUN_TTL_SECONDS - 60),
+        ]);
+        $status = $proof->signStatus([
+            'running' => false,
+            'suite' => 'pregao-live',
+            'test' => 'console_http',
+            'result' => 'passed',
+            'video_url' => null,
+            'stream_url' => '/qa/live/' . $runId,
+            'run_id' => $runId,
+            'sequence' => 5,
+            'step' => 'console_http',
+            'screenshot_url' => '/qa/frame/' . $runId,
+            'observed_at' => gmdate(DATE_ATOM, $now),
+            'started_at' => $manifest['created_at'],
+            'manifest_hash' => $manifest['manifest_hash'],
+        ], 1335);
+        $payloadHash = PregaoQaRunService::statusHash($status);
+        $eventId = 41;
+        $expiresAt = $now + PregaoQaRunService::EVIDENCE_TTL_SECONDS;
+        return [
+            PregaoQaRunService::manifestKey($runId) => [
+                'expires_at' => $now + PregaoQaRunService::RUN_TTL_SECONDS,
+                'value' => $manifest,
+            ],
+            PregaoQaRunService::stateKey($runId) => [
+                'expires_at' => $expiresAt,
+                'value' => [
+                    'run_id' => $runId,
+                    'account_id' => 1335,
+                    'manifest_hash' => $manifest['manifest_hash'],
+                    'status' => 'passed',
+                    'sequence' => 5,
+                    'step' => 'console_http',
+                    'screenshot_url' => '/qa/frame/' . $runId,
+                    'cursor' => null,
+                    'observed_at' => $status['observed_at'],
+                    'updated_at' => $status['observed_at'],
+                    'manifest' => $manifest,
+                    'receipt_hash' => $payloadHash,
+                    'receipt_event_id' => $eventId,
+                ],
+            ],
+            PregaoQaRunService::receiptKey($runId) => [
+                'expires_at' => $expiresAt,
+                'value' => [
+                    'run_id' => $runId,
+                    'account_id' => 1335,
+                    'manifest_hash' => $manifest['manifest_hash'],
+                    'manifest_expires_at' => $manifest['expires_at'],
+                    'sequence' => 5,
+                    'step' => 'console_http',
+                    'result' => 'passed',
+                    'observed_at' => $status['observed_at'],
+                    'payload_hash' => $payloadHash,
+                    'event_id' => $eventId,
+                    'event_ts' => $status['observed_at'],
+                    'status' => $status,
+                ],
+            ],
+        ];
     }
 }
