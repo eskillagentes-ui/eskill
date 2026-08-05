@@ -182,10 +182,7 @@ final class PregaoEventExplorerServiceTest extends TestCase
             ['icon' => '🛡️', 'level' => 'info', 'msg' => 'ciclo ok', 'robot' => 'SENTINELA', 'sku' => 'MLB123'],
             $byType['op']['payload']
         );
-        self::assertSame(
-            ['result' => 'passed', 'running' => false, 'suite' => 'smoke', 'test' => 'login'],
-            $byType['qa.status']['payload']
-        );
+        self::assertNull($byType['qa.status']['payload'], 'QA histórico sem proveniência deve falhar fechado');
         self::assertSame(
             ['flash' => 'green', 'key' => 'perguntas_7d'],
             $byType['metric.update']['payload']
@@ -202,7 +199,9 @@ final class PregaoEventExplorerServiceTest extends TestCase
         $db = $this->makeDb();
         $this->insertEvent($db, 1335, 'op', '2026-08-04 10:00:00', [
             'msg' => 'Authorization: Basic dXNlcjpwYXNz Bearer "TOP_SECRET_MARKER" '
-                . 'token="QA SECRET MARKER" ' . str_repeat('x', 700),
+                . 'client_secret="CLIENT SECRET MARKER" id_token="ID TOKEN MARKER" '
+                . 'private_token="PRIVATE TOKEN MARKER" token="TOP\\"ESCAPED SECRET MARKER" '
+                . str_repeat('x', 700),
         ]);
 
         $result = $this->makeService($db)->list(1335);
@@ -210,7 +209,10 @@ final class PregaoEventExplorerServiceTest extends TestCase
 
         self::assertStringNotContainsString('TOP_SECRET_MARKER', $message);
         self::assertStringNotContainsString('dXNlcjpwYXNz', $message);
-        self::assertStringNotContainsString('QA SECRET MARKER', $message);
+        self::assertStringNotContainsString('CLIENT SECRET MARKER', $message);
+        self::assertStringNotContainsString('ID TOKEN MARKER', $message);
+        self::assertStringNotContainsString('PRIVATE TOKEN MARKER', $message);
+        self::assertStringNotContainsString('ESCAPED SECRET MARKER', $message);
         self::assertLessThanOrEqual(500, strlen($message));
         self::assertStringContainsString('[REDACTED]', $message);
     }

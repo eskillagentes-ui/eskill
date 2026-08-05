@@ -235,6 +235,10 @@ final class PregaoEventExplorerService
             ? (json_decode($rawPayload, true) ?: [])
             : (is_array($rawPayload) ? $rawPayload : []);
 
+        if ($type === 'qa.status') {
+            // Histórico sem recibo de produtor confiável não prova execução.
+            return null;
+        }
         if ($type === 'agent.status') {
             return PregaoAgentStatusService::validatePayload($payload, $accountId);
         }
@@ -267,7 +271,8 @@ final class PregaoEventExplorerService
             return '[INVALID TEXT]';
         }
 
-        $secretValue = '(?:"[^"]*"|\'[^\']*\'|[^\s,;]+)';
+        $secretValue = '(?:"(?:\\\\.|[^"\\\\])*"|\'(?:\\\\.|[^\'\\\\])*\'|[^\s,;]+)';
+        $secretKey = '(?:authorization|api[_-]?key|(?:[a-z0-9]+[_-])*(?:token|secret|password))';
         $redacted = preg_replace(
             '/\bAuthorization\s*:\s*(?:Basic|Bearer)\s+' . $secretValue . '/iu',
             'Authorization: [REDACTED]',
@@ -279,8 +284,7 @@ final class PregaoEventExplorerService
             $redacted ?? ''
         );
         $redacted = preg_replace(
-            '/\b(access[_-]?token|refresh[_-]?token|api[_-]?key|authorization|password|secret|token)\s*[:=]\s*'
-                . $secretValue . '/iu',
+            '/\b(' . $secretKey . ')\s*[:=]\s*' . $secretValue . '/iu',
             '$1=[REDACTED]',
             $redacted ?? ''
         );
