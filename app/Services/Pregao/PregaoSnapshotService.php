@@ -438,28 +438,10 @@ final class PregaoSnapshotService
             $stmt->execute([$accountId]);
             $raw = $stmt->fetchColumn();
             $payload = is_string($raw) ? json_decode($raw, true) : null;
-            if (!is_array($payload) || !$this->qaProof->verifyStatus($payload, $accountId)) {
+            if (!is_array($payload)) {
                 return $this->emptyQaState();
             }
-            return [
-                'executed' => true,
-                'running' => $payload['running'],
-                'suite' => $payload['suite'],
-                'test' => $payload['test'],
-                'result' => $payload['result'],
-                'video_url' => null,
-                'stream_url' => $payload['stream_url'],
-                'run_id' => $payload['run_id'],
-                'sequence' => $payload['sequence'],
-                'step' => $payload['step'],
-                'observed_at' => $payload['observed_at'],
-                'log' => [[
-                    'sequence' => $payload['sequence'],
-                    'step' => $payload['step'],
-                    'result' => $payload['result'],
-                    'observed_at' => $payload['observed_at'],
-                ]],
-            ];
+            return $this->qaProof->projectStatus($payload, $accountId) ?? $this->emptyQaState();
         } catch (Throwable) {
             return $this->emptyQaState();
         }

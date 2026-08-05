@@ -1,0 +1,32 @@
+[Unit]
+Description=eskill Pregao QA Playwright read-only worker
+After=network-online.target redis-server.service
+Wants=network-online.target
+StartLimitIntervalSec=0
+
+[Service]
+Type=simple
+User=eskill
+Group=eskill
+WorkingDirectory=/home/eskill/htdocs/eskill.com.br
+Environment=PREGAO_QA_BASE_URL=https://eskill.com.br
+Environment=PREGAO_QA_ALLOW_PRODUCTION_READONLY=true
+Environment=PREGAO_QA_BROWSER_EXECUTABLE=/usr/bin/google-chrome-stable
+ExecStart=/usr/bin/php /home/eskill/htdocs/eskill.com.br/bin/pregao-qa-worker.php
+Restart=always
+RestartSec=2
+RuntimeMaxSec=180
+TimeoutStopSec=15
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=false
+ReadWritePaths=/home/eskill/htdocs/eskill.com.br/storage/private/pregao-qa /home/eskill/htdocs/eskill.com.br/storage/logs
+MemoryMax=1200M
+CPUQuota=150%
+StandardOutput=append:/home/eskill/htdocs/eskill.com.br/storage/logs/pregao-qa-worker.log
+StandardError=append:/home/eskill/htdocs/eskill.com.br/storage/logs/pregao-qa-worker.log
+
+[Install]
+WantedBy=multi-user.target

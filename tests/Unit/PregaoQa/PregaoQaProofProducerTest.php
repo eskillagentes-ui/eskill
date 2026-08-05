@@ -28,7 +28,7 @@ final class PregaoQaProofProducerTest extends TestCase
             'run_id' => $manifest['run_id'],
             'sequence' => 1,
             'step' => 'dashboard',
-            'result' => 'passed',
+            'result' => 'running',
             'screenshot' => 'latest.png',
             'cursor' => ['x' => 10, 'y' => 20],
             'observed_at' => '2026-08-05T12:01:00+00:00',
@@ -53,7 +53,9 @@ final class PregaoQaProofProducerTest extends TestCase
         self::assertSame('qa.status', $event['type']);
         self::assertSame(1335, $event['account_id']);
         self::assertTrue($proof->verifyStatus($event['payload'], 1335));
-        self::assertSame('/qa/frame/' . $manifest['run_id'], $event['payload']['stream_url']);
+        self::assertSame('/qa/live/' . $manifest['run_id'], $event['payload']['stream_url']);
+        self::assertSame($manifest['created_at'], $event['payload']['started_at']);
+        self::assertSame('running', $proof->projectStatus($event['payload'], 1335)['status']);
         self::assertSame($event, $published);
 
         $event['payload']['result'] = 'failed';

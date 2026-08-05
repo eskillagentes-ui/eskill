@@ -16,6 +16,7 @@ final class PregaoQaRunServiceTest extends TestCase
         $stored = [];
         $queued = null;
         $redis = $this->createMock(Redis::class);
+        $redis->method('set')->willReturn(true);
         $redis->method('setex')->willReturnCallback(static function (string $key, int $ttl, string $value) use (&$stored): bool {
             $stored[$key] = [$ttl, $value];
             return true;
@@ -42,6 +43,21 @@ final class PregaoQaRunServiceTest extends TestCase
         self::assertSame(1335, $manifest['account_id']);
         self::assertSame(77, $manifest['user_id']);
         self::assertSame($run['manifest_hash'], $manifest['manifest_hash']);
+        self::assertSame('pregao:qa:active:1335', PregaoQaRunService::activeKey(1335));
+    }
+
+    public function testStartRunRejectsSecondActiveRunForSameAccount(): void
+    {
+        $redis = $this->createMock(Redis::class);
+        $redis->expects(self::once())->method('set')
+            ->with(PregaoQaRunService::activeKey(1335), self::isType('string'), ['nx', 'ex' => 900])
+            ->willReturn(false);
+        $redis->expects(self::never())->method('setex');
+        $redis->expects(self::never())->method('lPush');
+
+        $service = new PregaoQaRunService($redis, new PregaoQaProof(str_repeat('k', 32)));
+        $this->expectException(\DomainException::class);
+        $service->startRun(1335, 77);
     }
 
     public function testClaimUsesNxLockAndFailsClosedWhenLockAlreadyExists(): void

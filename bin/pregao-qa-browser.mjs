@@ -12,7 +12,7 @@ export const QA_STEPS = Object.freeze([
   'event_explorer',
   'console_http',
 ]);
-const QA_RESULTS = new Set(['passed', 'failed']);
+const QA_RESULTS = new Set(['running', 'passed', 'failed', 'blocked']);
 const READONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
@@ -62,8 +62,8 @@ function assertStep(step) {
 export function latestScreenshotPath(outputRoot, step) {
   assertStep(step);
   return {
-    absolute: path.join(outputRoot, step, 'latest.png'),
-    protocol: `${step}/latest.png`,
+    absolute: path.join(outputRoot, 'latest.png'),
+    protocol: 'latest.png',
   };
 }
 
@@ -72,7 +72,7 @@ export function createProtocolRecord({ runId, sequence, step, result, screenshot
   assertStep(step);
   if (!Number.isInteger(sequence) || sequence < 1) throw new Error('sequence inválida');
   if (!QA_RESULTS.has(result)) throw new Error('resultado inválido');
-  if (screenshot !== null && screenshot !== `${step}/latest.png`) throw new Error('screenshot inválido');
+  if (screenshot !== null && screenshot !== 'latest.png') throw new Error('screenshot inválido');
   if (cursor !== null && (!cursor || !Number.isFinite(cursor.x) || !Number.isFinite(cursor.y))) {
     throw new Error('cursor inválido');
   }
@@ -89,7 +89,7 @@ export function createProtocolRecord({ runId, sequence, step, result, screenshot
 }
 
 export async function executeProtocolStep({
-  runId, sequence, step, action, capture, write, now,
+  runId, sequence, step, action, capture, write, now, terminal = false,
 }) {
   let failed = false;
   let screenshot = null;
@@ -110,7 +110,7 @@ export async function executeProtocolStep({
     runId,
     sequence,
     step,
-    result: failed ? 'failed' : 'passed',
+    result: failed ? 'failed' : (terminal ? 'passed' : 'running'),
     screenshot,
     cursor,
     observedAt: now(),
@@ -170,11 +170,14 @@ export function parseRunnerEnv(env) {
   if (typeof env.PREGAO_QA_OUTPUT_DIR !== 'string' || !path.isAbsolute(env.PREGAO_QA_OUTPUT_DIR)) {
     throw new Error('PREGAO_QA_OUTPUT_DIR absoluto é obrigatório');
   }
+  const executablePath = env.PREGAO_QA_BROWSER_EXECUTABLE || '/usr/bin/google-chrome-stable';
+  if (!path.isAbsolute(executablePath)) throw new Error('PREGAO_QA_BROWSER_EXECUTABLE absoluto é obrigatório');
   return {
     baseUrl,
     runId: env.PREGAO_QA_RUN_ID,
     outputRoot: path.resolve(env.PREGAO_QA_OUTPUT_DIR),
     cookie: parseCookie(env.PREGAO_QA_SESSION_COOKIE),
+    executablePath,
   };
 }
 
@@ -190,7 +193,7 @@ function emit(record) {
 }
 
 export async function run(config) {
-  const browser = await chromium.launch({ headless: true });
+  const browser = await chromium.launch({ headless: true, executablePath: config.executablePath });
   let context;
   let sequence = 0;
   let cursor = null;
@@ -250,6 +253,7 @@ export async function run(config) {
         capture: () => captureLatest(page, config.outputRoot, name),
         write: emit,
         now: () => new Date().toISOString(),
+        terminal: name === 'console_http',
       });
     }
 
@@ -271,6 +275,10 @@ export async function run(config) {
       }
       await page.locator('#pregao-root[data-read-only="1"]').waitFor({ state: 'visible', timeout: 10000 });
       snapshotResponse = await snapshotWait;
+      const box = await page.locator('.pg-header').boundingBox();
+      if (!box) throw new Error('cabeçalho indisponível');
+      cursor = await moveCursor(page, Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2));
+      return cursor;
     });
 
     await step('snapshot', async () => {
@@ -284,6 +292,10 @@ export async function run(config) {
       );
       await snapshotResponse.finished();
       await page.locator('#semaText').waitFor({ state: 'visible', timeout: 10000 });
+      const box = await page.locator('#semaText').boundingBox();
+      if (!box) throw new Error('semáforo indisponível');
+      cursor = await moveCursor(page, Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2));
+      return cursor;
     });
 
     await step('realtime', async () => {
@@ -291,6 +303,10 @@ export async function run(config) {
         const connection = document.getElementById('conn');
         return Boolean(connection && (connection.classList.contains('ws') || connection.classList.contains('sse')));
       }, null, { timeout: 15000 });
+      const box = await page.locator('#conn').boundingBox();
+      if (!box) throw new Error('indicador realtime indisponível');
+      cursor = await moveCursor(page, Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2));
+      return cursor;
     });
 
     await step('event_explorer', async () => {

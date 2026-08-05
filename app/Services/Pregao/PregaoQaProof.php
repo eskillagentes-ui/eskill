@@ -12,7 +12,7 @@ final class PregaoQaProof
 
     private const STATUS_KEYS = [
         'manifest_hash', 'observed_at', 'result', 'run_id', 'running', 'screenshot_url', 'sequence',
-        'signature', 'step', 'stream_url', 'suite', 'test', 'video_url',
+        'signature', 'started_at', 'step', 'stream_url', 'suite', 'test', 'video_url',
     ];
 
     private string $secret;
@@ -28,7 +28,14 @@ final class PregaoQaProof
     public static function fromEnvironment(): ?self
     {
         $secret = (string) ($_ENV['PREGAO_QA_SIGNING_KEY'] ?? getenv('PREGAO_QA_SIGNING_KEY') ?: '');
-        return strlen($secret) >= 32 ? new self($secret) : null;
+        if (strlen($secret) < 32) {
+            $appKey = (string) ($_ENV['APP_KEY'] ?? getenv('APP_KEY') ?: '');
+            if (strlen($appKey) < 32) {
+                return null;
+            }
+            $secret = hash_hmac('sha256', 'pregao-qa-live-v1', $appKey);
+        }
+        return new self($secret);
     }
 
     /** @param array<string, mixed> $manifest @return array<string, mixed> */
@@ -111,6 +118,28 @@ final class PregaoQaProof
         return preg_match('/\A[a-f0-9]{64}\z/D', $signature) === 1 && hash_equals($expected, $signature);
     }
 
+    /** @param array<string, mixed> $status @return array<string, mixed>|null */
+    public function projectStatus(array $status, int $accountId): ?array
+    {
+        if (!$this->verifyStatus($status, $accountId)) {
+            return null;
+        }
+        $started = strtotime($status['started_at']);
+        $observed = strtotime($status['observed_at']);
+        if ($started === false || $observed === false || $observed < $started) {
+            return null;
+        }
+        $running = $status['result'] === 'running';
+        return [
+            'trusted' => true,
+            'run_id' => $status['run_id'],
+            'status' => $status['result'],
+            'step' => $status['step'],
+            'elapsed_ms' => ($observed - $started) * 1000,
+            'result' => $running ? null : $status['result'],
+        ];
+    }
+
     /** @param array<string, mixed> $manifest */
     private function assertManifestBase(array $manifest): void
     {
@@ -144,8 +173,9 @@ final class PregaoQaProof
             && $status['running'] === ($status['result'] === 'running')
             && is_string($status['suite']) && $status['suite'] === 'pregao-live'
             && is_string($status['test']) && $status['test'] === $status['step']
+            && self::isIsoTimestamp($status['started_at'])
             && array_key_exists('video_url', $status) && $status['video_url'] === null
-            && (($status['stream_url'] === null) || $status['stream_url'] === '/qa/frame/' . $status['run_id'])
+            && (($status['stream_url'] === null) || $status['stream_url'] === '/qa/live/' . $status['run_id'])
             && (($status['screenshot_url'] === null) || $status['screenshot_url'] === '/qa/frame/' . $status['run_id'])
             && is_string($status['manifest_hash'])
             && preg_match('/\A[a-f0-9]{64}\z/D', $status['manifest_hash']) === 1

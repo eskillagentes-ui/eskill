@@ -32,12 +32,13 @@ final class PregaoQaSnapshotStreamTest extends TestCase
             'test' => 'dashboard',
             'result' => 'passed',
             'video_url' => null,
-            'stream_url' => '/qa/frame/' . $manifest['run_id'],
+            'stream_url' => '/qa/live/' . $manifest['run_id'],
             'run_id' => $manifest['run_id'],
             'sequence' => 1,
             'step' => 'dashboard',
             'screenshot_url' => '/qa/frame/' . $manifest['run_id'],
             'observed_at' => '2026-08-05T12:01:00+00:00',
+            'started_at' => $manifest['created_at'],
             'manifest_hash' => $manifest['manifest_hash'],
         ], 1335);
         $db->prepare('INSERT INTO pregao_events (account_id,type,ts,payload,source) VALUES (?,?,?,?,?)')
@@ -47,9 +48,11 @@ final class PregaoQaSnapshotStreamTest extends TestCase
         $method = new ReflectionMethod($service, 'loadLatestQa');
         $method->setAccessible(true);
         $qa = $method->invoke($service, 1335);
-        self::assertTrue($qa['executed']);
+        self::assertTrue($qa['trusted']);
+        self::assertSame('passed', $qa['status']);
         self::assertSame('passed', $qa['result']);
         self::assertSame($manifest['run_id'], $qa['run_id']);
+        self::assertSame(60000, $qa['elapsed_ms']);
 
         $payload['signature'] = str_repeat('0', 64);
         $db->prepare('INSERT INTO pregao_events (account_id,type,ts,payload,source) VALUES (?,?,?,?,?)')
@@ -65,15 +68,16 @@ final class PregaoQaSnapshotStreamTest extends TestCase
         $payload = $proof->signStatus([
             'running' => true,
             'suite' => 'pregao-live',
-            'test' => 'login',
+            'test' => 'dashboard',
             'result' => 'running',
             'video_url' => null,
             'stream_url' => null,
             'run_id' => '123e4567-e89b-42d3-a456-426614174000',
-            'sequence' => 0,
-            'step' => 'login',
+            'sequence' => 1,
+            'step' => 'dashboard',
             'screenshot_url' => null,
             'observed_at' => (new \DateTimeImmutable())->format(DATE_ATOM),
+            'started_at' => (new \DateTimeImmutable('-1 second'))->format(DATE_ATOM),
             'manifest_hash' => str_repeat('a', 64),
         ], 1335);
         $event = [

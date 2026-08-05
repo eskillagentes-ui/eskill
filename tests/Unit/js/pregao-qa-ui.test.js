@@ -52,6 +52,26 @@ function trustedQa(overrides = {}) {
     };
 }
 
+function signedQa(overrides = {}) {
+    return {
+        manifest_hash: 'a'.repeat(64),
+        observed_at: '2026-08-05T12:00:03.000Z',
+        result: 'running',
+        run_id: RUN_ID,
+        running: true,
+        screenshot_url: '/qa/frame/' + RUN_ID,
+        sequence: 2,
+        signature: 'b'.repeat(64),
+        started_at: '2026-08-05T12:00:00.000Z',
+        step: 'snapshot',
+        stream_url: '/qa/live/' + RUN_ID,
+        suite: 'pregao-live',
+        test: 'snapshot',
+        video_url: null,
+        ...overrides
+    };
+}
+
 test('trigger envia somente POST same-origin com CSRF e mantém botão bloqueado em queued', async () => {
     const api = loadApi();
     const { document, element } = makeDocument();
@@ -109,6 +129,44 @@ test('applyQa aceita somente projeção trusted exata e deriva iframe de UUID', 
     assert.strictEqual(ui.applyQa({ ...trustedQa(), trusted: false }), false);
     assert.strictEqual(ui.applyQa({ ...trustedQa(), run_id: '../escape' }), false);
     assert.strictEqual(ui.applyQa({ ...trustedQa(), step: 'arbitrary-script' }), false);
+});
+
+test('applyQa normaliza evento assinado realtime e mostra blocked sem inventar aprovação', () => {
+    const api = loadApi();
+    const { document, element } = makeDocument();
+    const ui = api.create({
+        document,
+        location: { href: 'https://app.example.test/dashboard/pregao', origin: 'https://app.example.test' },
+        boot: { qaRunUrl: '/api/pregao/qa/run', csrfToken: 'csrf' },
+        fetch: async () => { throw new Error('não esperado'); }
+    });
+
+    assert.strictEqual(ui.applyQa(signedQa()), true);
+    assert.strictEqual(element('qaStatus').textContent, 'EM EXECUÇÃO');
+    assert.strictEqual(element('qaElapsed').textContent, '3,0 s');
+    assert.strictEqual(ui.applyQa(signedQa({
+        result: 'blocked', running: false, step: 'console_http', test: 'console_http', sequence: 5
+    })), true);
+    assert.strictEqual(element('qaStatus').textContent, 'BLOQUEADO');
+    assert.match(element('qaFeedback').textContent, /bloqueado/i);
+    assert.strictEqual(ui.applyQa(signedQa({ signature: '0'.repeat(63) })), false);
+});
+
+test('snapshot sem execução confiável permanece NÃO EXECUTADO', () => {
+    const api = loadApi();
+    const { document, element } = makeDocument();
+    const ui = api.create({
+        document,
+        location: { href: 'https://app.example.test/dashboard/pregao', origin: 'https://app.example.test' },
+        boot: {},
+        fetch: async () => null
+    });
+    assert.strictEqual(ui.applyQa({
+        executed: false, running: false, suite: null, test: null, result: null, video_url: null,
+        stream_url: null, run_id: null, sequence: null, step: null, observed_at: null, log: []
+    }), true);
+    assert.strictEqual(element('qaStatus').textContent, 'NÃO EXECUTADO');
+    assert.strictEqual(element('qaStream').hidden, true);
 });
 
 test('trigger falha fechado para URL externa, CSRF ausente e resposta não trusted', async () => {

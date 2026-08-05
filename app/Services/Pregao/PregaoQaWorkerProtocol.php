@@ -7,7 +7,7 @@ namespace App\Services\Pregao;
 final class PregaoQaWorkerProtocol
 {
     /** @var list<string> */
-    public const STEPS = ['boot', 'login', 'dashboard', 'snapshot', 'stream', 'finalize'];
+    public const STEPS = ['dashboard', 'snapshot', 'realtime', 'event_explorer', 'console_http'];
     /** @var list<string> */
     public const RESULTS = ['running', 'passed', 'failed', 'blocked'];
     /** @var list<string> */
@@ -65,6 +65,6 @@ final class PregaoQaWorkerProtocol
             return false;
         }
         $epoch = strtotime($value);
-        return $epoch !== false;
+        return $epoch !== false && $epoch <= time() + 60;
     }
 }

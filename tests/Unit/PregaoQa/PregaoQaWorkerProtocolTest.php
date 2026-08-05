@@ -15,7 +15,7 @@ final class PregaoQaWorkerProtocolTest extends TestCase
             'run_id' => '123e4567-e89b-42d3-a456-426614174000',
             'sequence' => 1,
             'step' => 'dashboard',
-            'result' => 'passed',
+            'result' => 'running',
             'screenshot' => 'latest.png',
             'cursor' => ['x' => 10, 'y' => 20],
             'observed_at' => '2026-08-05T12:01:00+00:00',
@@ -41,6 +41,9 @@ final class PregaoQaWorkerProtocolTest extends TestCase
         $badSequence = $valid;
         $badSequence['sequence'] = 0;
         $cases[] = $badSequence;
+        $future = $valid;
+        $future['observed_at'] = '2099-08-05T12:01:00+00:00';
+        $cases[] = $future;
 
         foreach ($cases as $case) {
             self::assertNull(PregaoQaWorkerProtocol::decode(json_encode($case, JSON_THROW_ON_ERROR), $valid['run_id'], 0));
@@ -57,6 +60,13 @@ final class PregaoQaWorkerProtocolTest extends TestCase
         self::assertStringContainsString('$sessions->create(', $source);
         self::assertStringContainsString('$sessions->destroy(', $source);
         self::assertStringContainsString('finally', $source);
+        self::assertStringContainsString("['PREGAO_QA_SESSION_COOKIE']", $source);
+        self::assertStringContainsString("['PREGAO_QA_OUTPUT_DIR']", $source);
+        self::assertStringContainsString("['PREGAO_QA_BASE_URL']", $source);
+        self::assertStringContainsString('PREGAO_QA_ALLOW_PRODUCTION_READONLY', $source);
+        self::assertStringContainsString('stream_set_timeout($pipes[1], 120)', $source);
+        self::assertStringContainsString('$runs->releaseActive(', $source);
+        self::assertStringNotContainsString("'--session-id'", $source);
         self::assertStringNotContainsString('curl', $source);
     }
 }

@@ -12,6 +12,7 @@ final class PregaoQaRunService
     public const RUN_ID_PATTERN = '/\A[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\z/D';
     public const RUN_TTL_SECONDS = 900;
     public const LOCK_TTL_SECONDS = 900;
+    private const ACTIVE_PREFIX = 'pregao:qa:active:';
 
     private Redis $redis;
     private PregaoQaProof $proof;
@@ -48,37 +49,44 @@ final class PregaoQaRunService
             throw new \InvalidArgumentException('Escopo QA inválido');
         }
         $runId = self::uuidV4();
+        if ($this->redis->set(self::activeKey($accountId), $runId, ['nx', 'ex' => self::RUN_TTL_SECONDS]) !== true) {
+            throw new \DomainException('Já existe QA ativo para esta conta');
+        }
         $createdAt = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
-        $manifest = $this->proof->signManifest([
-            'run_id' => $runId,
-            'account_id' => $accountId,
-            'user_id' => $userId,
-            'created_at' => $createdAt->format(DATE_ATOM),
-            'expires_at' => $createdAt->modify('+' . self::RUN_TTL_SECONDS . ' seconds')->format(DATE_ATOM),
-        ]);
-        $encodedManifest = json_encode($manifest, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
-        if ($this->redis->setex(self::manifestKey($runId), self::RUN_TTL_SECONDS, $encodedManifest) !== true) {
-            throw new \RuntimeException('Falha ao armazenar manifesto QA');
-        }
-        $state = [
-            'run_id' => $runId,
-            'account_id' => $accountId,
-            'status' => 'queued',
-            'sequence' => -1,
-            'updated_at' => $createdAt->format(DATE_ATOM),
-        ];
-        if ($this->redis->setex(
-            self::stateKey($runId),
-            self::RUN_TTL_SECONDS,
-            json_encode($state, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)
-        ) !== true) {
-            $this->redis->del(self::manifestKey($runId));
-            throw new \RuntimeException('Falha ao armazenar estado QA');
-        }
-        $queued = $this->redis->lPush(self::QUEUE_KEY, json_encode(['run_id' => $runId], JSON_THROW_ON_ERROR));
-        if (!is_int($queued) || $queued < 1) {
+        try {
+            $manifest = $this->proof->signManifest([
+                'run_id' => $runId,
+                'account_id' => $accountId,
+                'user_id' => $userId,
+                'created_at' => $createdAt->format(DATE_ATOM),
+                'expires_at' => $createdAt->modify('+' . self::RUN_TTL_SECONDS . ' seconds')->format(DATE_ATOM),
+            ]);
+            $encodedManifest = json_encode($manifest, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            if ($this->redis->setex(self::manifestKey($runId), self::RUN_TTL_SECONDS, $encodedManifest) !== true) {
+                throw new \RuntimeException('Falha ao armazenar manifesto QA');
+            }
+            $state = [
+                'run_id' => $runId,
+                'account_id' => $accountId,
+                'status' => 'queued',
+                'sequence' => 0,
+                'updated_at' => $createdAt->format(DATE_ATOM),
+            ];
+            if ($this->redis->setex(
+                self::stateKey($runId),
+                self::RUN_TTL_SECONDS,
+                json_encode($state, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)
+            ) !== true) {
+                throw new \RuntimeException('Falha ao armazenar estado QA');
+            }
+            $queued = $this->redis->lPush(self::QUEUE_KEY, json_encode(['run_id' => $runId], JSON_THROW_ON_ERROR));
+            if (!is_int($queued) || $queued < 1) {
+                throw new \RuntimeException('Falha ao enfileirar QA');
+            }
+        } catch (\Throwable $exception) {
             $this->redis->del(self::manifestKey($runId), self::stateKey($runId));
-            throw new \RuntimeException('Falha ao enfileirar QA');
+            $this->releaseActive($accountId, $runId);
+            throw $exception;
         }
         return [
             'run_id' => $runId,
@@ -180,6 +188,23 @@ final class PregaoQaRunService
         // Lua constante: somente chave e token passam em KEYS/ARGV, nunca são interpolados no script.
         $lua = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
         $this->redis->eval($lua, [self::lockKey($runId), $token], 1);
+    }
+
+    public function releaseActive(int $accountId, string $runId): void
+    {
+        if ($accountId <= 0 || preg_match(self::RUN_ID_PATTERN, $runId) !== 1) {
+            return;
+        }
+        $lua = "if redis.call('GET', KEYS[1]) == ARGV[1] then return redis.call('DEL', KEYS[1]) else return 0 end";
+        $this->redis->eval($lua, [self::activeKey($accountId), $runId], 1);
+    }
+
+    public static function activeKey(int $accountId): string
+    {
+        if ($accountId <= 0) {
+            throw new \InvalidArgumentException('Conta QA inválida');
+        }
+        return self::ACTIVE_PREFIX . $accountId;
     }
 
     public static function manifestKey(string $runId): string

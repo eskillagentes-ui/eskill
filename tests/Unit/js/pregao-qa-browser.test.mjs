@@ -39,8 +39,8 @@ test('protocolo possui chaves exatas, etapa allowlisted e resultado real', () =>
     runId: RUN_ID,
     sequence: 2,
     step: 'snapshot',
-    result: 'passed',
-    screenshot: 'snapshot/latest.png',
+    result: 'running',
+    screenshot: 'latest.png',
     cursor: { x: 320, y: 180 },
     observedAt: '2026-08-05T12:00:00.000Z',
   });
@@ -51,8 +51,8 @@ test('protocolo possui chaves exatas, etapa allowlisted e resultado real', () =>
     run_id: RUN_ID,
     sequence: 2,
     step: 'snapshot',
-    result: 'passed',
-    screenshot: 'snapshot/latest.png',
+    result: 'running',
+    screenshot: 'latest.png',
     cursor: { x: 320, y: 180 },
     observed_at: '2026-08-05T12:00:00.000Z',
   });
@@ -75,7 +75,7 @@ test('falha em qualquer ponto da etapa ainda emite uma linha failed exata', asyn
     sequence: 4,
     step: 'event_explorer',
     action: async () => { throw new Error('elemento ausente'); },
-    capture: async () => 'event_explorer/latest.png',
+    capture: async () => 'latest.png',
     write: (record) => emitted.push(record),
     now: () => '2026-08-05T12:00:00.000Z',
   }), /etapa event_explorer falhou/);
@@ -85,16 +85,16 @@ test('falha em qualquer ponto da etapa ainda emite uma linha failed exata', asyn
     sequence: 4,
     step: 'event_explorer',
     result: 'failed',
-    screenshot: 'event_explorer/latest.png',
+    screenshot: 'latest.png',
     cursor: null,
     observed_at: '2026-08-05T12:00:00.000Z',
   });
 });
 
-test('screenshot usa somente latest.png dentro da pasta allowlisted da etapa', () => {
+test('screenshot sobrescreve somente latest.png da execução', () => {
   const file = latestScreenshotPath('/tmp/qa-run', 'event_explorer');
-  assert.strictEqual(file.absolute, path.join('/tmp/qa-run', 'event_explorer', 'latest.png'));
-  assert.strictEqual(file.protocol, 'event_explorer/latest.png');
+  assert.strictEqual(file.absolute, path.join('/tmp/qa-run', 'latest.png'));
+  assert.strictEqual(file.protocol, 'latest.png');
   assert.throws(() => latestScreenshotPath('/tmp/qa-run', '../escape'), /etapa/i);
 });
 
@@ -121,6 +121,7 @@ test('sessão é aceita somente por env e configuração não contém segredo', 
   });
   assert.deepStrictEqual(config.cookie, { name: 'PHPSESSID', value: 'session-value' });
   assert.strictEqual(config.baseUrl.origin, 'https://qa.example.test');
+  assert.strictEqual(config.executablePath, '/usr/bin/google-chrome-stable');
   assert.throws(() => parseRunnerEnv({
     PREGAO_QA_BASE_URL: 'https://qa.example.test',
     PREGAO_QA_RUN_ID: RUN_ID,
@@ -131,7 +132,7 @@ test('sessão é aceita somente por env e configuração não contém segredo', 
 
 test('runner é headless, sem trace vídeo body sensível ou APIs de escrita', () => {
   assert.match(source, /from ['"]playwright['"]/);
-  assert.match(source, /chromium\.launch\(\{\s*headless:\s*true\s*\}\)/s);
+  assert.match(source, /chromium\.launch\(\{\s*headless:\s*true,\s*executablePath:/s);
   assert.match(source, /serviceWorkers:\s*['"]block['"]/);
   assert.match(source, /route\.abort\(/);
   assert.doesNotMatch(source, /trace\s*:/i);

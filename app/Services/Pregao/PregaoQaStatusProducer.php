@@ -46,12 +46,13 @@ final class PregaoQaStatusProducer
             'test' => $validated['step'],
             'result' => $validated['result'],
             'video_url' => null,
-            'stream_url' => $frameUrl,
+            'stream_url' => $frameUrl === null ? null : '/qa/live/' . $manifest['run_id'],
             'run_id' => $manifest['run_id'],
             'sequence' => $validated['sequence'],
             'step' => $validated['step'],
             'screenshot_url' => $frameUrl,
             'observed_at' => $validated['observed_at'],
+            'started_at' => $manifest['created_at'],
             'manifest_hash' => $manifest['manifest_hash'],
         ], $manifest['account_id']);
         return $this->emitter->emitTrustedQaStatus($payload, $manifest['account_id'], $this->proof);

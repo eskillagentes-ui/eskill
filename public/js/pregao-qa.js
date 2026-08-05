@@ -8,14 +8,23 @@
 
     const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
     const PAYLOAD_KEYS = ['elapsed_ms', 'result', 'run_id', 'status', 'step', 'trusted'];
+    const SIGNED_KEYS = [
+        'manifest_hash', 'observed_at', 'result', 'run_id', 'running', 'screenshot_url', 'sequence',
+        'signature', 'started_at', 'step', 'stream_url', 'suite', 'test', 'video_url'
+    ];
+    const EMPTY_KEYS = [
+        'executed', 'log', 'observed_at', 'result', 'run_id', 'running', 'sequence',
+        'step', 'stream_url', 'suite', 'test', 'video_url'
+    ];
     const RUNNING_STATUSES = new Set(['queued', 'running']);
-    const STATUSES = new Set(['queued', 'running', 'passed', 'failed']);
+    const STATUSES = new Set(['queued', 'running', 'passed', 'failed', 'blocked']);
     const STEPS = new Set(['dashboard', 'snapshot', 'realtime', 'event_explorer', 'console_http']);
     const STATUS_LABELS = {
         queued: 'NA FILA',
         running: 'EM EXECUÇÃO',
         passed: 'APROVADO',
-        failed: 'FALHOU'
+        failed: 'FALHOU',
+        blocked: 'BLOQUEADO'
     };
     const STEP_LABELS = {
         dashboard: 'dashboard /pregao',
@@ -29,7 +38,7 @@
         return JSON.stringify(Object.keys(value).sort()) === JSON.stringify(keys);
     }
 
-    function isTrustedQaPayload(value) {
+    function validateProjection(value) {
         if (!value || typeof value !== 'object' || Array.isArray(value)
             || !exactKeys(value, PAYLOAD_KEYS)
             || value.trusted !== true
@@ -43,7 +52,39 @@
         if (RUNNING_STATUSES.has(value.status) && value.result !== null) return false;
         if (value.status === 'passed' && value.result !== 'passed') return false;
         if (value.status === 'failed' && value.result !== 'failed') return false;
+        if (value.status === 'blocked' && value.result !== 'blocked') return false;
         return true;
+    }
+
+    function normalizeQaPayload(value) {
+        if (validateProjection(value)) return value;
+        if (!value || typeof value !== 'object' || Array.isArray(value) || !exactKeys(value, SIGNED_KEYS)) return null;
+        if (typeof value.run_id !== 'string' || !UUID_RE.test(value.run_id)
+            || typeof value.step !== 'string' || !STEPS.has(value.step)
+            || typeof value.result !== 'string' || !STATUSES.has(value.result) || value.result === 'queued'
+            || value.running !== (value.result === 'running')
+            || value.suite !== 'pregao-live' || value.test !== value.step || value.video_url !== null
+            || !Number.isInteger(value.sequence) || value.sequence < 1
+            || typeof value.signature !== 'string' || !/^[a-f0-9]{64}$/.test(value.signature)
+            || typeof value.manifest_hash !== 'string' || !/^[a-f0-9]{64}$/.test(value.manifest_hash)) return null;
+        const expectedLive = '/qa/live/' + value.run_id;
+        const expectedFrame = '/qa/frame/' + value.run_id;
+        if (![null, expectedLive].includes(value.stream_url) || ![null, expectedFrame].includes(value.screenshot_url)) return null;
+        const started = Date.parse(value.started_at);
+        const observed = Date.parse(value.observed_at);
+        if (!Number.isFinite(started) || !Number.isFinite(observed) || observed < started) return null;
+        return {
+            trusted: true,
+            run_id: value.run_id,
+            status: value.result,
+            step: value.step,
+            elapsed_ms: Math.min(604800000, observed - started),
+            result: value.result === 'running' ? null : value.result
+        };
+    }
+
+    function isTrustedQaPayload(value) {
+        return normalizeQaPayload(value) !== null;
     }
 
     function formatElapsed(milliseconds) {
@@ -96,10 +137,32 @@
         }
 
         function applyQa(payload) {
-            if (!isTrustedQaPayload(payload)) {
+            if (payload && typeof payload === 'object' && !Array.isArray(payload)
+                && exactKeys(payload, EMPTY_KEYS) && payload.executed === false && payload.running === false
+                && Array.isArray(payload.log) && payload.log.length === 0
+                && ['observed_at', 'result', 'run_id', 'sequence', 'step', 'stream_url', 'suite', 'test', 'video_url']
+                    .every((key) => payload[key] === null)) {
+                clearMedia();
+                const button = $('qaRunButton');
+                if (button) button.disabled = false;
+                const live = $('qaLive');
+                if (live) live.textContent = 'NÃO EXECUTADO';
+                const status = $('qaStatus');
+                if (status) status.textContent = 'NÃO EXECUTADO';
+                const step = $('qaStep');
+                if (step) step.textContent = 'aguardando execução autorizada';
+                const elapsed = $('qaElapsed');
+                if (elapsed) elapsed.textContent = '—';
+                const feedback = $('qaFeedback');
+                if (feedback) feedback.textContent = 'Nenhuma execução QA confiável foi registrada.';
+                return true;
+            }
+            const normalized = normalizeQaPayload(payload);
+            if (normalized === null) {
                 failClosed('Status QA não confiável rejeitado; nenhuma mídia foi aberta.');
                 return false;
             }
+            payload = normalized;
 
             const running = RUNNING_STATUSES.has(payload.status);
             const button = $('qaRunButton');
@@ -114,7 +177,9 @@
             if (elapsed) elapsed.textContent = formatElapsed(payload.elapsed_ms);
             const feedback = $('qaFeedback');
             if (feedback) {
-                feedback.textContent = payload.status === 'failed'
+                feedback.textContent = payload.status === 'blocked'
+                    ? 'QA bloqueado com segurança antes de concluir.'
+                    : payload.status === 'failed'
                     ? 'QA terminou com falha real. Consulte a etapa indicada.'
                     : payload.status === 'passed'
                         ? 'QA read-only concluído sem erros observados.'

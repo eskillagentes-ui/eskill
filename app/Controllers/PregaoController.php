@@ -257,7 +257,16 @@ class PregaoController extends BaseController
             }
             $service = new PregaoQaRunService(PregaoQaRunService::connectRedis(), $proof);
             $run = $service->startRun($accountId, $userId);
-            $this->json(['success' => true, 'data' => $run], 202);
+            $this->json(['success' => true, 'data' => [
+                'trusted' => true,
+                'run_id' => $run['run_id'],
+                'status' => 'queued',
+                'step' => null,
+                'elapsed_ms' => 0,
+                'result' => null,
+            ]], 202);
+        } catch (\DomainException) {
+            $this->jsonError('Já existe QA em execução para esta conta', 409);
         } catch (Throwable) {
             log_error('Pregao QA run failed', ['reason' => 'qa_run_unavailable']);
             $this->jsonError('QA live indisponível', 503);
@@ -267,17 +276,18 @@ class PregaoController extends BaseController
     /** GET /qa/live/{runId} */
     public function qaLive(string $runId): void
     {
-        header('Content-Type: application/json; charset=utf-8');
+        header('Content-Type: text/html; charset=utf-8');
         header('Cache-Control: private, no-store');
-        if (!$this->requireAuthJson()) {
+        header('X-Content-Type-Options: nosniff');
+        if (!$this->requireAuthJson(false)) {
             return;
         }
-        $accountId = $this->resolveAccountIdBoundary();
+        $accountId = $this->resolveAccountIdBoundary(false);
         if ($accountId === false) {
             return;
         }
         if ($accountId === null || preg_match(PregaoQaRunService::RUN_ID_PATTERN, $runId) !== 1) {
-            $this->jsonError('Execução QA não encontrada', 404);
+            http_response_code(404);
             return;
         }
         try {
@@ -287,17 +297,26 @@ class PregaoController extends BaseController
             }
             $service = new PregaoQaRunService(PregaoQaRunService::connectRedis(), $proof);
             if ($service->loadAuthorizedRun($runId, $accountId) === null) {
-                $this->jsonError('Execução QA não encontrada', 404);
+                http_response_code(404);
                 return;
             }
-            $state = $service->loadState($runId, $accountId);
-            if ($state === null) {
-                $this->jsonError('Estado QA indisponível', 404);
+            if ($service->loadState($runId, $accountId) === null) {
+                http_response_code(404);
                 return;
             }
-            $this->json(['success' => true, 'data' => $state]);
+            $nonce = defined('CSP_NONCE') ? (string) CSP_NONCE : '';
+            if ($nonce === '') {
+                throw new \RuntimeException('csp_nonce_unavailable');
+            }
+            $frameUrl = json_encode('/qa/frame/' . $runId, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
+            $safeNonce = htmlspecialchars($nonce, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+            echo '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><title>QA ao vivo</title></head>'
+                . '<body><img id="qa-live-frame" alt="Frame real do QA Playwright">'
+                . '<script nonce="' . $safeNonce . '">(function(){const img=document.getElementById("qa-live-frame");'
+                . 'const base=' . $frameUrl . ';function refresh(){img.src=base+"?v="+Date.now();}'
+                . 'refresh();setInterval(refresh,1000);}());</script></body></html>';
         } catch (Throwable) {
-            $this->jsonError('QA live indisponível', 503);
+            http_response_code(503);
         }
     }
 
