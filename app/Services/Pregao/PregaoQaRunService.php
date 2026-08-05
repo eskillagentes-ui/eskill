@@ -16,6 +16,7 @@ final class PregaoQaRunService
     public const EVIDENCE_TTL_SECONDS = 86400;
     public const COOLDOWN_TTL_SECONDS = 60;
     public const MAX_QUEUE_DEPTH = 8;
+    public const MAX_FRAME_BYTES = 4 * 1024 * 1024;
     private const ACTIVE_PREFIX = 'pregao:qa:active:';
     private const COOLDOWN_ACCOUNT_PREFIX = 'pregao:qa:cooldown:account:';
     private const COOLDOWN_USER_PREFIX = 'pregao:qa:cooldown:user:';
@@ -611,7 +612,7 @@ LUA;
         if ($sourceFile === null) {
             throw new \InvalidArgumentException('Frame QA inválido');
         }
-        [$sourceHandle] = $sourceFile;
+        [$sourceHandle, $sourceStat] = $sourceFile;
         $temporary = null;
         try {
             $root = self::ensurePrivateRoot($privateRoot);
@@ -621,7 +622,7 @@ LUA;
             }
             $destination = $directory . DIRECTORY_SEPARATOR . 'latest.png';
             $destinationStat = @lstat($destination);
-            if (is_array($destinationStat) && !self::isRegularStat($destinationStat)) {
+            if (is_array($destinationStat) && !self::isVerifiedFrameStat($destinationStat)) {
                 throw new \InvalidArgumentException('Frame QA inválido');
             }
 
@@ -631,8 +632,13 @@ LUA;
                 throw new \RuntimeException('Falha ao reter frame QA');
             }
             try {
-                $copied = stream_copy_to_stream($sourceHandle, $temporaryHandle);
-                if ($copied === false || !fflush($temporaryHandle)) {
+                $copied = stream_copy_to_stream($sourceHandle, $temporaryHandle, self::MAX_FRAME_BYTES + 1);
+                if ($copied === false || $copied > self::MAX_FRAME_BYTES
+                    || !self::isUnchangedVerifiedHandle($sourceHandle, $sourceStat, $copied)
+                ) {
+                    throw new \InvalidArgumentException('Frame QA inválido');
+                }
+                if (!fflush($temporaryHandle)) {
                     throw new \RuntimeException('Falha ao reter frame QA');
                 }
             } finally {
@@ -649,7 +655,7 @@ LUA;
                 throw new \InvalidArgumentException('Diretório de retenção QA inválido');
             }
             $destinationStat = @lstat($destination);
-            if (is_array($destinationStat) && !self::isRegularStat($destinationStat)) {
+            if (is_array($destinationStat) && !self::isVerifiedFrameStat($destinationStat)) {
                 throw new \InvalidArgumentException('Frame QA inválido');
             }
             if (!rename($temporary, $destination)) {
@@ -688,10 +694,9 @@ LUA;
             if ($opened === null) {
                 return null;
             }
-            [$handle] = $opened;
+            [$handle, $openedStat] = $opened;
             try {
-                $contents = stream_get_contents($handle);
-                return is_string($contents) ? $contents : null;
+                return self::readBoundedVerifiedHandle($handle, $openedStat);
             } finally {
                 fclose($handle);
             }
@@ -844,7 +849,7 @@ LUA;
         $frame = $directory . DIRECTORY_SEPARATOR . 'latest.png';
         clearstatcache(true, $frame);
         $stat = @lstat($frame);
-        if (!is_array($stat) || !self::isRegularStat($stat)
+        if (!is_array($stat) || !self::isVerifiedFrameStat($stat)
             || !self::hasOnlyExistingNonLinkComponents($frame)
         ) {
             return null;
@@ -870,7 +875,7 @@ LUA;
         clearstatcache(true, $normalized);
         $before = @lstat($normalized);
         $resolved = realpath($normalized);
-        if (!is_array($before) || !self::isRegularStat($before)
+        if (!is_array($before) || !self::isVerifiedFrameStat($before)
             || !is_string($resolved) || $resolved !== $normalized
         ) {
             return null;
@@ -880,14 +885,77 @@ LUA;
             return null;
         }
         $opened = fstat($handle);
-        if (!is_array($opened) || !self::isRegularStat($opened)
-            || !isset($before['dev'], $before['ino'], $opened['dev'], $opened['ino'])
-            || $before['dev'] !== $opened['dev'] || $before['ino'] !== $opened['ino']
+        if (!is_array($opened) || !self::isVerifiedFrameStat($opened)
+            || !self::hasSameFileIdentity($before, $opened)
+            || (int) $before['size'] !== (int) $opened['size']
         ) {
             fclose($handle);
             return null;
         }
         return [$handle, $opened];
+    }
+
+    /**
+     * @param resource $handle
+     * @param array<int|string,int> $validatedStat
+     */
+    private static function readBoundedVerifiedHandle($handle, array $validatedStat): ?string
+    {
+        if (!is_resource($handle)) {
+            return null;
+        }
+        $beforeRead = fstat($handle);
+        if (!is_array($beforeRead) || !self::isVerifiedFrameStat($beforeRead)
+            || !self::hasSameFileIdentity($validatedStat, $beforeRead)
+            || (int) ($validatedStat['size'] ?? -1) !== (int) $beforeRead['size']
+        ) {
+            return null;
+        }
+        $contents = stream_get_contents($handle, self::MAX_FRAME_BYTES + 1);
+        if (!is_string($contents) || strlen($contents) > self::MAX_FRAME_BYTES) {
+            return null;
+        }
+        return self::isUnchangedVerifiedHandle($handle, $beforeRead, strlen($contents))
+            ? $contents
+            : null;
+    }
+
+    /**
+     * @param resource $handle
+     * @param array<int|string,int> $validatedStat
+     */
+    private static function isUnchangedVerifiedHandle($handle, array $validatedStat, int $bytesRead): bool
+    {
+        if (!is_resource($handle) || $bytesRead < 0 || $bytesRead > self::MAX_FRAME_BYTES) {
+            return false;
+        }
+        $afterRead = fstat($handle);
+        return is_array($afterRead)
+            && self::isVerifiedFrameStat($afterRead)
+            && self::hasSameFileIdentity($validatedStat, $afterRead)
+            && (int) ($validatedStat['size'] ?? -1) === $bytesRead
+            && (int) $afterRead['size'] === $bytesRead;
+    }
+
+    /** @param array<int|string,int> $stat */
+    private static function isVerifiedFrameStat(array $stat): bool
+    {
+        return self::isRegularStat($stat)
+            && isset($stat['nlink'], $stat['size'])
+            && (int) $stat['nlink'] === 1
+            && (int) $stat['size'] >= 0
+            && (int) $stat['size'] <= self::MAX_FRAME_BYTES;
+    }
+
+    /**
+     * @param array<int|string,int> $left
+     * @param array<int|string,int> $right
+     */
+    private static function hasSameFileIdentity(array $left, array $right): bool
+    {
+        return isset($left['dev'], $left['ino'], $right['dev'], $right['ino'])
+            && $left['dev'] === $right['dev']
+            && $left['ino'] === $right['ino'];
     }
 
     private static function normalizeAbsolutePath(string $path): string

@@ -27,6 +27,12 @@ final class PregaoQaControllerRoutesContractTest extends TestCase
         self::assertStringContainsString('$this->resolveAccountIdBoundary()', $controller);
         self::assertStringContainsString('loadAuthorizedRun($runId, $accountId)', $controller);
         self::assertStringContainsString('PregaoQaRunService::readLatestFrame($root, $runId)', $controller);
+        self::assertMatchesRegularExpression(
+            '/\$frame = PregaoQaRunService::readLatestFrame\(\$root, \$runId\);\s*'
+                . 'if \(\$frame === null\) \{\s*http_response_code\(404\);\s*return;\s*\}/',
+            $controller,
+            'frame inválido ou grande deve permanecer um 404 opaco'
+        );
         self::assertStringContainsString('getimagesizefromstring($frame)', $controller);
         self::assertStringNotContainsString('readfile($frame)', $controller);
         self::assertStringNotContainsString('getimagesize($frame)', $controller);

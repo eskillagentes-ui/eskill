@@ -59,6 +59,109 @@ final class PregaoQaMediaSessionGuardTest extends TestCase
         }
     }
 
+    public function testRetentionRejectsHardlinkedSource(): void
+    {
+        $base = sys_get_temp_dir() . '/pregao-qa-source-hardlink-' . bin2hex(random_bytes(4));
+        $root = $base . '/private';
+        $sourceDirectory = $base . '/source';
+        $source = $sourceDirectory . '/latest.png';
+        $alias = $sourceDirectory . '/alias.png';
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        mkdir($root, 0700, true);
+        mkdir($sourceDirectory, 0700);
+        file_put_contents($source, 'hardlinked-source');
+
+        try {
+            self::assertTrue(link($source, $alias));
+            self::assertGreaterThan(1, (int) (lstat($source)['nlink'] ?? 0));
+            $this->expectException(\InvalidArgumentException::class);
+            PregaoQaRunService::retainLatestFrame($source, $root, $runId);
+        } finally {
+            @unlink($alias);
+            @unlink($source);
+            @rmdir($sourceDirectory);
+            @rmdir($root . '/' . $runId);
+            @rmdir($root);
+            @rmdir($base);
+        }
+    }
+
+    public function testReadRejectsHardlinkedLatestFrame(): void
+    {
+        $base = sys_get_temp_dir() . '/pregao-qa-latest-hardlink-' . bin2hex(random_bytes(4));
+        $root = $base . '/private';
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $directory = $root . '/' . $runId;
+        $frame = $directory . '/latest.png';
+        $alias = $directory . '/alias.png';
+        mkdir($directory, 0700, true);
+        file_put_contents($frame, 'hardlinked-latest');
+
+        try {
+            self::assertTrue(link($frame, $alias));
+            self::assertGreaterThan(1, (int) (lstat($frame)['nlink'] ?? 0));
+            self::assertNull(PregaoQaRunService::readLatestFrame($root, $runId));
+        } finally {
+            @unlink($alias);
+            @unlink($frame);
+            @rmdir($directory);
+            @rmdir($root);
+            @rmdir($base);
+        }
+    }
+
+    public function testOversizedLatestFrameReturnsNullWithoutExhaustingSixteenMegabytes(): void
+    {
+        $base = sys_get_temp_dir() . '/pregao-qa-oversized-' . bin2hex(random_bytes(4));
+        $root = $base . '/private';
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $directory = $root . '/' . $runId;
+        $frame = $directory . '/latest.png';
+        mkdir($directory, 0700, true);
+        $handle = fopen($frame, 'x+b');
+        self::assertIsResource($handle);
+        self::assertTrue(ftruncate($handle, 64 * 1024 * 1024));
+        fclose($handle);
+
+        try {
+            self::assertSame(4 * 1024 * 1024, PregaoQaRunService::MAX_FRAME_BYTES);
+            [$exitCode, $stdout, $stderr] = $this->runFrameReadInSubprocess($root, $runId);
+            self::assertSame(0, $exitCode, $stderr);
+            self::assertSame("NULL\n", $stdout);
+        } finally {
+            @unlink($frame);
+            @rmdir($directory);
+            @rmdir($root);
+            @rmdir($base);
+        }
+    }
+
+    public function testGrowthAfterValidatedStatIsRejectedWithoutUnboundedAllocation(): void
+    {
+        $base = sys_get_temp_dir() . '/pregao-qa-growing-' . bin2hex(random_bytes(4));
+        $frame = $base . '/latest.png';
+        mkdir($base, 0700, true);
+        file_put_contents($frame, 'small-frame');
+        $servicePath = dirname(__DIR__, 3) . '/app/Services/Pregao/PregaoQaRunService.php';
+        $code = 'require ' . var_export($servicePath, true) . ';'
+            . '$handle=fopen(' . var_export($frame, true) . ',"rb");'
+            . '$validated=fstat($handle);'
+            . '$writer=fopen(' . var_export($frame, true) . ',"c+b");'
+            . 'ftruncate($writer,64*1024*1024);fclose($writer);'
+            . '$method=new ReflectionMethod(\\App\\Services\\Pregao\\PregaoQaRunService::class,"readBoundedVerifiedHandle");'
+            . '$result=$method->invoke(null,$handle,$validated);fclose($handle);'
+            . 'echo $result===null?"NULL\\n":"BYTES=".strlen($result)."\\n";';
+
+        try {
+            [$exitCode, $stdout, $stderr] = $this->runPhpInSubprocess($code);
+            self::assertSame(0, $exitCode, $stderr);
+            self::assertSame("NULL\n", $stdout);
+        } finally {
+            @unlink($frame);
+            @rmdir($base);
+        }
+    }
+
     public function testRootSymlinkIsRejectedForReadAndRetention(): void
     {
         $base = sys_get_temp_dir() . '/pregao-qa-root-link-' . bin2hex(random_bytes(4));
@@ -300,5 +403,35 @@ final class PregaoQaMediaSessionGuardTest extends TestCase
         self::assertMatchesRegularExpression('/<script\\s+nonce="<\\?=\\s*htmlspecialchars\\(/', $view);
         self::assertStringContainsString('sandbox="allow-scripts"', $view);
         self::assertStringNotContainsString('allow-same-origin', $view);
+    }
+
+    /** @return array{0:int,1:string,2:string} */
+    private function runFrameReadInSubprocess(string $root, string $runId): array
+    {
+        $servicePath = dirname(__DIR__, 3) . '/app/Services/Pregao/PregaoQaRunService.php';
+        $code = 'require ' . var_export($servicePath, true) . ';'
+            . '$result=\\App\\Services\\Pregao\\PregaoQaRunService::readLatestFrame('
+            . var_export($root, true) . ',' . var_export($runId, true) . ');'
+            . 'echo $result===null?"NULL\\n":"BYTES=".strlen($result)."\\n";';
+        return $this->runPhpInSubprocess($code);
+    }
+
+    /** @return array{0:int,1:string,2:string} */
+    private function runPhpInSubprocess(string $code): array
+    {
+        $process = proc_open(
+            [PHP_BINARY, '-d', 'memory_limit=16M', '-r', $code],
+            [1 => ['pipe', 'w'], 2 => ['pipe', 'w']],
+            $pipes
+        );
+        self::assertIsResource($process);
+        $stdout = stream_get_contents($pipes[1]);
+        $stderr = stream_get_contents($pipes[2]);
+        fclose($pipes[1]);
+        fclose($pipes[2]);
+        $exitCode = proc_close($process);
+        self::assertIsString($stdout);
+        self::assertIsString($stderr);
+        return [$exitCode, $stdout, $stderr];
     }
 }
