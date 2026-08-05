@@ -6,6 +6,7 @@ namespace App\Controllers;
 
 use App\Controllers\BaseController;
 use App\Services\Pregao\PregaoAccountAuthorizer;
+use App\Services\Pregao\PregaoEventExplorerService;
 use App\Services\Pregao\PregaoSnapshotService;
 use App\Services\Pregao\PregaoStreamService;
 use App\Services\UserService;
@@ -92,6 +93,50 @@ class PregaoController extends BaseController
             log_error('Pregao snapshot failed', ['reason' => 'snapshot_exception']);
             http_response_code(500);
             echo json_encode(['success' => false, 'error' => 'Falha ao montar snapshot', 'data' => null]);
+        }
+    }
+
+    /**
+     * GET /api/pregao/events — Event Explorer read-only (paginado, filtrável).
+     */
+    public function events(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: private, no-store');
+        header('X-Content-Type-Options: nosniff');
+
+        if (!$this->requireAuthJson()) {
+            return;
+        }
+
+        $accountId = $this->resolveAccountId();
+        if ($accountId === null) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'Conta indisponível', 'data' => null]);
+            return;
+        }
+
+        try {
+            $service = new PregaoEventExplorerService();
+            $data = $service->list($accountId, [
+                'type' => $this->request->get('type'),
+                'source' => $this->request->get('source'),
+                'from' => $this->request->get('from'),
+                'to' => $this->request->get('to'),
+                'page' => $this->request->get('page'),
+                'per_page' => $this->request->get('per_page'),
+            ]);
+            echo json_encode(
+                ['success' => true, 'data' => $data, 'meta' => ['read_only' => true]],
+                JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            );
+        } catch (\InvalidArgumentException) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'Filtro inválido', 'data' => null]);
+        } catch (Throwable) {
+            log_error('Pregao events failed', ['reason' => 'events_exception']);
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => 'Falha ao listar eventos', 'data' => null]);
         }
     }
 

@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/css/pregao.css?v=6">
+<link rel="stylesheet" href="/css/pregao.css?v=7">
 
 <div id="pregao-root" data-account-id="<?= (int)($pregaoAccountId ?? 0) ?>" data-read-only="1">
     <header class="pg-header">
@@ -140,6 +140,44 @@
                     <span>Modo <b>SOMENTE LEITURA</b></span>
                 </div>
             </section>
+
+            <section class="panel events-panel" id="eventsPanel" aria-labelledby="eventsTitle">
+                <div class="p-head" id="eventsTitle">
+                    🧾 EXPLORADOR DE EVENTOS
+                    <span class="events-total" id="eventsTotal" role="status">carregando…</span>
+                </div>
+                <form class="events-filters" id="eventsFilters">
+                    <select id="evType" aria-label="Filtrar por tipo">
+                        <option value="">todos os tipos</option>
+                        <option value="index.tick">index.tick</option>
+                        <option value="index.candle">index.candle</option>
+                        <option value="metric.update">metric.update</option>
+                        <option value="op">op</option>
+                        <option value="sale">sale</option>
+                        <option value="keyword.rank">keyword.rank</option>
+                        <option value="qa.status">qa.status</option>
+                        <option value="agent.status">agent.status</option>
+                        <option value="account.semaforo">account.semaforo</option>
+                    </select>
+                    <select id="evSource" aria-label="Filtrar por fonte">
+                        <option value="">todas as fontes</option>
+                        <option value="live">live</option>
+                        <option value="seed">seed</option>
+                    </select>
+                    <input type="date" id="evFrom" aria-label="Data inicial">
+                    <input type="date" id="evTo" aria-label="Data final">
+                    <button type="submit" class="events-btn">Filtrar</button>
+                </form>
+                <ul class="events-list" id="eventsList">
+                    <li class="events-empty">Carregando eventos…</li>
+                </ul>
+                <div class="events-pager">
+                    <button type="button" class="events-btn" id="evPrev" disabled>← anteriores</button>
+                    <span id="evPageInfo">—</span>
+                    <button type="button" class="events-btn" id="evNext" disabled>próximos →</button>
+                </div>
+                <div class="events-readonly">Somente leitura · payload sanitizado por allowlist</div>
+            </section>
         </div>
 
         <div class="right">
@@ -177,6 +215,7 @@
     window.PREGAO_BOOT = {
         accountId: <?= (int)($pregaoAccountId ?? 0) ?>,
         snapshotUrl: '/api/pregao/snapshot',
+        eventsUrl: '/api/pregao/events',
         streamUrl: '/api/pregao/stream',
         ticketUrl: '/api/pregao/ticket',
         wsPath: '/ws/pregao'
@@ -184,3 +223,4 @@
 </script>
 <script src="/js/pregao-chart-layout.js?v=1"></script>
 <script src="/js/pregao.js?v=38" defer></script>
+<script src="/js/pregao-events.js?v=1" defer></script>

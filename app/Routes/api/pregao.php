@@ -11,6 +11,7 @@ declare(strict_types=1);
 use App\Controllers\PregaoController;
 
 $router->get('api/pregao/snapshot', PregaoController::class, 'snapshot');
+$router->get('api/pregao/events', PregaoController::class, 'events');
 $router->get('api/pregao/stream', PregaoController::class, 'stream');
 $router->get('api/pregao/ticket', PregaoController::class, 'ticket');
 

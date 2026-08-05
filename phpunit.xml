@@ -56,6 +56,7 @@
             <file>tests/Unit/Services/Pregao/PregaoAgentStatusServiceTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoDataSourceStatusServiceTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoEmitServiceTest.php</file>
+            <file>tests/Unit/Services/Pregao/PregaoEventExplorerServiceTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoMetricsCollectorAgentActionsContractTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoSnapshotDailyIndexTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoStreamServiceAgentEventFilterTest.php</file>

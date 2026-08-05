@@ -916,6 +916,116 @@ a.card.sn-card:hover {
     font-weight: 600;
 }
 
+.events-panel {
+    margin-top: 14px;
+}
+
+.events-total {
+    margin-left: auto;
+    color: var(--mut);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0;
+}
+
+.events-filters {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 8px;
+    padding: 12px 12px 0;
+}
+
+.events-filters select,
+.events-filters input {
+    padding: 5px 8px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel2);
+    color: var(--txt);
+    font-family: var(--mono);
+    font-size: 10px;
+}
+
+.events-btn {
+    padding: 5px 10px;
+    border: 1px solid var(--line);
+    border-radius: 6px;
+    background: var(--panel2);
+    color: var(--txt);
+    font-family: var(--mono);
+    font-size: 10px;
+    cursor: pointer;
+}
+
+.events-btn:disabled {
+    color: var(--mut);
+    cursor: default;
+    opacity: 0.5;
+}
+
+.events-list {
+    list-style: none;
+    margin: 0;
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 340px;
+    overflow-y: auto;
+}
+
+.events-row {
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 7px;
+    background: var(--panel2);
+}
+
+.events-row-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 10px;
+}
+
+.events-row-head span {
+    color: var(--mut);
+    font-family: var(--mono);
+    font-size: 9px;
+}
+
+.events-row-detail {
+    margin-top: 4px;
+    color: var(--mut);
+    font-size: 10px;
+    overflow-wrap: anywhere;
+}
+
+.events-empty {
+    color: var(--mut);
+    font-size: 10px;
+    padding: 4px;
+}
+
+.events-pager {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 0 12px 8px;
+    color: var(--mut);
+    font-family: var(--mono);
+    font-size: 10px;
+}
+
+.events-readonly {
+    padding: 0 12px 12px;
+    color: var(--mut);
+    font-family: var(--mono);
+    font-size: 9px;
+}
+
 @media (prefers-reduced-motion: reduce) {
     .tape-in {
         animation: none
