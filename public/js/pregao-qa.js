@@ -18,6 +18,10 @@
     ];
     const RUNNING_STATUSES = new Set(['queued', 'running']);
     const STATUSES = new Set(['queued', 'running', 'passed', 'failed', 'blocked']);
+    const TERMINAL_STATUSES = new Set(['passed', 'failed', 'blocked']);
+    const MAX_ELAPSED_MS = 604800000;
+    const MAX_OBSERVED_AGE_MS = 86400000;
+    const MAX_FUTURE_SKEW_MS = 60000;
     const STEPS = new Set(['dashboard', 'snapshot', 'realtime', 'event_explorer', 'console_http']);
     const STATUS_LABELS = {
         queued: 'NA FILA',
@@ -44,7 +48,7 @@
             || value.trusted !== true
             || typeof value.run_id !== 'string' || !UUID_RE.test(value.run_id)
             || typeof value.status !== 'string' || !STATUSES.has(value.status)
-            || !Number.isInteger(value.elapsed_ms) || value.elapsed_ms < 0 || value.elapsed_ms > 604800000) {
+            || !Number.isInteger(value.elapsed_ms) || value.elapsed_ms < 0 || value.elapsed_ms > MAX_ELAPSED_MS) {
             return false;
         }
         if (value.step !== null && (typeof value.step !== 'string' || !STEPS.has(value.step))) return false;
@@ -56,7 +60,7 @@
         return true;
     }
 
-    function normalizeQaPayload(value) {
+    function normalizeQaPayload(value, nowMs) {
         if (validateProjection(value)) return value;
         if (!value || typeof value !== 'object' || Array.isArray(value) || !exactKeys(value, SIGNED_KEYS)) return null;
         if (typeof value.run_id !== 'string' || !UUID_RE.test(value.run_id)
@@ -65,6 +69,7 @@
             || value.running !== (value.result === 'running')
             || value.suite !== 'pregao-live' || value.test !== value.step || value.video_url !== null
             || !Number.isInteger(value.sequence) || value.sequence < 1
+            || typeof value.started_at !== 'string' || typeof value.observed_at !== 'string'
             || typeof value.signature !== 'string' || !/^[a-f0-9]{64}$/.test(value.signature)
             || typeof value.manifest_hash !== 'string' || !/^[a-f0-9]{64}$/.test(value.manifest_hash)) return null;
         const expectedLive = '/qa/live/' + value.run_id;
@@ -72,19 +77,21 @@
         if (![null, expectedLive].includes(value.stream_url) || ![null, expectedFrame].includes(value.screenshot_url)) return null;
         const started = Date.parse(value.started_at);
         const observed = Date.parse(value.observed_at);
-        if (!Number.isFinite(started) || !Number.isFinite(observed) || observed < started) return null;
+        if (!Number.isFinite(started) || !Number.isFinite(observed) || !Number.isFinite(nowMs)
+            || observed < started || observed - started > MAX_ELAPSED_MS
+            || observed < nowMs - MAX_OBSERVED_AGE_MS || observed > nowMs + MAX_FUTURE_SKEW_MS) return null;
         return {
             trusted: true,
             run_id: value.run_id,
             status: value.result,
             step: value.step,
-            elapsed_ms: Math.min(604800000, observed - started),
+            elapsed_ms: observed - started,
             result: value.result === 'running' ? null : value.result
         };
     }
 
     function isTrustedQaPayload(value) {
-        return normalizeQaPayload(value) !== null;
+        return normalizeQaPayload(value, Date.now()) !== null;
     }
 
     function formatElapsed(milliseconds) {
@@ -106,9 +113,13 @@
         const boot = env.boot || {};
         const currentLocation = env.location;
         const request = env.fetch;
+        const now = typeof env.now === 'function' ? env.now : Date.now;
         const $ = (id) => doc.getElementById(id);
         let submitting = false;
         let initialized = false;
+        let hasTrustedStatus = false;
+        let lastObservedAt = null;
+        const runStates = new Map();
 
         function clearMedia() {
             const stream = $('qaStream');
@@ -142,6 +153,7 @@
                 && Array.isArray(payload.log) && payload.log.length === 0
                 && ['observed_at', 'result', 'run_id', 'sequence', 'step', 'stream_url', 'suite', 'test', 'video_url']
                     .every((key) => payload[key] === null)) {
+                if (hasTrustedStatus) return false;
                 clearMedia();
                 const button = $('qaRunButton');
                 if (button) button.disabled = false;
@@ -157,11 +169,36 @@
                 if (feedback) feedback.textContent = 'Nenhuma execução QA confiável foi registrada.';
                 return true;
             }
-            const normalized = normalizeQaPayload(payload);
+            const signed = payload && typeof payload === 'object' && !Array.isArray(payload)
+                && exactKeys(payload, SIGNED_KEYS);
+            const normalized = normalizeQaPayload(payload, now());
             if (normalized === null) {
                 failClosed('Status QA não confiável rejeitado; nenhuma mídia foi aberta.');
                 return false;
             }
+            const runState = runStates.get(normalized.run_id);
+            if (signed) {
+                const observedAt = Date.parse(payload.observed_at);
+                if ((runState && (runState.terminal || (runState.signed
+                    && (payload.sequence <= runState.sequence || observedAt < runState.observedAt))))
+                    || (lastObservedAt !== null && observedAt < lastObservedAt)) return false;
+                runStates.set(payload.run_id, {
+                    signed: true,
+                    sequence: payload.sequence,
+                    observedAt,
+                    terminal: TERMINAL_STATUSES.has(normalized.status)
+                });
+                lastObservedAt = observedAt;
+            } else {
+                if (runState && (runState.signed || runState.terminal)) return false;
+                runStates.set(normalized.run_id, {
+                    signed: false,
+                    sequence: null,
+                    observedAt: null,
+                    terminal: TERMINAL_STATUSES.has(normalized.status)
+                });
+            }
+            hasTrustedStatus = true;
             payload = normalized;
 
             const running = RUNNING_STATUSES.has(payload.status);
