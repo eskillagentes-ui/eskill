@@ -296,11 +296,7 @@ class PregaoController extends BaseController
                 throw new \RuntimeException('qa_signing_unavailable');
             }
             $service = new PregaoQaRunService(PregaoQaRunService::connectRedis(), $proof);
-            if ($service->loadAuthorizedRun($runId, $accountId) === null) {
-                http_response_code(404);
-                return;
-            }
-            if ($service->loadState($runId, $accountId) === null) {
+            if (!$service->isMediaAuthorized($runId, $accountId)) {
                 http_response_code(404);
                 return;
             }
@@ -316,7 +312,7 @@ class PregaoController extends BaseController
                 . 'const base=' . $frameUrl . ';function refresh(){img.src=base+"?v="+Date.now();}'
                 . 'refresh();setInterval(refresh,1000);}());</script></body></html>';
         } catch (Throwable) {
-            http_response_code(503);
+            http_response_code(404);
         }
     }
 
@@ -342,7 +338,7 @@ class PregaoController extends BaseController
                 throw new \RuntimeException('qa_signing_unavailable');
             }
             $service = new PregaoQaRunService(PregaoQaRunService::connectRedis(), $proof);
-            if ($service->loadAuthorizedRun($runId, $accountId) === null) {
+            if (!$service->isMediaAuthorized($runId, $accountId)) {
                 http_response_code(404);
                 return;
             }

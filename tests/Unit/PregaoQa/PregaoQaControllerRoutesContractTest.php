@@ -25,7 +25,13 @@ final class PregaoQaControllerRoutesContractTest extends TestCase
         }
         self::assertStringContainsString('$this->requireAuthJson()', $controller);
         self::assertStringContainsString('$this->resolveAccountIdBoundary()', $controller);
-        self::assertStringContainsString('loadAuthorizedRun($runId, $accountId)', $controller);
+        self::assertSame(2, substr_count($controller, 'isMediaAuthorized($runId, $accountId)'));
+        self::assertStringNotContainsString('loadAuthorizedRun($runId, $accountId)', $controller);
+        self::assertMatchesRegularExpression(
+            '/public function qaLive\(string \$runId\): void.*?isMediaAuthorized\(\$runId, \$accountId\).*?catch \(Throwable\) \{\s*http_response_code\(404\);/s',
+            $controller,
+            'falhas de autorização e infraestrutura do live devem permanecer 404 opaco'
+        );
         self::assertStringContainsString('PregaoQaRunService::readLatestFrame($root, $runId)', $controller);
         self::assertMatchesRegularExpression(
             '/\$frame = PregaoQaRunService::readLatestFrame\(\$root, \$runId\);\s*'

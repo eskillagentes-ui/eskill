@@ -251,6 +251,42 @@ final class PregaoQaRunService
         return $manifest !== null && $manifest['account_id'] === $accountId ? $manifest : null;
     }
 
+    public function isMediaAuthorized(string $runId, int $accountId): bool
+    {
+        if ($accountId <= 0 || preg_match(self::RUN_ID_PATTERN, $runId) !== 1) {
+            return false;
+        }
+        $state = $this->decodeStoredArray(self::stateKey($runId));
+        if ($state === null
+            || ($state['run_id'] ?? null) !== $runId
+            || ($state['account_id'] ?? null) !== $accountId
+            || !is_string($state['status'] ?? null)
+        ) {
+            return false;
+        }
+
+        if (in_array($state['status'], ['passed', 'failed', 'blocked'], true)) {
+            $retainedManifest = is_array($state['manifest'] ?? null) ? $state['manifest'] : null;
+            $receipt = $this->decodeStoredArray(self::receiptKey($runId));
+            $status = is_array($receipt['status'] ?? null) ? $receipt['status'] : null;
+            return $retainedManifest !== null
+                && $this->proof->verifyManifest($retainedManifest)
+                && ($retainedManifest['run_id'] ?? null) === $runId
+                && ($retainedManifest['account_id'] ?? null) === $accountId
+                && ($retainedManifest['manifest_hash'] ?? null) === ($state['manifest_hash'] ?? null)
+                && $status !== null
+                && ($status['result'] ?? null) === $state['status']
+                && $this->isStatusAuthoritative($status, $accountId);
+        }
+
+        if (!in_array($state['status'], ['queued', 'running'], true)) {
+            return false;
+        }
+        $activeManifest = $this->loadAuthorizedRun($runId, $accountId);
+        return $activeManifest !== null
+            && ($activeManifest['manifest_hash'] ?? null) === ($state['manifest_hash'] ?? null);
+    }
+
     /** @return array<string,mixed>|null */
     public function loadState(string $runId, int $accountId): ?array
     {
