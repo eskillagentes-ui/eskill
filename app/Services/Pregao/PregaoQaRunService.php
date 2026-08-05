@@ -70,6 +70,7 @@ final class PregaoQaRunService
             $state = [
                 'run_id' => $runId,
                 'account_id' => $accountId,
+                'manifest_hash' => $manifest['manifest_hash'],
                 'status' => 'queued',
                 'sequence' => 0,
                 'updated_at' => $createdAt->format(DATE_ATOM),
@@ -124,8 +125,6 @@ final class PregaoQaRunService
         $expires = strtotime((string) $manifest['expires_at']);
         if ($expires === false || $expires < time()) {
             $this->failPendingClosed($manifest);
-            $this->ackPending($runId, $rawJob);
-            $this->releaseActive((int) $manifest['account_id'], $runId);
             $this->release($runId, $token);
             return null;
         }
@@ -140,7 +139,8 @@ final class PregaoQaRunService
         return $this->redis->lRem(self::PENDING_KEY, $rawJob, 1) === 1;
     }
 
-    public function recoverPending(): int
+    /** @param null|callable(array<string,mixed>,array<string,mixed>):bool $ensureTerminalEvidence */
+    public function recoverPending(?callable $ensureTerminalEvidence = null): int
     {
         $jobs = $this->redis->lRange(self::PENDING_KEY, 0, -1);
         if (!is_array($jobs)) {
@@ -163,6 +163,16 @@ final class PregaoQaRunService
             $stateRaw = $this->redis->get(self::stateKey($runId));
             $state = is_string($stateRaw) ? json_decode($stateRaw, true) : null;
             if (is_array($state) && in_array(($state['status'] ?? null), ['passed', 'failed', 'blocked'], true)) {
+                $terminalManifest = is_array($state['manifest'] ?? null) ? $state['manifest'] : null;
+                if ($ensureTerminalEvidence === null
+                    || !is_array($terminalManifest)
+                    || !$this->proof->verifyManifest($terminalManifest)
+                    || $terminalManifest['run_id'] !== $runId
+                    || $ensureTerminalEvidence($terminalManifest, $state) !== true
+                ) {
+                    continue;
+                }
+                $this->releaseActive((int) $terminalManifest['account_id'], $runId);
                 $this->redis->lRem(self::PENDING_KEY, $rawJob, 0);
                 continue;
             }
@@ -174,8 +184,15 @@ final class PregaoQaRunService
             $expires = strtotime((string) $manifest['expires_at']);
             if ($expires === false || $expires < time()) {
                 $this->failPendingClosed($manifest);
-                $this->releaseActive((int) $manifest['account_id'], $runId);
-                $this->redis->lRem(self::PENDING_KEY, $rawJob, 0);
+                $terminalRaw = $this->redis->get(self::stateKey($runId));
+                $terminal = is_string($terminalRaw) ? json_decode($terminalRaw, true) : null;
+                if ($ensureTerminalEvidence !== null
+                    && is_array($terminal)
+                    && $ensureTerminalEvidence($manifest, $terminal) === true
+                ) {
+                    $this->releaseActive((int) $manifest['account_id'], $runId);
+                    $this->redis->lRem(self::PENDING_KEY, $rawJob, 0);
+                }
                 continue;
             }
             $lua = "if redis.call('EXISTS', KEYS[3]) == 0 and redis.call('LREM', KEYS[1], 1, ARGV[1]) == 1 then return redis.call('LPUSH', KEYS[2], ARGV[1]) else return 0 end";
@@ -221,30 +238,31 @@ final class PregaoQaRunService
         if (!$this->proof->verifyManifest($manifest) || $manifest['run_id'] !== ($protocol['run_id'] ?? null)) {
             throw new \InvalidArgumentException('Estado QA sem manifesto válido');
         }
-        $currentRaw = $this->redis->get(self::stateKey($manifest['run_id']));
-        $current = is_string($currentRaw) ? json_decode($currentRaw, true) : null;
-        if (!is_array($current)
-            || ($current['run_id'] ?? null) !== $manifest['run_id']
-            || ($current['account_id'] ?? null) !== $manifest['account_id']
-            || !is_int($current['sequence'] ?? null)
-            || !is_string($current['status'] ?? null)
-        ) {
-            throw new \InvalidArgumentException('Progressão QA atual inválida');
+        $sequence = $protocol['sequence'] ?? null;
+        if (!is_int($sequence) || $sequence < 1) {
+            throw new \InvalidArgumentException('Progressão QA regressiva ou terminal');
         }
-        $previousResult = $current['status'] === 'queued' ? null : $current['status'];
+        $previousSequence = $sequence - 1;
+        $previousResult = $previousSequence === 0 ? null : 'running';
         $validated = PregaoQaWorkerProtocol::decode(
             json_encode($protocol, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
             $manifest['run_id'],
-            $current['sequence'],
+            $previousSequence,
             $previousResult
         );
         if ($validated === null) {
             throw new \InvalidArgumentException('Progressão QA regressiva ou terminal');
         }
         $protocol = $validated;
+        $observedAt = strtotime($protocol['observed_at']);
+        $expiresAt = strtotime((string) $manifest['expires_at']);
+        if ($observedAt === false || $expiresAt === false || $observedAt > $expiresAt) {
+            throw new \InvalidArgumentException('Evidência QA posterior ao manifesto');
+        }
         $state = [
             'run_id' => $manifest['run_id'],
             'account_id' => $manifest['account_id'],
+            'manifest_hash' => $manifest['manifest_hash'],
             'status' => $protocol['result'],
             'sequence' => $protocol['sequence'],
             'step' => $protocol['step'],
@@ -256,16 +274,39 @@ final class PregaoQaRunService
             'updated_at' => (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format(DATE_ATOM),
         ];
         $terminal = in_array($protocol['result'], ['passed', 'failed', 'blocked'], true);
-        $ttl = $terminal ? self::EVIDENCE_TTL_SECONDS : self::RUN_TTL_SECONDS;
-        if ($this->redis->setex(
-            self::stateKey($manifest['run_id']),
-            $ttl,
-            json_encode($state, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES)
-        ) !== true) {
-            throw new \RuntimeException('Falha ao atualizar estado QA');
+        if ($terminal) {
+            $state['manifest'] = $manifest;
         }
-        if ($terminal && $this->redis->expire(self::manifestKey($manifest['run_id']), $ttl) !== true) {
-            throw new \RuntimeException('Falha ao reter manifesto QA terminal');
+        $ttl = $terminal ? self::EVIDENCE_TTL_SECONDS : self::RUN_TTL_SECONDS;
+        $expectedStatus = $previousSequence === 0 ? 'queued' : 'running';
+        $lua = <<<'LUA'
+local raw = redis.call('GET', KEYS[1])
+if not raw then return -1 end
+local ok, current = pcall(cjson.decode, raw)
+if not ok or type(current) ~= 'table' then return -1 end
+if current.run_id ~= ARGV[1]
+    or tonumber(current.account_id) ~= tonumber(ARGV[2])
+    or current.manifest_hash ~= ARGV[3]
+    or tonumber(current.sequence) ~= tonumber(ARGV[4])
+    or current.status ~= ARGV[5] then
+    return 0
+end
+redis.call('SETEX', KEYS[1], tonumber(ARGV[6]), ARGV[7])
+return 1
+LUA;
+        // Lua constante: dados entram somente por KEYS/ARGV; nenhuma entrada é interpolada no script.
+        $updated = $this->redis->eval($lua, [
+            self::stateKey($manifest['run_id']),
+            $manifest['run_id'],
+            (string) $manifest['account_id'],
+            $manifest['manifest_hash'],
+            (string) $previousSequence,
+            $expectedStatus,
+            (string) $ttl,
+            json_encode($state, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+        ], 1);
+        if ($updated !== 1) {
+            throw new \InvalidArgumentException('Progressão QA atual inválida ou concorrente');
         }
     }
 
@@ -304,6 +345,187 @@ final class PregaoQaRunService
     public static function stateKey(string $runId): string
     {
         return 'pregao:qa:state:' . $runId;
+    }
+
+    public static function receiptKey(string $runId): string
+    {
+        return 'pregao:qa:receipt:' . $runId;
+    }
+
+    public static function latestReceiptKey(int $accountId): string
+    {
+        if ($accountId <= 0) {
+            throw new \InvalidArgumentException('Conta QA inválida');
+        }
+        return 'pregao:qa:receipt:latest:' . $accountId;
+    }
+
+    /** @param array<string,mixed> $status */
+    public static function statusHash(array $status): string
+    {
+        $normalize = static function (mixed $value) use (&$normalize): mixed {
+            if (!is_array($value)) {
+                return $value;
+            }
+            $keys = array_keys($value);
+            if ($keys !== range(0, count($value) - 1)) {
+                ksort($value, SORT_STRING);
+            }
+            foreach ($value as $key => $child) {
+                $value[$key] = $normalize($child);
+            }
+            return $value;
+        };
+        return hash('sha256', json_encode(
+            $normalize($status),
+            JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
+        ));
+    }
+
+    /** @param array<string,mixed> $manifest @param array<string,mixed> $status */
+    public function confirmEvidence(array $manifest, array $status, int $eventId, string $eventTs): bool
+    {
+        $observedAt = strtotime((string) ($status['observed_at'] ?? ''));
+        $expiresAt = strtotime((string) ($manifest['expires_at'] ?? ''));
+        if ($eventId <= 0
+            || !$this->proof->verifyManifest($manifest)
+            || !$this->proof->verifyStatus($status, (int) ($manifest['account_id'] ?? 0))
+            || ($status['run_id'] ?? null) !== $manifest['run_id']
+            || ($status['manifest_hash'] ?? null) !== $manifest['manifest_hash']
+            || $observedAt === false
+            || $expiresAt === false
+            || $observedAt > $expiresAt
+            || strtotime($eventTs) === false
+        ) {
+            return false;
+        }
+        $payloadHash = self::statusHash($status);
+        $terminal = in_array($status['result'], ['passed', 'failed', 'blocked'], true);
+        $ttl = $terminal ? self::EVIDENCE_TTL_SECONDS : self::RUN_TTL_SECONDS;
+        $receipt = [
+            'run_id' => $manifest['run_id'],
+            'account_id' => $manifest['account_id'],
+            'manifest_hash' => $manifest['manifest_hash'],
+            'manifest_expires_at' => $manifest['expires_at'],
+            'sequence' => $status['sequence'],
+            'step' => $status['step'],
+            'result' => $status['result'],
+            'observed_at' => $status['observed_at'],
+            'payload_hash' => $payloadHash,
+            'event_id' => $eventId,
+            'event_ts' => $eventTs,
+            'status' => $status,
+        ];
+        $lua = <<<'LUA'
+local raw = redis.call('GET', KEYS[1])
+if not raw then return 0 end
+local ok, state = pcall(cjson.decode, raw)
+if not ok or type(state) ~= 'table'
+    or state.run_id ~= ARGV[1]
+    or tonumber(state.account_id) ~= tonumber(ARGV[2])
+    or state.manifest_hash ~= ARGV[3]
+    or tonumber(state.sequence) ~= tonumber(ARGV[4])
+    or state.step ~= ARGV[5]
+    or state.status ~= ARGV[6]
+    or state.observed_at ~= ARGV[7] then
+    return 0
+end
+local existing = redis.call('GET', KEYS[2])
+if existing then
+    local receiptOk, receipt = pcall(cjson.decode, existing)
+    if receiptOk and receipt.payload_hash == ARGV[8] and tonumber(receipt.event_id) == tonumber(ARGV[9]) then
+        return 2
+    end
+    return 0
+end
+state.receipt_hash = ARGV[8]
+state.receipt_event_id = tonumber(ARGV[9])
+redis.call('SETEX', KEYS[1], tonumber(ARGV[10]), cjson.encode(state))
+redis.call('SETEX', KEYS[2], tonumber(ARGV[10]), ARGV[11])
+redis.call('SETEX', KEYS[3], tonumber(ARGV[10]), ARGV[1])
+return 1
+LUA;
+        // Lua constante: dados entram somente por KEYS/ARGV; nenhuma entrada é interpolada no script.
+        $confirmed = $this->redis->eval($lua, [
+            self::stateKey($manifest['run_id']),
+            self::receiptKey($manifest['run_id']),
+            self::latestReceiptKey((int) $manifest['account_id']),
+            $manifest['run_id'],
+            (string) $manifest['account_id'],
+            $manifest['manifest_hash'],
+            (string) $status['sequence'],
+            $status['step'],
+            $status['result'],
+            $status['observed_at'],
+            $payloadHash,
+            (string) $eventId,
+            (string) $ttl,
+            json_encode($receipt, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES),
+        ], 3);
+        return $confirmed === 1 || $confirmed === 2;
+    }
+
+    /** @param array<string,mixed> $manifest @param array<string,mixed> $protocol */
+    public function protocolMatchesPersistedState(array $manifest, array $protocol): bool
+    {
+        if (!$this->proof->verifyManifest($manifest)) {
+            return false;
+        }
+        $state = $this->decodeStoredArray(self::stateKey((string) $manifest['run_id']));
+        $expectedScreenshot = ($protocol['screenshot'] ?? null) === 'latest.png'
+            ? '/qa/frame/' . $manifest['run_id']
+            : null;
+        return $state !== null
+            && array_keys($protocol) === ['run_id', 'sequence', 'step', 'result', 'screenshot', 'cursor', 'observed_at']
+            && ($state['run_id'] ?? null) === $manifest['run_id']
+            && ($state['account_id'] ?? null) === $manifest['account_id']
+            && ($state['manifest_hash'] ?? null) === $manifest['manifest_hash']
+            && ($state['sequence'] ?? null) === ($protocol['sequence'] ?? null)
+            && ($state['step'] ?? null) === ($protocol['step'] ?? null)
+            && ($state['status'] ?? null) === ($protocol['result'] ?? null)
+            && ($state['observed_at'] ?? null) === ($protocol['observed_at'] ?? null)
+            && ($state['screenshot_url'] ?? null) === $expectedScreenshot
+            && ($state['cursor'] ?? null) === ($protocol['cursor'] ?? null);
+    }
+
+    /** @return array<string,mixed>|null */
+    public function receiptForStatus(array $status, int $accountId): ?array
+    {
+        if (!$this->isStatusAuthoritative($status, $accountId)) {
+            return null;
+        }
+        return $this->decodeStoredArray(self::receiptKey((string) $status['run_id']));
+    }
+
+    /** @param array<string,mixed> $status */
+    public function isStatusAuthoritative(array $status, int $accountId): bool
+    {
+        if ($accountId <= 0 || !$this->proof->verifyStatus($status, $accountId)) {
+            return false;
+        }
+        $runId = $status['run_id'] ?? null;
+        if (!is_string($runId) || preg_match(self::RUN_ID_PATTERN, $runId) !== 1) {
+            return false;
+        }
+        $receipt = $this->decodeStoredArray(self::receiptKey($runId));
+        return $receipt !== null && $this->receiptMatchesState($receipt, $status, $accountId);
+    }
+
+    /** @return array<string,mixed>|null */
+    public function loadLatestReceipt(int $accountId): ?array
+    {
+        if ($accountId <= 0) {
+            return null;
+        }
+        $runId = $this->redis->get(self::latestReceiptKey($accountId));
+        if (!is_string($runId) || preg_match(self::RUN_ID_PATTERN, $runId) !== 1) {
+            return null;
+        }
+        $receipt = $this->decodeStoredArray(self::receiptKey($runId));
+        $status = is_array($receipt['status'] ?? null) ? $receipt['status'] : null;
+        return $receipt !== null && $status !== null && $this->receiptMatchesState($receipt, $status, $accountId)
+            ? $receipt
+            : null;
     }
 
     public static function lockKey(string $runId): string
@@ -417,6 +639,57 @@ final class PregaoQaRunService
         return is_array($manifest) && $this->proof->verifyManifest($manifest) ? $manifest : null;
     }
 
+    /** @return array<string,mixed>|null */
+    private function decodeStoredArray(string $key): ?array
+    {
+        $raw = $this->redis->get($key);
+        $decoded = is_string($raw) ? json_decode($raw, true) : null;
+        return is_array($decoded) ? $decoded : null;
+    }
+
+    /** @param array<string,mixed> $receipt @param array<string,mixed> $status */
+    private function receiptMatchesState(array $receipt, array $status, int $accountId): bool
+    {
+        $runId = $status['run_id'];
+        $payloadHash = self::statusHash($status);
+        $expiresAt = strtotime((string) ($receipt['manifest_expires_at'] ?? ''));
+        $observedAt = strtotime((string) ($status['observed_at'] ?? ''));
+        if (($receipt['run_id'] ?? null) !== $runId
+            || ($receipt['account_id'] ?? null) !== $accountId
+            || ($receipt['manifest_hash'] ?? null) !== ($status['manifest_hash'] ?? null)
+            || ($receipt['sequence'] ?? null) !== ($status['sequence'] ?? null)
+            || ($receipt['step'] ?? null) !== ($status['step'] ?? null)
+            || ($receipt['result'] ?? null) !== ($status['result'] ?? null)
+            || ($receipt['observed_at'] ?? null) !== ($status['observed_at'] ?? null)
+            || ($receipt['payload_hash'] ?? null) !== $payloadHash
+            || !is_int($receipt['event_id'] ?? null) || $receipt['event_id'] <= 0
+            || $expiresAt === false || $observedAt === false || $observedAt > $expiresAt
+        ) {
+            return false;
+        }
+        $state = $this->decodeStoredArray(self::stateKey($runId));
+        if ($state === null
+            || ($state['run_id'] ?? null) !== $runId
+            || ($state['account_id'] ?? null) !== $accountId
+            || ($state['manifest_hash'] ?? null) !== $status['manifest_hash']
+            || ($state['sequence'] ?? null) !== $status['sequence']
+            || ($state['step'] ?? null) !== $status['step']
+            || ($state['status'] ?? null) !== $status['result']
+            || ($state['observed_at'] ?? null) !== $status['observed_at']
+            || ($state['receipt_hash'] ?? null) !== $payloadHash
+            || ($state['receipt_event_id'] ?? null) !== $receipt['event_id']
+        ) {
+            return false;
+        }
+        if ($status['result'] !== 'running') {
+            return in_array($status['result'], ['passed', 'failed', 'blocked'], true);
+        }
+        $manifest = $this->loadManifest($runId);
+        return $manifest !== null
+            && $manifest['account_id'] === $accountId
+            && $manifest['manifest_hash'] === $status['manifest_hash'];
+    }
+
     /** @param array<string,mixed> $manifest */
     private function failPendingClosed(array $manifest): void
     {
@@ -433,7 +706,7 @@ final class PregaoQaRunService
             'result' => 'blocked',
             'screenshot' => null,
             'cursor' => null,
-            'observed_at' => (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format(DATE_ATOM),
+            'observed_at' => (string) $manifest['expires_at'],
         ]);
     }
 

@@ -19,6 +19,7 @@ final class PregaoSnapshotService
     private PregaoAgentStatusService $agentStatusService;
     private PregaoDataSourceStatusService $dataSourceStatusService;
     private ?PregaoQaProof $qaProof;
+    private ?PregaoQaRunService $qaRuns;
 
     /** @var array<string, mixed> */
     private array $config;
@@ -29,7 +30,8 @@ final class PregaoSnapshotService
         ?array $config = null,
         ?PregaoAgentStatusService $agentStatusService = null,
         ?PregaoDataSourceStatusService $dataSourceStatusService = null,
-        ?PregaoQaProof $qaProof = null
+        ?PregaoQaProof $qaProof = null,
+        ?PregaoQaRunService $qaRuns = null
     ) {
         $this->db = $db ?? Database::getInstance();
         $this->calculator = $calculator ?? new AccountIndexCalculator();
@@ -37,6 +39,14 @@ final class PregaoSnapshotService
         $this->agentStatusService = $agentStatusService ?? new PregaoAgentStatusService($this->db);
         $this->dataSourceStatusService = $dataSourceStatusService ?? new PregaoDataSourceStatusService();
         $this->qaProof = $qaProof ?? PregaoQaProof::fromEnvironment();
+        $this->qaRuns = $qaRuns;
+        if ($this->qaRuns === null && $this->qaProof !== null) {
+            try {
+                $this->qaRuns = new PregaoQaRunService(PregaoQaRunService::connectRedis(), $this->qaProof);
+            } catch (Throwable) {
+                $this->qaRuns = null;
+            }
+        }
     }
 
     /**
@@ -426,19 +436,26 @@ final class PregaoSnapshotService
      */
     private function loadLatestQa(int $accountId): array
     {
-        if ($accountId <= 0 || $this->qaProof === null) {
+        if ($accountId <= 0 || $this->qaProof === null || $this->qaRuns === null) {
             return $this->emptyQaState();
         }
         try {
+            $receipt = $this->qaRuns->loadLatestReceipt($accountId);
+            if ($receipt === null || !is_int($receipt['event_id'] ?? null)) {
+                return $this->emptyQaState();
+            }
             $stmt = $this->db->prepare(
                 "SELECT payload FROM pregao_events
-                 WHERE account_id = ? AND type = 'qa.status' AND source = 'live'
-                 ORDER BY id DESC LIMIT 1"
+                 WHERE id = ? AND account_id = ? AND type = 'qa.status' AND source = 'live'
+                 LIMIT 1"
             );
-            $stmt->execute([$accountId]);
+            $stmt->execute([$receipt['event_id'], $accountId]);
             $raw = $stmt->fetchColumn();
             $payload = is_string($raw) ? json_decode($raw, true) : null;
             if (!is_array($payload)) {
+                return $this->emptyQaState();
+            }
+            if (!$this->qaRuns->isStatusAuthoritative($payload, $accountId)) {
                 return $this->emptyQaState();
             }
             return $this->qaProof->projectStatus($payload, $accountId) ?? $this->emptyQaState();

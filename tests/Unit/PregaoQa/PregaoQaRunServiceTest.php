@@ -183,22 +183,15 @@ final class PregaoQaRunServiceTest extends TestCase
             'created_at' => '2026-08-05T12:00:00+00:00',
             'expires_at' => '2099-08-05T12:15:00+00:00',
         ]);
-        $state = json_encode([
-            'run_id' => $runId,
-            'account_id' => 1335,
-            'status' => 'running',
-            'sequence' => 4,
-        ], JSON_THROW_ON_ERROR);
+        $terminalState = null;
         $redis = $this->createMock(Redis::class);
-        $redis->expects(self::once())->method('get')
-            ->with(PregaoQaRunService::stateKey($runId))
-            ->willReturn($state);
-        $redis->expects(self::once())->method('setex')
-            ->with(PregaoQaRunService::stateKey($runId), PregaoQaRunService::EVIDENCE_TTL_SECONDS, self::isType('string'))
-            ->willReturn(true);
-        $redis->expects(self::once())->method('expire')
-            ->with(PregaoQaRunService::manifestKey($runId), PregaoQaRunService::EVIDENCE_TTL_SECONDS)
-            ->willReturn(true);
+        $redis->expects(self::once())->method('eval')
+            ->willReturnCallback(static function (string $lua, array $args, int $keyCount) use (&$terminalState): int {
+                self::assertSame(1, $keyCount);
+                self::assertSame((string) PregaoQaRunService::EVIDENCE_TTL_SECONDS, $args[6]);
+                $terminalState = json_decode((string) $args[7], true, 512, JSON_THROW_ON_ERROR);
+                return 1;
+            });
         $service = new PregaoQaRunService($redis, $proof);
         $service->updateState($manifest, [
             'run_id' => $runId,
@@ -209,6 +202,9 @@ final class PregaoQaRunServiceTest extends TestCase
             'cursor' => ['x' => 10, 'y' => 20],
             'observed_at' => (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format(DATE_ATOM),
         ]);
+        self::assertSame('passed', $terminalState['status']);
+        self::assertSame(5, $terminalState['sequence']);
+        self::assertSame($manifest, $terminalState['manifest']);
     }
 
     public function testStateProgressionRejectsRepeatedSequence(): void
@@ -241,6 +237,249 @@ final class PregaoQaRunServiceTest extends TestCase
             'cursor' => ['x' => 10, 'y' => 20],
             'observed_at' => (new \DateTimeImmutable('now', new \DateTimeZone('UTC')))->format(DATE_ATOM),
         ]);
+    }
+
+    public function testStateProgressionUsesSingleAtomicLuaCasWithoutGetSetWindow(): void
+    {
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $proof = new PregaoQaProof(str_repeat('k', 32));
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $manifest = $proof->signManifest([
+            'run_id' => $runId,
+            'account_id' => 1335,
+            'user_id' => 77,
+            'created_at' => $now->modify('-1 minute')->format(DATE_ATOM),
+            'expires_at' => $now->modify('+14 minutes')->format(DATE_ATOM),
+        ]);
+        $redis = $this->createMock(Redis::class);
+        $redis->expects(self::never())->method('get');
+        $redis->expects(self::once())->method('eval')
+            ->with(
+                self::logicalAnd(self::stringContains('cjson.decode'), self::stringContains('SETEX')),
+                self::callback(static fn (array $args): bool => $args[0] === PregaoQaRunService::stateKey($runId)),
+                1
+            )
+            ->willReturn(1);
+
+        (new PregaoQaRunService($redis, $proof))->updateState($manifest, [
+            'run_id' => $runId,
+            'sequence' => 1,
+            'step' => 'dashboard',
+            'result' => 'running',
+            'screenshot' => null,
+            'cursor' => null,
+            'observed_at' => $now->format(DATE_ATOM),
+        ]);
+    }
+
+    public function testConcurrentCasLoserCannotOverwriteTheWinningProgression(): void
+    {
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $proof = new PregaoQaProof(str_repeat('k', 32));
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $manifest = $proof->signManifest([
+            'run_id' => $runId,
+            'account_id' => 1335,
+            'user_id' => 77,
+            'created_at' => $now->modify('-1 minute')->format(DATE_ATOM),
+            'expires_at' => $now->modify('+14 minutes')->format(DATE_ATOM),
+        ]);
+        $redis = $this->createMock(Redis::class);
+        $redis->method('eval')->willReturn(0);
+        $redis->expects(self::never())->method('get');
+        $redis->expects(self::never())->method('setex');
+
+        $this->expectException(\InvalidArgumentException::class);
+        (new PregaoQaRunService($redis, $proof))->updateState($manifest, [
+            'run_id' => $runId,
+            'sequence' => 1,
+            'step' => 'dashboard',
+            'result' => 'running',
+            'screenshot' => null,
+            'cursor' => null,
+            'observed_at' => $now->format(DATE_ATOM),
+        ]);
+    }
+
+    public function testRecoveryRepairsTerminalEvidenceIdempotentlyBeforeAckAndActiveRelease(): void
+    {
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $raw = json_encode(['run_id' => $runId], JSON_THROW_ON_ERROR);
+        $proof = new PregaoQaProof(str_repeat('k', 32));
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $manifest = $proof->signManifest([
+            'run_id' => $runId,
+            'account_id' => 1335,
+            'user_id' => 77,
+            'created_at' => $now->modify('-10 minutes')->format(DATE_ATOM),
+            'expires_at' => $now->modify('+5 minutes')->format(DATE_ATOM),
+        ]);
+        $state = [
+            'run_id' => $runId,
+            'account_id' => 1335,
+            'status' => 'passed',
+            'sequence' => 5,
+            'step' => 'console_http',
+            'screenshot_url' => null,
+            'cursor' => null,
+            'observed_at' => $now->format(DATE_ATOM),
+            'updated_at' => $now->format(DATE_ATOM),
+            'manifest' => $manifest,
+        ];
+        $redis = $this->createMock(Redis::class);
+        $redis->method('lRange')->willReturn([$raw]);
+        $redis->method('get')->willReturnCallback(static function (string $key) use ($runId, $state): string|false {
+            return match ($key) {
+                PregaoQaRunService::lockKey($runId) => false,
+                PregaoQaRunService::stateKey($runId) => json_encode($state, JSON_THROW_ON_ERROR),
+                default => false,
+            };
+        });
+        $redis->expects(self::once())->method('lRem')
+            ->with(PregaoQaRunService::PENDING_KEY, $raw, 0)
+            ->willReturn(1);
+        $redis->expects(self::once())->method('eval')
+            ->with(self::stringContains("redis.call('GET', KEYS[1])"), [PregaoQaRunService::activeKey(1335), $runId], 1)
+            ->willReturn(1);
+        $repairs = [];
+
+        $recovered = (new PregaoQaRunService($redis, $proof))->recoverPending(
+            static function (array $recoveryManifest, array $recoveryState) use (&$repairs): bool {
+                $repairs[] = [$recoveryManifest, $recoveryState];
+                return true;
+            }
+        );
+
+        self::assertSame(0, $recovered, 'terminal não volta para a fila');
+        self::assertCount(1, $repairs);
+        self::assertSame(5, $repairs[0][1]['sequence'], 'recuperação confirma a etapa terminal, não inventa sequência 6');
+    }
+
+    public function testRecoveryKeepsTerminalPendingAndActiveUntilEvidenceIsConfirmed(): void
+    {
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $raw = json_encode(['run_id' => $runId], JSON_THROW_ON_ERROR);
+        $proof = new PregaoQaProof(str_repeat('k', 32));
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $manifest = $proof->signManifest([
+            'run_id' => $runId,
+            'account_id' => 1335,
+            'user_id' => 77,
+            'created_at' => $now->modify('-10 minutes')->format(DATE_ATOM),
+            'expires_at' => $now->modify('+5 minutes')->format(DATE_ATOM),
+        ]);
+        $state = [
+            'run_id' => $runId,
+            'account_id' => 1335,
+            'status' => 'passed',
+            'sequence' => 5,
+            'step' => 'console_http',
+            'observed_at' => $now->format(DATE_ATOM),
+            'manifest' => $manifest,
+        ];
+        $redis = $this->createMock(Redis::class);
+        $redis->method('lRange')->willReturn([$raw]);
+        $redis->method('get')->willReturnCallback(static function (string $key) use ($runId, $state): string|false {
+            return match ($key) {
+                PregaoQaRunService::lockKey($runId) => false,
+                PregaoQaRunService::stateKey($runId) => json_encode($state, JSON_THROW_ON_ERROR),
+                default => false,
+            };
+        });
+        $redis->expects(self::never())->method('lRem');
+        $redis->expects(self::never())->method('eval');
+
+        $recovered = (new PregaoQaRunService($redis, $proof))->recoverPending(
+            static fn (array $recoveryManifest, array $recoveryState): bool => false
+        );
+
+        self::assertSame(0, $recovered);
+    }
+
+    public function testConfirmEvidenceAtomicallyBindsReceiptToStateAndExactEvent(): void
+    {
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $proof = new PregaoQaProof(str_repeat('k', 32));
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $manifest = $proof->signManifest([
+            'run_id' => $runId,
+            'account_id' => 1335,
+            'user_id' => 77,
+            'created_at' => $now->modify('-1 minute')->format(DATE_ATOM),
+            'expires_at' => $now->modify('+14 minutes')->format(DATE_ATOM),
+        ]);
+        $status = $proof->signStatus([
+            'running' => true,
+            'suite' => 'pregao-live',
+            'test' => 'dashboard',
+            'result' => 'running',
+            'video_url' => null,
+            'stream_url' => null,
+            'run_id' => $runId,
+            'sequence' => 1,
+            'step' => 'dashboard',
+            'screenshot_url' => null,
+            'observed_at' => $now->format(DATE_ATOM),
+            'started_at' => $manifest['created_at'],
+            'manifest_hash' => $manifest['manifest_hash'],
+        ], 1335);
+        $redis = $this->createMock(Redis::class);
+        $redis->expects(self::once())->method('eval')
+            ->with(
+                self::logicalAnd(self::stringContains('receipt_event_id'), self::stringContains('SETEX')),
+                self::callback(static fn (array $args): bool => array_slice($args, 0, 3) === [
+                    PregaoQaRunService::stateKey($runId),
+                    PregaoQaRunService::receiptKey($runId),
+                    PregaoQaRunService::latestReceiptKey(1335),
+                ]),
+                3
+            )
+            ->willReturn(1);
+
+        self::assertTrue((new PregaoQaRunService($redis, $proof))->confirmEvidence(
+            $manifest,
+            $status,
+            41,
+            $now->format(DATE_ATOM)
+        ));
+    }
+
+    public function testConfirmEvidenceRejectsObservationBeyondManifestExpiryBeforeRedis(): void
+    {
+        $runId = '123e4567-e89b-42d3-a456-426614174000';
+        $proof = new PregaoQaProof(str_repeat('k', 32));
+        $now = new \DateTimeImmutable('now', new \DateTimeZone('UTC'));
+        $manifest = $proof->signManifest([
+            'run_id' => $runId,
+            'account_id' => 1335,
+            'user_id' => 77,
+            'created_at' => $now->modify('-1 minute')->format(DATE_ATOM),
+            'expires_at' => $now->modify('+15 seconds')->format(DATE_ATOM),
+        ]);
+        $status = $proof->signStatus([
+            'running' => true,
+            'suite' => 'pregao-live',
+            'test' => 'dashboard',
+            'result' => 'running',
+            'video_url' => null,
+            'stream_url' => null,
+            'run_id' => $runId,
+            'sequence' => 1,
+            'step' => 'dashboard',
+            'screenshot_url' => null,
+            'observed_at' => $now->modify('+30 seconds')->format(DATE_ATOM),
+            'started_at' => $manifest['created_at'],
+            'manifest_hash' => $manifest['manifest_hash'],
+        ], 1335);
+        $redis = $this->createMock(Redis::class);
+        $redis->expects(self::never())->method('eval');
+
+        self::assertFalse((new PregaoQaRunService($redis, $proof))->confirmEvidence(
+            $manifest,
+            $status,
+            41,
+            $now->format(DATE_ATOM)
+        ));
     }
 
     public function testManifestAuthorizationIsTenantBoundAndFailsClosed(): void
