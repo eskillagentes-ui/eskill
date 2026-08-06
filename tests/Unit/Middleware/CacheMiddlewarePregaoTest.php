@@ -27,17 +27,27 @@ final class CacheMiddlewarePregaoTest extends TestCase
         $configProperty->setAccessible(true);
         $configProperty->setValue($middleware, ['enabled' => true, 'default_ttl' => 300]);
 
-        $calls = 0;
-        $response = $middleware->handle(
+        $uris = [
             '/dashboard/pregao?account_id=1335',
-            'GET',
-            static function () use (&$calls): string {
-                $calls++;
-                return 'fresh-account-bound-html';
-            }
-        );
+            '/api/pregao/snapshot',
+            '/api/pregao/events?page=1',
+            '/api/pregao/ticket',
+            '/qa/live/123e4567-e89b-42d3-a456-426614174000',
+            '/qa/frame/123e4567-e89b-42d3-a456-426614174000',
+        ];
+        $calls = 0;
+        foreach ($uris as $uri) {
+            $response = $middleware->handle(
+                $uri,
+                'GET',
+                static function () use (&$calls): string {
+                    $calls++;
+                    return 'fresh-account-bound-response';
+                }
+            );
+            self::assertSame('fresh-account-bound-response', $response, $uri);
+        }
 
-        self::assertSame('fresh-account-bound-html', $response);
-        self::assertSame(1, $calls);
+        self::assertSame(count($uris), $calls);
     }
 }

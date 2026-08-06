@@ -15,6 +15,7 @@ import {
   auditUserAgent,
   createProtocolRecord,
   executeProtocolStep,
+  isIgnorableSandboxServiceWorkerError,
   latestScreenshotPath,
   moveCursor,
   moveCursorToLocator,
@@ -273,6 +274,19 @@ test('Event Explorer rola o filtro para o viewport antes de mover o cursor', asy
 
   assert.deepStrictEqual(cursor, { x: 140, y: 220 });
   assert.deepStrictEqual(calls, ['scroll', 'box', 'mouse:140:220', 'overlay:140:220']);
+});
+
+test('ignora somente o SecurityError interno exato do service worker no iframe sandboxado', () => {
+  const expected = new Error("Failed to read the 'serviceWorker' property from 'Navigator': Service worker is disabled because the context is sandboxed and lacks the 'allow-same-origin' flag.");
+  expected.name = 'SecurityError';
+  assert.strictEqual(isIgnorableSandboxServiceWorkerError(expected), true);
+
+  const wrongName = new Error(expected.message);
+  assert.strictEqual(isIgnorableSandboxServiceWorkerError(wrongName), false);
+  const otherSecurityError = new Error('Permission denied');
+  otherSecurityError.name = 'SecurityError';
+  assert.strictEqual(isIgnorableSandboxServiceWorkerError(otherSecurityError), false);
+  assert.match(source, /page\.on\('pageerror',[\s\S]+isIgnorableSandboxServiceWorkerError/);
 });
 
 test('sessão é aceita somente por env e configuração não contém segredo', () => {

@@ -16,6 +16,7 @@ const QA_RESULTS = new Set(['running', 'passed', 'failed', 'blocked']);
 const READONLY_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 const REDIRECT_STATUSES = new Set([301, 302, 303, 307, 308]);
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+const SANDBOX_SERVICE_WORKER_ERROR = "Failed to read the 'serviceWorker' property from 'Navigator': Service worker is disabled because the context is sandboxed and lacks the 'allow-same-origin' flag.";
 
 export class NetworkPolicyViolation extends Error {}
 
@@ -273,6 +274,12 @@ export async function moveCursorToLocator(page, locator, unavailableMessage) {
   );
 }
 
+export function isIgnorableSandboxServiceWorkerError(error) {
+  return error instanceof Error
+    && error.name === 'SecurityError'
+    && error.message === SANDBOX_SERVICE_WORKER_ERROR;
+}
+
 function parseCookie(rawCookie) {
   if (typeof rawCookie !== 'string' || rawCookie.length < 3) throw new Error('cookie de sessão ausente no env');
   const separator = rawCookie.indexOf('=');
@@ -397,7 +404,9 @@ export async function run(config) {
     page.on('console', (message) => {
       if (message.type() === 'error') observations.javascript += 1;
     });
-    page.on('pageerror', () => { observations.javascript += 1; });
+    page.on('pageerror', (error) => {
+      if (!isIgnorableSandboxServiceWorkerError(error)) observations.javascript += 1;
+    });
     page.on('response', (response) => {
       if (response.status() >= 400) observations.http += 1;
     });

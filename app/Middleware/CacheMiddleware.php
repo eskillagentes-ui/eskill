@@ -194,6 +194,11 @@ class CacheMiddleware
             '/security',
             // Account-bound HTML embeds CSRF/CSP/session state and must never be reused.
             '/dashboard/pregao',
+            // QA responses carry per-request CSP nonces, authoritative state
+            // and account-bound private media that must never be replayed.
+            '/api/pregao/',
+            '/qa/live/',
+            '/qa/frame/',
         ];
 
         foreach ($neverCache as $pattern) {
