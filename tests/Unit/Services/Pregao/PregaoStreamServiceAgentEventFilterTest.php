@@ -113,7 +113,7 @@ final class PregaoStreamServiceAgentEventFilterTest extends TestCase
         $source = file_get_contents(dirname(__DIR__, 4) . '/bin/pregao-ws-gateway.php');
         self::assertIsString($source);
         self::assertStringContainsString(
-            'PregaoStreamService::isEventAllowedForAccount($event, $client[\'account_id\'])',
+            'PregaoStreamService::isEventAllowedForAccount($event, $client[\'account_id\'], $qaProof, $qaRuns)',
             $source
         );
         self::assertStringContainsString('$fan->rPop(\'pregao:fanout\')', $source);

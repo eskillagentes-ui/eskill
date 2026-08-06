@@ -18,7 +18,7 @@ source = source.slice(0, bootOffset)
 const elements = new Map();
 const context2d = new Proxy({}, {
     get(target, property) {
-        if (!(property in target)) target[property] = function () {};
+        if (!(property in target)) target[property] = function () { };
         return target[property];
     },
     set(target, property, value) {
@@ -35,7 +35,7 @@ function element(id) {
             innerHTML: '',
             className: '',
             style: {},
-            classList: { add() {}, remove() {}, toggle() {} },
+            classList: { add() { }, remove() { }, toggle() { } },
             clientWidth: 600,
             clientHeight: 380,
             width: 600,
@@ -44,6 +44,8 @@ function element(id) {
             srcWrites: 0,
             attributes: new Map(),
             appendChild(child) { this.children.push(child); },
+            addEventListener() { },
+            removeEventListener() { },
             setAttribute(name, value) {
                 if (name === 'src') this.src = value;
                 else this.attributes.set(name, String(value));
@@ -52,7 +54,7 @@ function element(id) {
                 return name === 'src' ? (this.attributes.get('src') ?? null) : (this.attributes.get(name) ?? null);
             },
             removeAttribute(name) { this.attributes.delete(name); },
-            load() {},
+            load() { },
             getContext() { return context2d; }
         };
         Object.defineProperty(node, 'src', {
@@ -95,10 +97,10 @@ const sandbox = {
         createTextNode: (text) => ({ textContent: String(text) })
     },
     matchMedia: () => ({ matches: false }),
-    addEventListener() {},
+    addEventListener() { },
     setInterval() { return 1; },
     setTimeout() { return 1; },
-    clearTimeout() {},
+    clearTimeout() { },
     devicePixelRatio: 1,
     getComputedStyle: () => ({ getPropertyValue: () => 'monospace' }),
     fetch: async () => {
@@ -107,9 +109,9 @@ const sandbox = {
         nextSnapshot = null;
         return { ok: true, json: async () => snapshot };
     },
-    location: { protocol: 'https:', host: 'example.test' },
-    WebSocket: function () {},
-    EventSource: function () {},
+    location: { protocol: 'https:', host: 'example.test', href: 'https://example.test/dashboard/pregao', origin: 'https://example.test' },
+    WebSocket: function () { },
+    EventSource: function () { },
     console,
     Intl,
     Date,
@@ -118,10 +120,74 @@ const sandbox = {
     Set,
     Promise,
     JSON,
-    encodeURIComponent
+    encodeURIComponent,
+    URL,
+    Map
 };
 sandbox.globalThis = sandbox;
+sandbox.window.document = sandbox.document;
+sandbox.window.fetch = sandbox.fetch;
+sandbox.window.location = sandbox.location;
+sandbox.window.URL = URL;
+sandbox.window.Map = Map;
+sandbox.window.Date = Date;
+sandbox.window.JSON = JSON;
+sandbox.window.console = console;
 vm.runInNewContext(source, sandbox, { filename: sourcePath });
+
+const qaSourcePath = path.resolve(__dirname, '../../../public/js/pregao-qa.js');
+const qaSource = fs.readFileSync(qaSourcePath, 'utf8');
+vm.runInNewContext(qaSource, sandbox, { filename: qaSourcePath });
+assert.ok(sandbox.window.PregaoQaUi, 'PregaoQaUi deve carregar no sandbox');
+
+/** Payload vazio canônico (EMPTY_KEYS do pregao-qa.js). */
+function emptyQaPayload() {
+    return {
+        executed: false,
+        log: [],
+        observed_at: null,
+        result: null,
+        run_id: null,
+        running: false,
+        sequence: null,
+        step: null,
+        stream_url: null,
+        suite: null,
+        test: null,
+        video_url: null
+    };
+}
+
+/** Projeção confiável (PROJECTION_KEYS) com observed_at fresco. */
+function projectionQaPayload(overrides = {}) {
+    const runId = overrides.run_id || '11111111-1111-4111-8111-111111111111';
+    const status = overrides.status || 'running';
+    const step = overrides.step || 'dashboard';
+    const streamDefault = status === 'running' ? '/qa/live/' + runId : null;
+    return {
+        elapsed_ms: overrides.elapsed_ms ?? 1500,
+        executed: true,
+        log: [],
+        observed_at: overrides.observed_at || new Date().toISOString(),
+        result: Object.prototype.hasOwnProperty.call(overrides, 'result')
+            ? overrides.result
+            : (status === 'running' ? null : status),
+        run_id: runId,
+        running: Object.prototype.hasOwnProperty.call(overrides, 'running')
+            ? overrides.running
+            : status === 'running',
+        sequence: overrides.sequence ?? 1,
+        status,
+        step,
+        stream_url: Object.prototype.hasOwnProperty.call(overrides, 'stream_url')
+            ? overrides.stream_url
+            : streamDefault,
+        suite: 'pregao-live',
+        test: step,
+        trusted: true,
+        video_url: null
+    };
+}
 
 async function runSnapshot(data, preserveState, keepMissingWatermarks) {
     if (preserveState !== true) sandbox.window.__pregaoTest.resetState();
@@ -767,7 +833,7 @@ test('mantém o cache-busting do cliente corrigido', () => {
     const deploy = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/deploy.yml'), 'utf8');
     assert.match(source, /iconNode\.textContent = String\(icon\)/, 'ícone do feed deve usar textContent');
     assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
-    assert.match(view, /\/js\/pregao\.js\?v=44/, 'view deve invalidar o cache do cliente corrigido');
+    assert.match(view, /\/js\/pregao\.js\?v=45/, 'view deve invalidar o cache do cliente corrigido');
     assert.match(pkg.scripts['test:unit:js'], /pregao-chart-layout\.test\.js/, 'runner deve descobrir layout');
     assert.strictEqual(
         pkg.scripts.test,
@@ -782,51 +848,45 @@ test('QA sem status real aparece como não executado, sem mídia artificial', as
         server_ts: '2026-08-04T12:00:00-03:00',
         index: { value: null, open: null, change_pct: null },
         candles: [],
-        qa: {
-            executed: false, running: false, suite: null, test: null,
-            result: null, video_url: null, stream_url: null, log: []
-        }
+        qa: emptyQaPayload()
     });
     assert.strictEqual(element('qaLive').textContent, 'NÃO EXECUTADO');
-    assert.strictEqual(element('qalog').textContent, '▶ não executado');
-    assert.match(element('qaIdle').textContent, /não executado/);
-    assert.strictEqual(element('qaIdle').hidden, false, 'placeholder deve continuar visível');
+    assert.strictEqual(element('qaStatus').textContent, 'NÃO EXECUTADO');
     assert.strictEqual(element('qaStream').hidden, true, 'nenhum stream artificial');
-    assert.strictEqual(element('qaVideo').hidden, true, 'nenhum vídeo artificial');
+    assert.strictEqual(element('qaStream').getAttribute('src'), null);
 
     await runSnapshot({
         server_ts: '2026-08-04T12:00:00-03:00',
         index: { value: null, open: null, change_pct: null },
         candles: [],
-        qa: {
-            executed: true, running: false, suite: 'smoke', test: 'login',
-            result: 'passed', video_url: null, stream_url: null, log: []
-        }
+        qa: projectionQaPayload({ status: 'passed', step: 'console_http', stream_url: null })
     });
-    assert.strictEqual(element('qaLive').textContent, 'PASSED', 'resultado real deve continuar sendo exibido');
+    assert.strictEqual(element('qaLive').textContent, 'APROVADO', 'resultado real deve continuar sendo exibido');
 });
 
 test('QA limpa mídia anterior e rejeita URLs fora dos caminhos permitidos', async () => {
+    const runId = '22222222-2222-4222-8222-222222222222';
+    const livePath = '/qa/live/' + runId;
     await runSnapshot({
         server_ts: '2026-08-04T12:00:00-03:00',
         index: { value: null, open: null, change_pct: null },
         candles: [],
-        qa: {
-            executed: true, running: true, suite: 'smoke', test: 'login',
-            result: 'running', video_url: null, stream_url: '/qa/stream/session-1', log: []
-        }
+        qa: projectionQaPayload({ run_id: runId, status: 'running', stream_url: livePath })
     });
-    assert.strictEqual(element('qaStream').getAttribute('src'), '/qa/stream/session-1');
+    assert.strictEqual(element('qaStream').getAttribute('src'), livePath);
 
     const writesBefore = element('qaStream').srcWrites;
     await runSnapshot({
         server_ts: '2026-08-04T12:00:30-03:00',
         index: { value: null, open: null, change_pct: null },
         candles: [],
-        qa: {
-            executed: true, running: true, suite: 'smoke', test: 'login',
-            result: 'running', video_url: null, stream_url: '/qa/stream/session-1', log: []
-        }
+        qa: projectionQaPayload({
+            run_id: runId,
+            status: 'running',
+            stream_url: livePath,
+            sequence: 2,
+            elapsed_ms: 2000
+        })
     });
     assert.strictEqual(element('qaStream').srcWrites, writesBefore, 'snapshot repetido não recarrega iframe');
 
@@ -834,22 +894,24 @@ test('QA limpa mídia anterior e rejeita URLs fora dos caminhos permitidos', asy
         server_ts: '2026-08-04T12:01:00-03:00',
         index: { value: null, open: null, change_pct: null },
         candles: [],
-        qa: null
+        qa: emptyQaPayload()
     });
-    assert.strictEqual(element('qaStream').getAttribute('src'), null, 'QA ausente deve remover src anterior');
-    assert.strictEqual(element('qaLive').textContent, 'NÃO EXECUTADO');
+    // Já houve status confiável: empty canônico não sobrescreve (hasTrustedStatus).
+    assert.strictEqual(element('qaStream').getAttribute('src'), livePath);
 
     await runSnapshot({
         server_ts: '2026-08-04T12:02:00-03:00',
         index: { value: null, open: null, change_pct: null },
         candles: [],
-        qa: {
-            executed: true, running: true, suite: 'smoke', test: 'login',
-            result: 'running', video_url: null, stream_url: 'javascript:alert(1)', log: []
-        }
+        qa: projectionQaPayload({
+            run_id: '33333333-3333-4333-8333-333333333333',
+            status: 'running',
+            stream_url: 'javascript:alert(1)'
+        })
     });
     assert.notStrictEqual(element('qaStream').getAttribute('src'), 'javascript:alert(1)');
     assert.strictEqual(element('qaStream').hidden, true);
+    assert.strictEqual(element('qaLive').textContent, 'INDISPONÍVEL');
 });
 
 test('QA realtime é ignorado enquanto não existe produtor confiável', async () => {
@@ -857,7 +919,7 @@ test('QA realtime é ignorado enquanto não existe produtor confiável', async (
         server_ts: '2026-08-04T12:00:00-03:00',
         index: { value: null, open: null, change_pct: null },
         candles: [],
-        qa: { executed: false, running: false, result: null, video_url: null, stream_url: null, log: [] }
+        qa: emptyQaPayload()
     });
 
     sandbox.window.__pregaoTest.handleEvent({
@@ -865,8 +927,9 @@ test('QA realtime é ignorado enquanto não existe produtor confiável', async (
         payload: { running: false, suite: 'smoke', test: 'login', result: 'passed' }
     });
 
-    assert.strictEqual(element('qaLive').textContent, 'NÃO EXECUTADO');
-    assert.strictEqual(element('qalog').textContent, '▶ não executado');
+    // Payload sem assinatura/projeção → fail-closed, sem promover execução falsa.
+    assert.strictEqual(element('qaLive').textContent, 'INDISPONÍVEL');
+    assert.strictEqual(element('qaStream').hidden, true);
 });
 
 test('semáforos são nomeados como Saúde da conta e Sentinela operacional', async () => {

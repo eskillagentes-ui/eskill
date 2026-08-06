@@ -1,0 +1,45 @@
+## 2026-08-06 — Pregão/Ads Onda 1 + E2E readonly
+
+- PHPUnit `--filter Pregao` 98 OK; `--filter Ads` 43 OK; JS unit 31 OK.
+- Novos unit: `PregaoQaProofTest`, `PregaoQaWorkerProtocolTest`, `SkuCustoServiceTest`.
+- E2E readonly: 15/15 OK. Fixes:
+  - `pregao.css`: `#pregao-root .chart-empty[hidden] { display:none !important }`.
+  - `mutation-guard`: continue em non-http / document / loopback (evita `route.fetch` vs php -S).
+  - `pregao-overflow`: CSS via `addStyleTag({ content })`.
+  - `playwright.config`: `workers: 1` quando `E2E_READONLY=1`.
+  - `package.json` `test:e2e:readonly`: remove `TMPDIR=.tmp` (Chromium crash/timeout em setContent).
+- Sem commit.
+
+## 2026-08-06 — Financial coverage restante (ingestion/PnL/settlement)
+
+- Novos unit tests: BillingChargeIngestion, FinancialIngestion, SettlementIngestion, WithdrawalIngestion, FinancialReconciliationService, PnlReportService, SettlementReportService.
+- Ledger `final` → instância real + PDO mock (sem double).
+- `tests/Unit/Services/Financial/` → **146 OK** / 482 asserts.
+- Sem commit.
+
+## 2026-08-06 — Corrigir tudo possível (Unit PHP + JS + Financial coverage)
+
+- **Unit PHP full:** 4342 OK (0 fail; era 2). Fixes:
+  - `PregaoStreamServiceAgentEventFilterTest`: assert assinatura com `$qaProof, $qaRuns`.
+  - `AdsServiceTest::testGetAdsItemsFalhaNaPaginaTardia…`: `incomplete=false` em HTTP mid-page (fail-closed canônico).
+- **JS unit:** 31/31 OK (era 4 fail). `pregao-snapshot-state.test.js` alinhado a `pregao-qa.js` (EMPTY/PROJECTION keys, `/qa/live/{uuid}`, label APROVADO, load PregaoQaUi no sandbox, cache `pregao.js?v=45`).
+- **Financial coverage nova:** CustomerPaymentMethod, Subscription, FinancialForecast, ProductProfitability unit tests → pasta Financial **124 OK**.
+- **Ainda sem unit (P3 / I/O pesado):** BillingChargeIngestion, FinancialIngestion, Settlement*, WithdrawalIngestion, FinancialReconciliationService, PnlReportService, SettlementReportService.
+- Sem commit.
+
+## 2026-08-06 — Financeiro fechamento (smokes + gaps)
+
+- Smokes: `smoke_financials_dashboard` 112 PASS; `smoke_sales_pnl` 25 PASS (read-only, conta 1335).
+- Feature FinancialReport + FinancialServiceTest: 17 OK.
+- E2E readonly: allowlist só `mutation-guard` + `pregao-overflow` — **sem spec financeiro** (P3 / fora).
+- Sem unit test (dívida P3): BillingChargeIngestion, CustomerPaymentMethod, FinancialForecast, FinancialIngestion, FinancialReconciliationService, PnlReport, ProductProfitability, Settlement*, Subscription, WithdrawalIngestion.
+- Módulo Financeiro: sem falha P0/P1 aberta. Sem commit.
+
+## 2026-08-06 — Financeiro Onda 1–3 (PaymentRefund chargebacks)
+
+- **Escopo:** módulo Financial (PHPUnit unit + `--filter Financial` + Feature report).
+- **Onda 1:** 2 falhas em `PaymentRefundServiceTest` (chargeback success + exception).
+- **Causa:** testes mockavam `MercadoLivreClient::get`; produção usa `mpGet` → cliente Mercado Pago (`HasFinancialDependencies`). Success batia API real / envelope sem `id`; exception esperava throw que `mpRequest` engole.
+- **Fix:** injetar mock de `mpClient` via Reflection; alinhar asserts ao envelope de erro.
+- **Verde:** `phpunit tests/Unit/Services/Financial/` 106 OK; `--filter Financial` 86 OK (1 skipped); Feature+FinancialServiceTest OK.
+- **Sem commit** (não pedido).

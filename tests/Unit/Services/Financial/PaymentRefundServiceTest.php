@@ -32,7 +32,7 @@ class PaymentRefundServiceTest extends TestCase
         return $mock;
     }
 
-    private function buildService(MercadoLivreClient $mockClient): PaymentRefundService
+    private function buildService(MercadoLivreClient $mockClient, ?object $mpClient = null): PaymentRefundService
     {
         $ref = new \ReflectionClass(PaymentRefundService::class);
         $service = $ref->newInstanceWithoutConstructor();
@@ -45,7 +45,42 @@ class PaymentRefundServiceTest extends TestCase
         $accountIdProp->setAccessible(true);
         $accountIdProp->setValue($service, 1);
 
+        if ($mpClient !== null) {
+            $mpProp = $ref->getProperty('mpClient');
+            $mpProp->setAccessible(true);
+            $mpProp->setValue($service, $mpClient);
+        }
+
         return $service;
+    }
+
+    /**
+     * Chargebacks usam mpGet → Mercado Pago client, não MercadoLivreClient::get.
+     *
+     * @param array<string, mixed> $getReturnMap
+     */
+    private function createMockMpClient(array $getReturnMap = [], ?\Throwable $throwOnGet = null): object
+    {
+        $mock = $this->getMockBuilder(\stdClass::class)
+            ->addMethods(['get', 'post', 'put', 'delete'])
+            ->getMock();
+
+        if ($throwOnGet !== null) {
+            $mock->method('get')->willThrowException($throwOnGet);
+            return $mock;
+        }
+
+        $mock->method('get')
+            ->willReturnCallback(function (string $endpoint, array $params = []) use ($getReturnMap): array {
+                foreach ($getReturnMap as $pattern => $response) {
+                    if (str_contains($endpoint, (string) $pattern)) {
+                        return $response;
+                    }
+                }
+                return ['error' => 'not_found', 'message' => 'not_found'];
+            });
+
+        return $mock;
     }
 
     // ===========================
@@ -150,7 +185,8 @@ class PaymentRefundServiceTest extends TestCase
 
     public function testGetChargebackDetailsSuccess(): void
     {
-        $client = $this->createMockClient([
+        $mlClient = $this->createMockClient();
+        $mpClient = $this->createMockMpClient([
             '/v1/chargebacks/' => [
                 'id' => 'CB-001',
                 'amount' => 200.00,
@@ -159,7 +195,7 @@ class PaymentRefundServiceTest extends TestCase
             ],
         ]);
 
-        $service = $this->buildService($client);
+        $service = $this->buildService($mlClient, $mpClient);
         $result = $service->getChargebackDetails('CB-001');
 
         $this->assertSame('CB-001', $result['id']);
@@ -170,23 +206,25 @@ class PaymentRefundServiceTest extends TestCase
 
     public function testGetChargebackDetailsApiError(): void
     {
-        $client = $this->createMockClient([
-            '/v1/chargebacks/' => ['error' => 'not_found'],
+        $mlClient = $this->createMockClient();
+        $mpClient = $this->createMockMpClient([
+            '/v1/chargebacks/' => ['error' => 'not_found', 'message' => 'Chargeback not found'],
         ]);
 
-        $service = $this->buildService($client);
+        $service = $this->buildService($mlClient, $mpClient);
         $result = $service->getChargebackDetails('CB-999');
 
         $this->assertArrayHasKey('error', $result);
+        $this->assertSame('Chargeback not found', $result['error']);
     }
 
     public function testGetChargebackDetailsException(): void
     {
-        $mock = $this->createMock(MercadoLivreClient::class);
-        $mock->method('get')
-            ->willThrowException(new \RuntimeException('API unavailable'));
+        // mpRequest engole Throwable e devolve envelope; getChargebackDetails usa message.
+        $mlClient = $this->createMock(MercadoLivreClient::class);
+        $mpClient = $this->createMockMpClient([], new \RuntimeException('API unavailable'));
 
-        $service = $this->buildService($mock);
+        $service = $this->buildService($mlClient, $mpClient);
         $result = $service->getChargebackDetails('CB-001');
 
         $this->assertArrayHasKey('error', $result);

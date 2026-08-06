@@ -24,6 +24,11 @@
     display: none !important;
 }
 
+/* display:flex do placeholder não pode vencer o atributo hidden */
+#pregao-root .chart-empty[hidden] {
+    display: none !important;
+}
+
 #pregao-root ::-webkit-scrollbar {
     width: 6px
 }

@@ -42,7 +42,7 @@ export default defineConfig({
   /* Retry on CI only */
   retries: process.env.CI ? 2 : 0,
   /* Opt out of parallel tests on CI. */
-  workers: process.env.CI ? 2 : undefined,
+  workers: e2eReadonly ? 1 : (process.env.CI ? 2 : undefined),
   /* Reporter to use. See https://playwright.dev/docs/test-reporters */
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : 'html',
   /* Shared settings for all the projects below. See https://playwright.dev/docs/api/class-testoptions. */
@@ -85,17 +85,17 @@ export default defineConfig({
   webServer: process.env.PLAYWRIGHT_SKIP_WEBSERVER
     ? undefined
     : {
-        command: `php -S 127.0.0.1:${PORT} router.php`,
-        url: BASE_URL,
-        reuseExistingServer: !process.env.CI,
-        // PHP_CLI_SERVER_WORKERS (SO_REUSEPORT com múltiplos processos) foi
-        // testado e causou "Timed out waiting from config.webServer" no
-        // runner do GitHub Actions (funcionava localmente); mantendo o
-        // servidor embutido em processo único, que já é suficiente para a
-        // carga dos testes E2E e é o comportamento padrão/mais previsível.
-        timeout: 60_000,
-        env: {
-          APP_ENV: process.env.APP_ENV || 'testing',
-        },
+      command: `php -S 127.0.0.1:${PORT} router.php`,
+      url: BASE_URL,
+      reuseExistingServer: !process.env.CI,
+      // PHP_CLI_SERVER_WORKERS (SO_REUSEPORT com múltiplos processos) foi
+      // testado e causou "Timed out waiting from config.webServer" no
+      // runner do GitHub Actions (funcionava localmente); mantendo o
+      // servidor embutido em processo único, que já é suficiente para a
+      // carga dos testes E2E e é o comportamento padrão/mais previsível.
+      timeout: 60_000,
+      env: {
+        APP_ENV: process.env.APP_ENV || 'testing',
       },
+    },
 });

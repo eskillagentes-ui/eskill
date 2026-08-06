@@ -41,7 +41,7 @@ function assertSafeHost(target: URL, label: string, allowedHosts: ReadonlySet<st
   if (!allowedHosts.has(target.hostname.toLowerCase())) {
     throw new Error(
       `[${label}] host E2E não permitido: ${target.hostname.toLowerCase()}; ` +
-        'use loopback ou staging.eskill.com.br.'
+      'use loopback ou staging.eskill.com.br.'
     );
   }
 }
@@ -80,7 +80,7 @@ export function requireMutationAllowed(suiteName: string): void {
   if (process.env.E2E_ALLOW_MUTATION !== 'true') {
     throw new Error(
       `[${suiteName}] mutações bloqueadas: defina E2E_ALLOW_MUTATION=true ` +
-        '(somente no staging explicitamente permitido).'
+      '(somente no staging explicitamente permitido).'
     );
   }
 
@@ -135,14 +135,30 @@ export const test = base.extend<{ safeApiNetwork: void; safeNetwork: void }>({
     const restoreContextRequest = installApiRequestGuard(context.request);
     await context.route('**/*', async (route) => {
       const request = route.request();
+      const rawUrl = request.url();
+      // Sem http(s) / documento / loopback local: continue.
+      // route.fetch contra php -S deadlock com workers>1 (servidor single-thread).
+      const isLoopbackHttp = /^https?:\/\/(127\.0\.0\.1|localhost|\[::1\])(?::\d+)?\//i.test(rawUrl);
+      if (!/^https?:/i.test(rawUrl) || request.resourceType() === 'document' || isLoopbackHttp) {
+        if (/^https?:/i.test(rawUrl)) {
+          try {
+            assertMutationRequestAllowed(request.method(), rawUrl);
+          } catch (error) {
+            await route.abort('blockedbyclient');
+            throw error;
+          }
+        }
+        await route.continue();
+        return;
+      }
       let response: APIResponse;
       try {
-        assertMutationRequestAllowed(request.method(), request.url());
+        assertMutationRequestAllowed(request.method(), rawUrl);
         response = await route.fetch({ maxRedirects: 0 });
         const status = response.status();
         const location = response.headers()['location'];
         if (status >= 300 && status < 400 && location) {
-          const redirectUrl = new URL(location, request.url()).toString();
+          const redirectUrl = new URL(location, rawUrl).toString();
           const redirectMethod = status === 307 || status === 308 ? request.method() : 'GET';
           assertMutationRequestAllowed(redirectMethod, redirectUrl);
         }
@@ -151,7 +167,7 @@ export const test = base.extend<{ safeApiNetwork: void; safeNetwork: void }>({
           await route.abort('blockedbyclient');
         } catch (abortError) {
           if (!(abortError instanceof Error)
-              || !abortError.message.includes('Route is already handled')) {
+            || !abortError.message.includes('Route is already handled')) {
             throw abortError;
           }
         }
@@ -162,7 +178,7 @@ export const test = base.extend<{ safeApiNetwork: void; safeNetwork: void }>({
         await route.fulfill({ response });
       } catch (fulfillError) {
         if (!(fulfillError instanceof Error)
-            || !fulfillError.message.includes('Route is already handled')) {
+          || !fulfillError.message.includes('Route is already handled')) {
           throw fulfillError;
         }
       }

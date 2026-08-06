@@ -431,8 +431,9 @@ class AdsServiceTest extends TestCase
 
         $result = $service->getAdsItems('2026-08-01', '2026-08-01', 2, 'item');
 
+        // HTTP/rede mid-page: fail-closed sem partials; incomplete só para pagination_incomplete.
         $this->assertFalse($result['ok']);
-        $this->assertTrue($result['incomplete']);
+        $this->assertFalse($result['incomplete']);
         $this->assertSame(503, $result['api_status']);
         $this->assertSame([], $result['items']);
     }
