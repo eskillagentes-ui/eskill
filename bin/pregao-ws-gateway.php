@@ -3,8 +3,6 @@
 
 declare(strict_types=1);
 
-use App\Services\Pregao\PregaoQaProof;
-use App\Services\Pregao\PregaoQaRunService;
 use App\Services\Pregao\PregaoStreamService;
 
 /**
@@ -44,6 +42,8 @@ fwrite(STDOUT, "[pregao-ws] listening on {$host}:{$port}\n");
 
 /** @var array<int, array{sock: resource, account_id: int}> $clients */
 $clients = [];
+$streamService = new PregaoStreamService();
+
 $redisHost = $_ENV['REDIS_HOST'] ?? getenv('REDIS_HOST') ?: '127.0.0.1';
 $redisPort = (int) ($_ENV['REDIS_PORT'] ?? getenv('REDIS_PORT') ?: 6379);
 $pass = $_ENV['REDIS_PASSWORD'] ?? getenv('REDIS_PASSWORD') ?: '';
@@ -55,9 +55,6 @@ if (!empty($pass) && $pass !== 'null') {
     $fan->auth($pass);
 }
 $fan->select($db);
-$qaProof = PregaoQaProof::fromEnvironment();
-$qaRuns = $qaProof === null ? null : new PregaoQaRunService($fan, $qaProof);
-$streamService = new PregaoStreamService($qaProof, $qaRuns);
 
 /**
  * @param resource $sock
@@ -121,12 +118,7 @@ function pregao_ws_send($sock, string $payload): void
 /**
  * @param array<int, array{sock: resource, account_id: int}> $clients
  */
-function pregao_ws_broadcast(
-    array &$clients,
-    string $json,
-    ?PregaoQaProof $qaProof,
-    ?PregaoQaRunService $qaRuns
-): void
+function pregao_ws_broadcast(array &$clients, string $json): void
 {
     $event = json_decode($json, true);
     if (!is_array($event)) {
@@ -134,7 +126,7 @@ function pregao_ws_broadcast(
     }
 
     foreach ($clients as $id => $client) {
-        if (!PregaoStreamService::isEventAllowedForAccount($event, $client['account_id'], $qaProof, $qaRuns)) {
+        if (!PregaoStreamService::isEventAllowedForAccount($event, $client['account_id'])) {
             continue;
         }
         try {
@@ -197,14 +189,14 @@ while (true) {
     // BRPOP com timeout curto para não busy-loop
     $item = $fan->brPop(['pregao:fanout'], 1);
     if (is_array($item) && isset($item[1]) && is_string($item[1])) {
-        pregao_ws_broadcast($clients, $item[1], $qaProof, $qaRuns);
+        pregao_ws_broadcast($clients, $item[1]);
         // Drain burst
         while (true) {
             $more = $fan->rPop('pregao:fanout');
             if (!is_string($more) || $more === '') {
                 break;
             }
-            pregao_ws_broadcast($clients, $more, $qaProof, $qaRuns);
+            pregao_ws_broadcast($clients, $more);
         }
     }
 }

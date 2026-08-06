@@ -192,8 +192,6 @@ class CacheMiddleware
             '/register',
             '/auth/',
             '/security',
-            // Account-bound HTML embeds CSRF/CSP/session state and must never be reused.
-            '/dashboard/pregao',
         ];
 
         foreach ($neverCache as $pattern) {

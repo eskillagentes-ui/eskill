@@ -767,7 +767,7 @@ test('mantém o cache-busting do cliente corrigido', () => {
     const deploy = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/deploy.yml'), 'utf8');
     assert.match(source, /iconNode\.textContent = String\(icon\)/, 'ícone do feed deve usar textContent');
     assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
-    assert.match(view, /\/js\/pregao\.js\?v=45/, 'view deve invalidar o cache do cliente corrigido');
+    assert.match(view, /\/js\/pregao\.js\?v=44/, 'view deve invalidar o cache do cliente corrigido');
     assert.match(pkg.scripts['test:unit:js'], /pregao-chart-layout\.test\.js/, 'runner deve descobrir layout');
     assert.strictEqual(
         pkg.scripts.test,
@@ -777,52 +777,96 @@ test('mantém o cache-busting do cliente corrigido', () => {
     assert.match(deploy, /npm run test:unit:js/, 'deploy deve executar a suíte Node antes do gate');
 });
 
-test('cliente principal aplica apenas qa.status aprovado pelo sanitizador trusted', async () => {
-    const accepted = [];
-    sandbox.window.PregaoQaUi = {
-        isTrustedQaPayload(payload) {
-            return Boolean(payload && payload.trusted === true && payload.run_id === '123e4567-e89b-42d3-a456-426614174000');
-        },
-        applyQa(payload) {
-            accepted.push(payload);
-            return true;
+test('QA sem status real aparece como não executado, sem mídia artificial', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        qa: {
+            executed: false, running: false, suite: null, test: null,
+            result: null, video_url: null, stream_url: null, log: []
         }
-    };
+    });
+    assert.strictEqual(element('qaLive').textContent, 'NÃO EXECUTADO');
+    assert.strictEqual(element('qalog').textContent, '▶ não executado');
+    assert.match(element('qaIdle').textContent, /não executado/);
+    assert.strictEqual(element('qaIdle').hidden, false, 'placeholder deve continuar visível');
+    assert.strictEqual(element('qaStream').hidden, true, 'nenhum stream artificial');
+    assert.strictEqual(element('qaVideo').hidden, true, 'nenhum vídeo artificial');
 
     await runSnapshot({
         server_ts: '2026-08-04T12:00:00-03:00',
         index: { value: null, open: null, change_pct: null },
         candles: [],
         qa: {
-            trusted: true,
-            run_id: '123e4567-e89b-42d3-a456-426614174000',
-            status: 'running',
-            step: 'snapshot',
-            elapsed_ms: 1000,
-            result: null
+            executed: true, running: false, suite: 'smoke', test: 'login',
+            result: 'passed', video_url: null, stream_url: null, log: []
         }
     });
-    assert.strictEqual(accepted.length, 1, 'snapshot trusted deve ser delegado');
+    assert.strictEqual(element('qaLive').textContent, 'PASSED', 'resultado real deve continuar sendo exibido');
+});
+
+test('QA limpa mídia anterior e rejeita URLs fora dos caminhos permitidos', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        qa: {
+            executed: true, running: true, suite: 'smoke', test: 'login',
+            result: 'running', video_url: null, stream_url: '/qa/stream/session-1', log: []
+        }
+    });
+    assert.strictEqual(element('qaStream').getAttribute('src'), '/qa/stream/session-1');
+
+    const writesBefore = element('qaStream').srcWrites;
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:30-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        qa: {
+            executed: true, running: true, suite: 'smoke', test: 'login',
+            result: 'running', video_url: null, stream_url: '/qa/stream/session-1', log: []
+        }
+    });
+    assert.strictEqual(element('qaStream').srcWrites, writesBefore, 'snapshot repetido não recarrega iframe');
+
+    await runSnapshot({
+        server_ts: '2026-08-04T12:01:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        qa: null
+    });
+    assert.strictEqual(element('qaStream').getAttribute('src'), null, 'QA ausente deve remover src anterior');
+    assert.strictEqual(element('qaLive').textContent, 'NÃO EXECUTADO');
+
+    await runSnapshot({
+        server_ts: '2026-08-04T12:02:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        qa: {
+            executed: true, running: true, suite: 'smoke', test: 'login',
+            result: 'running', video_url: null, stream_url: 'javascript:alert(1)', log: []
+        }
+    });
+    assert.notStrictEqual(element('qaStream').getAttribute('src'), 'javascript:alert(1)');
+    assert.strictEqual(element('qaStream').hidden, true);
+});
+
+test('QA realtime é ignorado enquanto não existe produtor confiável', async () => {
+    await runSnapshot({
+        server_ts: '2026-08-04T12:00:00-03:00',
+        index: { value: null, open: null, change_pct: null },
+        candles: [],
+        qa: { executed: false, running: false, result: null, video_url: null, stream_url: null, log: [] }
+    });
 
     sandbox.window.__pregaoTest.handleEvent({
         type: 'qa.status',
-        payload: { trusted: false, run_id: '123e4567-e89b-42d3-a456-426614174000' }
+        payload: { running: false, suite: 'smoke', test: 'login', result: 'passed' }
     });
-    assert.strictEqual(accepted.length, 1, 'realtime não trusted deve ser ignorado');
 
-    sandbox.window.__pregaoTest.handleEvent({
-        type: 'qa.status',
-        payload: {
-            trusted: true,
-            run_id: '123e4567-e89b-42d3-a456-426614174000',
-            status: 'passed',
-            step: 'console_http',
-            elapsed_ms: 5000,
-            result: 'passed'
-        }
-    });
-    assert.strictEqual(accepted.length, 2, 'realtime trusted deve ser delegado');
-    delete sandbox.window.PregaoQaUi;
+    assert.strictEqual(element('qaLive').textContent, 'NÃO EXECUTADO');
+    assert.strictEqual(element('qalog').textContent, '▶ não executado');
 });
 
 test('semáforos são nomeados como Saúde da conta e Sentinela operacional', async () => {
