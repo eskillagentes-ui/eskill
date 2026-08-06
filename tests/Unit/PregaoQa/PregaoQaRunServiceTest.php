@@ -589,6 +589,18 @@ final class PregaoQaRunServiceTest extends TestCase
         self::assertTrue($service->isMediaAuthorized($runId, 1335));
         self::assertFalse($service->isMediaAuthorized($runId, 9999));
 
+        $records[PregaoQaRunService::latestReceiptKey(1335)]['value'] = [
+            'run_id' => '223e4567-e89b-42d3-a456-426614174000',
+            'sequence' => 5,
+            'event_id' => 42,
+            'payload_hash' => str_repeat('a', 64),
+            'status_signature' => str_repeat('b', 64),
+        ];
+        self::assertTrue(
+            $service->isMediaAuthorized($runId, 1335),
+            'Uma execução posterior não pode revogar a mídia terminal ainda retida'
+        );
+
         $clock = $now + PregaoQaRunService::EVIDENCE_TTL_SECONDS;
         self::assertFalse($service->isMediaAuthorized($runId, 1335));
     }

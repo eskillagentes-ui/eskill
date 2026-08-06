@@ -279,8 +279,18 @@ final class PregaoQaRunService
                 && ($retainedManifest['account_id'] ?? null) === $accountId
                 && ($retainedManifest['manifest_hash'] ?? null) === ($state['manifest_hash'] ?? null)
                 && $status !== null
+                && $this->proof->verifyStatus($status, $accountId)
+                && $this->receiptMatchesEvidence($receipt, $status, $accountId)
+                && ($status['run_id'] ?? null) === $runId
+                && ($status['manifest_hash'] ?? null) === ($state['manifest_hash'] ?? null)
+                && ($status['sequence'] ?? null) === $sequence
+                && ($status['step'] ?? null) === ($state['step'] ?? null)
                 && ($status['result'] ?? null) === $state['status']
-                && $this->isStatusAuthoritative($status, $accountId);
+                && ($status['observed_at'] ?? null) === ($state['observed_at'] ?? null)
+                && ($status['screenshot_url'] ?? null) === ($state['screenshot_url'] ?? null)
+                && self::canonicalValuesEqual($status['cursor'] ?? null, $state['cursor'] ?? null)
+                && ($receipt['payload_hash'] ?? null) === ($state['receipt_hash'] ?? null)
+                && ($receipt['event_id'] ?? null) === ($state['receipt_event_id'] ?? null);
         }
 
         if (!in_array($state['status'], ['queued', 'running'], true)) {
