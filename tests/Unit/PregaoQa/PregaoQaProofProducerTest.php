@@ -87,6 +87,7 @@ final class PregaoQaProofProducerTest extends TestCase
         self::assertTrue($proof->verifyStatus($event['payload'], 1335));
         self::assertSame('/qa/live/' . $manifest['run_id'], $event['payload']['stream_url']);
         self::assertSame($manifest['created_at'], $event['payload']['started_at']);
+        self::assertSame($protocol['cursor'], $event['payload']['cursor']);
         self::assertSame('running', $proof->projectStatus($event['payload'], 1335)['status']);
         self::assertSame($event, $published);
 
@@ -197,6 +198,7 @@ final class PregaoQaProofProducerTest extends TestCase
         $emitter = new PregaoEmitService($db, $redis);
         $producer = new PregaoQaStatusProducer($emitter, $proof, $runs);
         $signedStatus = $proof->signStatus([
+            'cursor' => null,
             'running' => true,
             'suite' => 'pregao-live',
             'test' => 'dashboard',

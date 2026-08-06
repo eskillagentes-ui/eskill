@@ -73,6 +73,7 @@ final class PregaoQaProofFreshnessTest extends TestCase
     private function terminalStatus(\DateTimeImmutable $observedAt): array
     {
         return [
+            'cursor' => null,
             'running' => false,
             'suite' => 'pregao-live',
             'test' => 'console_http',

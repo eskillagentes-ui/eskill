@@ -31,6 +31,7 @@ final class PregaoQaSnapshotStreamTest extends TestCase
             'expires_at' => $observedAt->modify('+14 minutes')->format(DATE_ATOM),
         ]);
         $payload = $proof->signStatus([
+            'cursor' => null,
             'running' => false,
             'suite' => 'pregao-live',
             'test' => 'dashboard',
@@ -67,6 +68,7 @@ final class PregaoQaSnapshotStreamTest extends TestCase
     {
         $proof = new PregaoQaProof(str_repeat('s', 32));
         $payload = $proof->signStatus([
+            'cursor' => null,
             'running' => true,
             'suite' => 'pregao-live',
             'test' => 'dashboard',
@@ -203,6 +205,7 @@ final class PregaoQaSnapshotStreamTest extends TestCase
     private function status(array $manifest, int $sequence, string $step, string $result, \DateTimeImmutable $observedAt): array
     {
         return [
+            'cursor' => null,
             'running' => $result === 'running',
             'suite' => 'pregao-live',
             'test' => $step,

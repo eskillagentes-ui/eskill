@@ -38,10 +38,15 @@ final class PregaoQaStatusProducer
             throw new \InvalidArgumentException('Manifesto QA inválido ou expirado');
         }
         $validated = $protocol;
+        $cursor = $validated['cursor'];
+        if (is_array($cursor)) {
+            $cursor = ['x' => $cursor['x'] ?? null, 'y' => $cursor['y'] ?? null];
+        }
         $frameUrl = $validated['screenshot'] === 'latest.png'
             ? '/qa/frame/' . $manifest['run_id']
             : null;
         $payload = $this->proof->signStatus([
+            'cursor' => $cursor,
             'running' => $validated['result'] === 'running',
             'suite' => 'pregao-live',
             'test' => $validated['step'],

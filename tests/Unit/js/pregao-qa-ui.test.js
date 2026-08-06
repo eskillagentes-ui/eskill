@@ -75,6 +75,7 @@ function projectedQa(overrides = {}) {
 
 function signedQa(overrides = {}) {
     return {
+        cursor: { x: 120, y: 432 },
         manifest_hash: 'a'.repeat(64),
         observed_at: '2026-08-05T12:00:03.000Z',
         result: 'running',
@@ -236,6 +237,9 @@ test('evento HMAC exato com stream ausente não tem contrato afrouxado nem mídi
     assert.strictEqual(element('qaStream').hidden, true);
     assert.strictEqual(element('qaStream').getAttribute('src'), null);
     assert.strictEqual(ui.applyQa({ ...signedQa(), extra: 'rejeitar' }), false);
+    assert.strictEqual(ui.applyQa(signedQa({ cursor: { x: 120 } })), false);
+    assert.strictEqual(ui.applyQa(signedQa({ cursor: { x: -1, y: 432 } })), false);
+    assert.strictEqual(api.isTrustedQaPayload(signedQa({ cursor: null })), true);
 });
 
 test('snapshot sem execução confiável permanece NÃO EXECUTADO', () => {

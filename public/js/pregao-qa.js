@@ -13,7 +13,7 @@
         'status', 'step', 'stream_url', 'suite', 'test', 'trusted', 'video_url'
     ];
     const SIGNED_KEYS = [
-        'manifest_hash', 'observed_at', 'result', 'run_id', 'running', 'screenshot_url', 'sequence',
+        'cursor', 'manifest_hash', 'observed_at', 'result', 'run_id', 'running', 'screenshot_url', 'sequence',
         'signature', 'started_at', 'step', 'stream_url', 'suite', 'test', 'video_url'
     ];
     const EMPTY_KEYS = [
@@ -100,6 +100,10 @@
             || typeof value.started_at !== 'string' || typeof value.observed_at !== 'string'
             || typeof value.signature !== 'string' || !/^[a-f0-9]{64}$/.test(value.signature)
             || typeof value.manifest_hash !== 'string' || !/^[a-f0-9]{64}$/.test(value.manifest_hash)) return null;
+        if (value.cursor !== null && (!value.cursor || typeof value.cursor !== 'object' || Array.isArray(value.cursor)
+            || !exactKeys(value.cursor, ['x', 'y'])
+            || !Number.isInteger(value.cursor.x) || value.cursor.x < 0 || value.cursor.x > 100000
+            || !Number.isInteger(value.cursor.y) || value.cursor.y < 0 || value.cursor.y > 100000)) return null;
         const expectedLive = '/qa/live/' + value.run_id;
         const expectedFrame = '/qa/frame/' + value.run_id;
         if (![null, expectedLive].includes(value.stream_url) || ![null, expectedFrame].includes(value.screenshot_url)) return null;

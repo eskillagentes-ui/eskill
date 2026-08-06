@@ -19,7 +19,7 @@ final class PregaoQaProof
     ];
 
     private const STATUS_KEYS = [
-        'manifest_hash', 'observed_at', 'result', 'run_id', 'running', 'screenshot_url', 'sequence',
+        'cursor', 'manifest_hash', 'observed_at', 'result', 'run_id', 'running', 'screenshot_url', 'sequence',
         'signature', 'started_at', 'step', 'stream_url', 'suite', 'test', 'video_url',
     ];
 
@@ -192,6 +192,7 @@ final class PregaoQaProof
             && $status['running'] === ($status['result'] === 'running')
             && is_string($status['suite']) && $status['suite'] === 'pregao-live'
             && is_string($status['test']) && $status['test'] === $status['step']
+            && self::isCursor($status['cursor'])
             && self::isIsoTimestamp($status['started_at'])
             && array_key_exists('video_url', $status) && $status['video_url'] === null
             && (($status['stream_url'] === null) || $status['stream_url'] === '/qa/live/' . $status['run_id'])
@@ -199,6 +200,21 @@ final class PregaoQaProof
             && is_string($status['manifest_hash'])
             && preg_match('/\A[a-f0-9]{64}\z/D', $status['manifest_hash']) === 1
             && self::isIsoTimestamp($status['observed_at']);
+    }
+
+    private static function isCursor(mixed $cursor): bool
+    {
+        if ($cursor === null) {
+            return true;
+        }
+        if (!is_array($cursor)) {
+            return false;
+        }
+        $keys = array_keys($cursor);
+        sort($keys, SORT_STRING);
+        return $keys === ['x', 'y']
+            && is_int($cursor['x']) && $cursor['x'] >= 0 && $cursor['x'] <= 100000
+            && is_int($cursor['y']) && $cursor['y'] >= 0 && $cursor['y'] <= 100000;
     }
 
     private function isStatusFresh(string $observedAt): bool

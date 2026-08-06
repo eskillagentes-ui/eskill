@@ -326,6 +326,7 @@ final class PregaoQaReceiptPipelineRedisTest extends TestCase
     {
         $frameUrl = $protocol['screenshot'] === 'latest.png' ? '/qa/frame/' . $manifest['run_id'] : null;
         return $proof->signStatus([
+            'cursor' => $protocol['cursor'],
             'running' => $protocol['result'] === 'running',
             'suite' => 'pregao-live',
             'test' => $protocol['step'],

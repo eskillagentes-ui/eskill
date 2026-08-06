@@ -481,6 +481,7 @@ final class PregaoQaRunServiceTest extends TestCase
             'expires_at' => $now->modify('+14 minutes')->format(DATE_ATOM),
         ]);
         $status = $proof->signStatus([
+            'cursor' => null,
             'running' => true,
             'suite' => 'pregao-live',
             'test' => 'dashboard',
@@ -529,6 +530,7 @@ final class PregaoQaRunServiceTest extends TestCase
             'expires_at' => $now->modify('+15 seconds')->format(DATE_ATOM),
         ]);
         $status = $proof->signStatus([
+            'cursor' => null,
             'running' => true,
             'suite' => 'pregao-live',
             'test' => 'dashboard',
@@ -751,6 +753,7 @@ final class PregaoQaRunServiceTest extends TestCase
             'expires_at' => gmdate(DATE_ATOM, $now + PregaoQaRunService::RUN_TTL_SECONDS - 60),
         ]);
         $status = $proof->signStatus([
+            'cursor' => ['x' => 120, 'y' => 432],
             'running' => false,
             'suite' => 'pregao-live',
             'test' => 'console_http',
@@ -783,7 +786,7 @@ final class PregaoQaRunServiceTest extends TestCase
                     'sequence' => 5,
                     'step' => 'console_http',
                     'screenshot_url' => '/qa/frame/' . $runId,
-                    'cursor' => null,
+                    'cursor' => ['x' => 120, 'y' => 432],
                     'observed_at' => $status['observed_at'],
                     'updated_at' => $status['observed_at'],
                     'manifest' => $manifest,
