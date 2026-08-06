@@ -17,6 +17,7 @@ import {
   executeProtocolStep,
   latestScreenshotPath,
   moveCursor,
+  moveCursorToLocator,
   networkPolicyDecision,
   parseRunnerEnv,
 } from '../../../bin/pregao-qa-browser.mjs';
@@ -252,6 +253,26 @@ test('overlay recebe exatamente a coordenada usada por page.mouse', async () => 
   assert.deepStrictEqual(calls[1].value, { x: 411, y: 237 });
   assert.match(calls[1].fn, /position.*fixed/s);
   assert.match(calls[1].fn, /pointerEvents.*none/s);
+});
+
+test('Event Explorer rola o filtro para o viewport antes de mover o cursor', async () => {
+  const calls = [];
+  const locator = {
+    async scrollIntoViewIfNeeded() { calls.push('scroll'); },
+    async boundingBox() {
+      calls.push('box');
+      return { x: 100, y: 200, width: 80, height: 40 };
+    },
+  };
+  const page = {
+    mouse: { async move(x, y) { calls.push(`mouse:${x}:${y}`); } },
+    async evaluate(_fn, value) { calls.push(`overlay:${value.x}:${value.y}`); },
+  };
+
+  const cursor = await moveCursorToLocator(page, locator, 'filtro indisponível');
+
+  assert.deepStrictEqual(cursor, { x: 140, y: 220 });
+  assert.deepStrictEqual(calls, ['scroll', 'box', 'mouse:140:220', 'overlay:140:220']);
 });
 
 test('sessão é aceita somente por env e configuração não contém segredo', () => {

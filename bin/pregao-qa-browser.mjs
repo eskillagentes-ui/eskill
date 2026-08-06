@@ -262,6 +262,17 @@ export async function moveCursor(page, x, y) {
   return cursor;
 }
 
+export async function moveCursorToLocator(page, locator, unavailableMessage) {
+  await locator.scrollIntoViewIfNeeded();
+  const box = await locator.boundingBox();
+  if (!box) throw new Error(unavailableMessage);
+  return moveCursor(
+    page,
+    Math.round(box.x + box.width / 2),
+    Math.round(box.y + box.height / 2),
+  );
+}
+
 function parseCookie(rawCookie) {
   if (typeof rawCookie !== 'string' || rawCookie.length < 3) throw new Error('cookie de sessão ausente no env');
   const separator = rawCookie.indexOf('=');
@@ -464,9 +475,7 @@ export async function run(config) {
 
     await step('event_explorer', async () => {
       const filterButton = page.locator('#eventsFilters button[type="submit"]');
-      const box = await filterButton.boundingBox();
-      if (!box) throw new Error('filtro de eventos indisponível');
-      cursor = await moveCursor(page, Math.round(box.x + box.width / 2), Math.round(box.y + box.height / 2));
+      cursor = await moveCursorToLocator(page, filterButton, 'filtro de eventos indisponível');
       const eventsWait = page.waitForResponse((response) => {
         const target = new URL(response.url());
         return target.origin === config.baseUrl.origin
