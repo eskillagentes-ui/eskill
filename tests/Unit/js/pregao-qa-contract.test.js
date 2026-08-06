@@ -11,6 +11,7 @@ const view = fs.readFileSync(path.join(root, 'app/Views/dashboard/pregao.php'), 
 const css = fs.readFileSync(path.join(root, 'public/css/pregao.css'), 'utf8');
 const client = fs.readFileSync(path.join(root, 'public/js/pregao.js'), 'utf8');
 const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+const playwrightConfig = fs.readFileSync(path.join(root, 'playwright.config.ts'), 'utf8');
 const wallClientPath = path.join(root, 'public/js/pregao-wall.js');
 
 test('view contém trigger QA read-only, status etapa tempo e iframe live', () => {
@@ -43,6 +44,11 @@ test('npm test continua estritamente read-only e descobre os novos testes Node',
         assert.match(pkg.scripts['test:unit:js'], new RegExp(file.replace('.', '\\.')));
     }
     assert.doesNotMatch(pkg.scripts.test, /staging|mutation|qa-browser/);
+    assert.match(
+        playwrightConfig,
+        /url:\s*`\$\{BASE_URL\}\/css\/pregao\.css`/,
+        'readiness deve usar asset estático e não depender de login, sessão ou banco'
+    );
 });
 
 test('modo parede expõe âncora operacional legível e acionamento explícito', () => {

@@ -86,7 +86,7 @@ export default defineConfig({
     ? undefined
     : {
         command: `php -S 127.0.0.1:${PORT} router.php`,
-        url: BASE_URL,
+        url: `${BASE_URL}/css/pregao.css`,
         reuseExistingServer: !process.env.CI,
         // PHP_CLI_SERVER_WORKERS (SO_REUSEPORT com múltiplos processos) foi
         // testado e causou "Timed out waiting from config.webServer" no
