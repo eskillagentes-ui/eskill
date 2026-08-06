@@ -192,6 +192,9 @@ class CacheMiddleware
             '/register',
             '/auth/',
             '/security',
+            // Account-bound HTML embeds CSRF/CSP/session state and must never be reused.
+            // Caching /dashboard/* also masks deploys (stale X-Cache HIT) and breaks empty-states.
+            '/dashboard',
         ];
 
         foreach ($neverCache as $pattern) {

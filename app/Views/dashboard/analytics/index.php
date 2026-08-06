@@ -45,11 +45,17 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
 
 <!-- Real-Time Summary Cards -->
 <div class="row g-4 mb-4" id="summary-cards">
+    <div class="col-12">
+        <div class="alert alert-light border mb-0" id="analytics-period-banner" role="status" data-period="30">
+            Período selecionado: <strong id="analytics-period-label">Últimos 30 dias</strong>
+            <span class="text-muted ms-2" id="analytics-period-empty-hint">Sem dados de receita no período — valores podem permanecer zerados.</span>
+        </div>
+    </div>
     <div class="col-md-3">
         <div class="analytics-card">
-            <div class="metric-label">Receita Hoje</div>
-            <div class="metric-big" id="revenue-today">R$ 0</div>
-            <small class="trend-up" id="growth-rate">+0%</small> vs ontem
+            <div class="metric-label" id="revenue-period-label">Receita no período</div>
+            <div class="metric-big" id="revenue-today">R$ 0,00</div>
+            <small class="trend-up" id="growth-rate">+0%</small> vs período anterior
         </div>
     </div>
     <div class="col-md-3">

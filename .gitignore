@@ -112,3 +112,5 @@ node_modules/
 /playwright/.auth/
 /app/Controllers/_runtime/
 /app/Services/_runtime/
+testsprite_tests/tmp/
+testsprite_tests/tmp/config.json

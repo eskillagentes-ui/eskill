@@ -1,0 +1,956 @@
+[
+  {
+    "id": "TC001",
+    "title": "Log in and reach the dashboard shell",
+    "description": "This verifies a seller can authenticate with email and password and land on the protected dashboard with the main metrics and navigation available.",
+    "category": "User Login",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the authenticated dashboard shell is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify dashboard metrics and module navigation are visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC002",
+    "title": "Open the dashboard shell from a logged-in session",
+    "description": "This verifies an authenticated user can open the dashboard home and see the main workspace content on entry.",
+    "category": "Main Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to open the dashboard home"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify dashboard metrics cards are visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the main module navigation is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC003",
+    "title": "Access the authenticated dashboard shell",
+    "description": "This test verifies that a logged-in seller can reach the dashboard home and see the main workspace navigation and summary content.",
+    "category": "Dashboard Shell",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the dashboard home is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the main module navigation is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC004",
+    "title": "Use the dashboard navigation to move between modules",
+    "description": "This verifies the authenticated shell provides working navigation from the dashboard to other product modules.",
+    "category": "Main Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation link to the financials module"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the financial reporting page is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify module navigation remains available"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC005",
+    "title": "Review financial reporting overview",
+    "description": "This verifies an authenticated operations user can open financials and see the core PnL and summary widgets.",
+    "category": "Financials Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation link to the financials module"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify PnL information is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify financial summary widgets are visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC006",
+    "title": "Open the financials overview from the dashboard",
+    "description": "This test verifies that a logged-in user can open financial reporting and see the core summary widgets for PnL and settlements.",
+    "category": "Financials",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation item for financial reporting"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify financial summary widgets are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify PnL and settlements information is displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC007",
+    "title": "Open the live Pregão monitoring view",
+    "description": "This verifies an authenticated user can open the live Pregão page and see the monitoring snapshot and feed content.",
+    "category": "Pregão",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation link to the Pregão module"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the live Pregão snapshot is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the event feed or live monitoring content is visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC008",
+    "title": "Review the live Pregão monitoring panel",
+    "description": "This test verifies that the Pregão page loads the live snapshot, event feed, and charts for read-only monitoring.",
+    "category": "Pregao Live Panel",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation item for Pregão monitoring"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the live Pregão snapshot is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the event feed and charts are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC009",
+    "title": "Update financials with a date filter change",
+    "description": "This verifies changing the financial date filter updates the displayed reporting summary for the selected range.",
+    "category": "Financials Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation link to the financials module"
+      },
+      {
+        "type": "action",
+        "description": "Select a different valid date range in the financial filter"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the financial summary updates for the selected date range"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC010",
+    "title": "Change the financials date range and see updated figures",
+    "description": "This test verifies that changing the financials date filter updates the displayed reporting figures.",
+    "category": "Financials",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation item for financial reporting"
+      },
+      {
+        "type": "action",
+        "description": "Change the financials date filter to a different valid range"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the reporting figures update for the selected date range"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC011",
+    "title": "Open the pricing intelligence view",
+    "description": "This verifies an authenticated user can inspect suggested prices and alerts in the pricing module.",
+    "category": "Pricing",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation link to the pricing module"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify suggested prices are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify pricing alerts are visible"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC012",
+    "title": "Open the pricing intelligence dashboard",
+    "description": "This test verifies that a logged-in user can open pricing intelligence and see suggested prices and alerts.",
+    "category": "Pricing Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation item for pricing intelligence"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify suggested prices are displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify pricing alerts are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC013",
+    "title": "Open account health diagnostics from the dashboard shell",
+    "description": "This test verifies that the account health page loads its diagnostic summary and pillar sections.",
+    "category": "Account Health",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation item for account health"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the account health diagnostic summary is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the diagnostic pillars are displayed"
+      }
+    ],
+    "priority": "High"
+  },
+  {
+    "id": "TC014",
+    "title": "Review account health diagnostics",
+    "description": "This verifies an authenticated user can open account health and see the diagnostic summary and pillars load.",
+    "category": "Account Health",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation link to the account health module"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the account health diagnostic summary is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the diagnostic pillars are visible"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC015",
+    "title": "Search the catalog clone page and review results",
+    "description": "This test verifies that a user can search catalog clone listings and see the returned results list.",
+    "category": "Catalog Clone Search",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation item for catalog clone search"
+      },
+      {
+        "type": "action",
+        "description": "Enter a valid catalog search query"
+      },
+      {
+        "type": "action",
+        "description": "Submit the catalog search"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify catalog search results are displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC016",
+    "title": "View account health diagnostic summary",
+    "description": "An authenticated user can open Account Health and see the diagnostic summary with its pillars loaded.",
+    "category": "Account Health",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the email field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to open account health"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the account health diagnostic summary is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the account health pillars are displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC017",
+    "title": "Search the catalog cloning page and review results",
+    "description": "This verifies an authenticated user can enter a catalog search query and see matching cloning results.",
+    "category": "Catalog Clonar Anúncios",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation link to the catalog cloning page"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the catalog search field with a valid search query"
+      },
+      {
+        "type": "action",
+        "description": "Submit the catalog search"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify matching catalog results are displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC018",
+    "title": "Display account health pillars as part of the diagnostics view",
+    "description": "An authenticated user can review the pillar breakdown that supports the account health diagnosis.",
+    "category": "Account Health",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the email field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to open account health"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the account health pillars are displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC019",
+    "title": "Show an authentication error for invalid login credentials",
+    "description": "This verifies invalid credentials are rejected and the user stays on the login experience with an error message visible.",
+    "category": "User Login",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with invalid@example.com"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with invalid-password"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a validation or authentication error is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the dashboard is not displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC020",
+    "title": "Show account health summary on initial load",
+    "description": "An authenticated user opening Account Health directly sees the summary content without needing additional interaction.",
+    "category": "Account Health",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the email field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to open account health"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the account health page is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the account health diagnostic summary is displayed"
+      }
+    ],
+    "priority": "Medium"
+  },
+  {
+    "id": "TC021",
+    "title": "Keep account health content visible after returning from another module",
+    "description": "An authenticated user can move between modules and return to Account Health without losing the diagnostic summary view.",
+    "category": "Account Health",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the email field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the dashboard navigation for pricing"
+      },
+      {
+        "type": "action",
+        "description": "Click the dashboard navigation for account health"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the account health diagnostic summary is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the account health pillars are displayed"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC022",
+    "title": "Stay on the login page with invalid credentials",
+    "description": "This test verifies that invalid login credentials are rejected and the user remains on the login screen with an error message.",
+    "category": "Dashboard Shell",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with invalid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with invalid credentials"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a login error message is displayed"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the login page remains displayed"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC023",
+    "title": "Show the financials empty or missing-data state",
+    "description": "This verifies the financials page handles a no-data period gracefully when a valid empty range is selected or displayed.",
+    "category": "Financials Dashboard",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation link to the financials module"
+      },
+      {
+        "type": "action",
+        "description": "Select a valid date range with no available financial data"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an empty state message is visible"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC024",
+    "title": "Handle an empty catalog search query",
+    "description": "This test verifies that submitting an empty catalog search query is blocked and a validation message is shown.",
+    "category": "Catalog Clone Search",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation item for catalog clone search"
+      },
+      {
+        "type": "action",
+        "description": "Leave the search field empty"
+      },
+      {
+        "type": "action",
+        "description": "Submit the catalog search"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a search validation message is displayed"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC025",
+    "title": "Handle an empty account health diagnostic state",
+    "description": "An authenticated user viewing Account Health with no available diagnostics sees a clear empty state instead of broken content.",
+    "category": "Account Health",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_USER}} into the email field"
+      },
+      {
+        "type": "action",
+        "description": "Fill in {{LOGIN_PASSWORD}} into the password field"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the link to open account health"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify an empty state message is displayed"
+      }
+    ],
+    "priority": "Low"
+  },
+  {
+    "id": "TC026",
+    "title": "Handle an empty catalog search submission",
+    "description": "This verifies the catalog search page prevents or clearly handles an empty search without showing irrelevant results.",
+    "category": "Catalog Clonar Anúncios",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Click the navigation link to the catalog cloning page"
+      },
+      {
+        "type": "action",
+        "description": "Submit the catalog search without entering a query"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a search validation or empty-state message is visible"
+      }
+    ],
+    "priority": "Low"
+  }
+]

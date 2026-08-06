@@ -47,10 +47,8 @@ class PregaoController extends BaseController
         if ($accountId === false) {
             return;
         }
-        if ($accountId === null) {
-            http_response_code(403);
-            return;
-        }
+        // Sem conta ML: ainda renderiza o shell read-only com empty-state
+        // (evita 403 vazio no staging / TestSprite — TC008).
         $pageTitle = 'Pregão';
         $currentPage = 'pregao';
         $pregaoAccountId = $accountId ?? 0;

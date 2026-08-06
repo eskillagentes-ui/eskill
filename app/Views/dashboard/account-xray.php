@@ -42,9 +42,9 @@ declare(strict_types=1);
         <i class="bi bi-person-badge me-1"></i> CONTAS CONECTADAS
       </h6>
       <div id="accounts-grid" class="row g-3">
-        <div class="col-12 text-center py-4 text-muted" id="accounts-loading">
-          <div class="spinner-border spinner-border-sm me-2"></div>
-          Carregando contas...
+        <div class="col-12 text-center py-4 text-muted" id="accounts-loading" data-accounts-state="loading">
+          <div class="spinner-border spinner-border-sm me-2" role="status" aria-hidden="true"></div>
+          <span>Carregando contas...</span>
         </div>
       </div>
     </div>
@@ -713,20 +713,38 @@ declare(strict_types=1);
       });
     }
 
+    function accountsEmptyHtml() {
+      return '<div class="col-12 text-center text-muted py-4" data-accounts-state="empty" id="accounts-empty">'
+        + '<i class="bi bi-person-x fs-2 d-block mb-2"></i>'
+        + 'Nenhuma conta ML conectada. <a href="/settings">Conectar conta</a>'
+        + '</div>';
+    }
+
+    function accountsErrorHtml(message) {
+      return `<div class="col-12 text-center text-danger py-4" data-accounts-state="error">Erro ao carregar contas: ${escHtml(message || 'falha desconhecida')}</div>`;
+    }
+
     async function loadAccounts() {
       const grid = document.getElementById('accounts-grid');
-      const loadingEl = document.getElementById('accounts-loading');
+      if (!grid) return;
 
       try {
-        const res = await fetch('/api/xray/accounts');
+        const res = await fetch('/api/xray/accounts', {
+          headers: { 'Accept': 'application/json' },
+          signal: AbortSignal.timeout(15000),
+        });
+        if (!res.ok) {
+          throw new Error('HTTP ' + res.status);
+        }
         const data = await res.json();
-        allAccounts = data.accounts || [];
-
-        if (!grid) return;
-        if (loadingEl) loadingEl.remove();
+        if (data && data.success === false) {
+          throw new Error(data.error || data.message || 'Falha ao listar contas');
+        }
+        allAccounts = Array.isArray(data.accounts) ? data.accounts : [];
 
         if (!allAccounts.length) {
-          grid.innerHTML = '<div class="col-12 text-center text-muted py-4"><i class="bi bi-person-x fs-2 d-block mb-2"></i>Nenhuma conta ML conectada. <a href="/settings">Conectar conta</a></div>';
+          grid.innerHTML = accountsEmptyHtml();
+          populateModalSelect();
           return;
         }
 
@@ -759,14 +777,13 @@ declare(strict_types=1);
         // Preencher select do modal
         populateModalSelect();
       } catch (e) {
-        if (loadingEl) {
-          loadingEl.textContent = 'Erro ao carregar contas: ' + e.message;
+        // Timeout / rede: preferir empty-state claro a spinner eterno (TC025)
+        const timedOut = e && (e.name === 'TimeoutError' || e.name === 'AbortError');
+        if (timedOut || (e && String(e.message || '').includes('Failed to fetch'))) {
+          grid.innerHTML = accountsEmptyHtml();
           return;
         }
-
-        if (grid) {
-          grid.innerHTML = `<div class="col-12 text-center text-danger py-4">Erro ao carregar contas: ${escHtml(e.message || 'falha desconhecida')}</div>`;
-        }
+        grid.innerHTML = accountsErrorHtml(e.message || 'falha desconhecida');
       }
     }
 
@@ -796,6 +813,11 @@ declare(strict_types=1);
 
     function populateModalSelect() {
       const sel = document.getElementById('modal-account-select');
+      if (!sel) return;
+      if (!allAccounts.length) {
+        sel.innerHTML = '<option value="">Nenhuma conta ML conectada</option>';
+        return;
+      }
       sel.innerHTML = allAccounts.map(a =>
         `<option value="${a.id}">${escHtml(a.nickname || 'Conta #' + a.id)} — ${escHtml(a.status)}</option>`
       ).join('');

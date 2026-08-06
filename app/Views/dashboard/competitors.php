@@ -39,6 +39,23 @@
     </div>
 </div>
 
+<div class="row g-4 mb-4">
+    <div class="col-12">
+        <div class="card border-0 shadow-sm" id="price-suggestions-card">
+            <div class="card-header bg-transparent">
+                <h6 class="mb-0"><i class="bi bi-tags me-2"></i>Sugestões de Preço</h6>
+            </div>
+            <div class="card-body" id="priceSuggestions">
+                <div class="text-center py-4 text-muted" data-suggestions-state="empty">
+                    <i class="bi bi-tag fs-1 d-block mb-2"></i>
+                    <p class="mb-1 fw-semibold">Nenhuma sugestão de preço disponível</p>
+                    <p class="mb-0 small">Cadastre concorrentes para gerar sugestões e alertas de preço.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
 <div class="card">
     <div class="card-header d-flex justify-content-between align-items-center">
         <h6 class="mb-0"><i class="bi bi-people me-2"></i>Concorrentes</h6>
@@ -100,10 +117,25 @@
             document.getElementById('totalProducts').textContent = data.total_products || 0;
             document.getElementById('priceAlerts').textContent = data.price_alerts || 0;
 
+            const suggestions = document.getElementById('priceSuggestions');
             const tbody = document.getElementById('competitorsTable');
             if (!data.competitors || data.competitors.length === 0) {
                 tbody.innerHTML = '<tr><td colspan="5" class="text-center py-5 text-muted"><i class="bi bi-people fs-1 d-block mb-2"></i>Nenhum concorrente cadastrado</td></tr>';
+                if (suggestions) {
+                    suggestions.innerHTML = '<div class="text-center py-4 text-muted" data-suggestions-state="empty">'
+                        + '<i class="bi bi-tag fs-1 d-block mb-2"></i>'
+                        + '<p class="mb-1 fw-semibold">Nenhuma sugestão de preço disponível</p>'
+                        + '<p class="mb-0 small">Cadastre concorrentes para gerar sugestões e alertas de preço.</p>'
+                        + '</div>';
+                }
                 return;
+            }
+
+            if (suggestions) {
+                const alerts = Number(data.price_alerts || 0);
+                suggestions.innerHTML = alerts > 0
+                    ? `<div data-suggestions-state="ready"><p class="mb-0">${alerts} alerta(s) de preço ativos para os concorrentes monitorados.</p></div>`
+                    : '<div class="text-muted" data-suggestions-state="ready-empty"><p class="mb-0 fw-semibold">Sugestões de Preço</p><p class="mb-0 small">Nenhum alerta de preço no momento — monitoramento ativo sem divergências.</p></div>';
             }
 
             tbody.innerHTML = data.competitors.map(c => `

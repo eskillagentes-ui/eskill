@@ -16,9 +16,10 @@
                 <h6 class="mb-0"><i class="bi bi-gem me-2"></i>Oportunidades Encontradas</h6>
             </div>
             <div class="card-body" id="opportunitiesList">
-                <div class="text-center py-5 text-muted">
+                <div class="text-center py-5 text-muted" data-opportunities-state="idle">
                     <i class="bi bi-gem fs-1"></i>
-                    <p class="mt-2 mb-0">Clique em "Buscar Oportunidades" para começar</p>
+                    <p class="mt-2 mb-1">Clique em "Buscar Oportunidades" para começar</p>
+                    <p class="mb-0 small">Sugestões de preço e alertas aparecem após a busca (requer categorias / conta ML).</p>
                 </div>
             </div>
         </div>
@@ -96,23 +97,43 @@ async function scanOpportunities() {
                 </div>
             `).join('');
         } else {
-            container.innerHTML = '<div class="text-center py-5 text-muted"><i class="bi bi-inbox fs-1"></i><p class="mt-2 mb-0">Nenhuma oportunidade encontrada com os filtros atuais</p></div>';
+            container.innerHTML = '<div class="text-center py-5 text-muted" data-opportunities-state="empty">'
+                + '<i class="bi bi-inbox fs-1"></i>'
+                + '<p class="mt-2 mb-1 fw-semibold">Nenhuma oportunidade / sugestão de preço encontrada</p>'
+                + '<p class="mb-0 small">Selecione uma categoria válida ou conecte uma conta ML ativa.</p>'
+                + '</div>';
         }
     } catch (e) {
-        container.innerHTML = '<div class="text-center py-5 text-danger">Erro ao buscar oportunidades</div>';
+        container.innerHTML = '<div class="text-center py-5 text-muted" data-opportunities-state="error">'
+            + '<i class="bi bi-exclamation-triangle fs-1 text-warning"></i>'
+            + '<p class="mt-2 mb-1 fw-semibold">Não foi possível buscar oportunidades</p>'
+            + '<p class="mb-0 small">Verifique se há conta Mercado Livre conectada e tente novamente.</p>'
+            + '</div>';
     }
 }
 
-// Load categories
+// Load categories (empty-state explícito quando API não retorna categorias)
 requestJson('/api/categories').then(data => {
     const select = document.getElementById('categoryFilter');
-    if (data.categories) {
-        data.categories.forEach(cat => {
-            const option = document.createElement('option');
-            option.value = cat.id;
-            option.textContent = cat.name;
-            select.appendChild(option);
-        });
+    const cats = data.categories || data.data || [];
+    if (!select) return;
+    if (!cats.length) {
+        const option = document.createElement('option');
+        option.value = '';
+        option.textContent = 'Nenhuma categoria disponível (conecte conta ML)';
+        select.innerHTML = '';
+        select.appendChild(option);
+        return;
     }
+    cats.forEach(cat => {
+        const option = document.createElement('option');
+        option.value = cat.id;
+        option.textContent = cat.name;
+        select.appendChild(option);
+    });
+}).catch(() => {
+    const select = document.getElementById('categoryFilter');
+    if (!select) return;
+    select.innerHTML = '<option value="">Nenhuma categoria disponível (conecte conta ML)</option>';
 });
 </script>

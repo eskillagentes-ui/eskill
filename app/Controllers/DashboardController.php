@@ -536,15 +536,24 @@ class DashboardController extends BaseController
 
     private function checkWebhookHealth(): string
     {
-        // Check last webhook received time from DB
+        // Path vivo: webhook_event_inbox (MercadoLivreWebhookController).
+        // webhook_events é legado e parou em 2026-01.
         try {
             $db = Database::getInstance();
-            $stmt = $db->query("SELECT created_at FROM webhook_events ORDER BY id DESC LIMIT 1");
-            $last = $stmt->fetchColumn();
-            if (!$last) return 'unknown';
+            $stmt = $db->query(
+                "SELECT COALESCE(received_at, created_at) AS last_at,
+                        (COALESCE(received_at, created_at) >= (NOW() - INTERVAL 1 HOUR)) AS is_fresh
+                 FROM webhook_event_inbox
+                 WHERE provider = 'mercadolivre'
+                 ORDER BY id DESC
+                 LIMIT 1"
+            );
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row || empty($row['last_at'])) {
+                return 'unknown';
+            }
 
-            // Se último foi há menos de 1 hora, OK
-            return (strtotime($last) > strtotime('-1 hour')) ? 'healthy' : 'warning';
+            return ((int)$row['is_fresh'] === 1) ? 'healthy' : 'warning';
         } catch (\Throwable $e) {
             log_warning('DashboardController: falha ao verificar saude de webhooks', [
                 'error' => $e->getMessage(),
@@ -850,6 +859,11 @@ class DashboardController extends BaseController
      */
     public function competitors(): void
     {
+        if (!$this->userService->isAuthenticated()) {
+            header('Location: /login');
+            exit;
+        }
+
         $currentUser = $this->userService->getCurrentUser();
         $pageTitle = 'Análise de Concorrência';
         ob_start();

@@ -39,11 +39,35 @@ const Analytics = {
     },
 
     async loadRevenueTrend() {
-        const days = document.getElementById('period-selector').value;
+        const selector = document.getElementById('period-selector');
+        const days = selector ? selector.value : '30';
+        const labelMap = {
+            '7': 'Últimos 7 dias',
+            '30': 'Últimos 30 dias',
+            '90': 'Últimos 90 dias'
+        };
+        const periodLabel = labelMap[String(days)] || (`Últimos ${days} dias`);
+        const banner = document.getElementById('analytics-period-banner');
+        const labelEl = document.getElementById('analytics-period-label');
+        const hintEl = document.getElementById('analytics-period-empty-hint');
+        if (banner) banner.setAttribute('data-period', String(days));
+        if (labelEl) labelEl.textContent = periodLabel;
+
         const start = new Date();
-        start.setDate(start.getDate() - days);
+        start.setDate(start.getDate() - Number(days));
 
         const json = await requestJson(`/api/analytics/revenue-trend?start=${start.toISOString().split('T')[0]}&end=${new Date().toISOString().split('T')[0]}`);
+        const rows = Array.isArray(json.data) ? json.data : [];
+        const periodRevenue = rows.reduce((sum, d) => sum + (parseFloat(d.revenue) || 0), 0);
+        const revenueEl = document.getElementById('revenue-today');
+        if (revenueEl) {
+            revenueEl.textContent = 'R$ ' + periodRevenue.toFixed(2);
+        }
+        if (hintEl) {
+            hintEl.textContent = periodRevenue > 0
+                ? `Receita agregada do gráfico: R$ ${periodRevenue.toFixed(2)}.`
+                : `Sem dados de receita para ${periodLabel} — valores podem permanecer zerados.`;
+        }
 
         const ctx = document.getElementById('revenueChart').getContext('2d');
 
@@ -52,10 +76,10 @@ const Analytics = {
         this.charts.revenue = new Chart(ctx, {
             type: 'line',
             data: {
-                labels: json.data.map(d => d.period),
+                labels: rows.length ? rows.map(d => d.period) : [periodLabel],
                 datasets: [{
                     label: 'Receita (R$)',
-                    data: json.data.map(d => parseFloat(d.revenue)),
+                    data: rows.length ? rows.map(d => parseFloat(d.revenue)) : [0],
                     borderColor: '#6f42c1',
                     backgroundColor: 'rgba(111, 66, 193, 0.1)',
                     tension: 0.4,
