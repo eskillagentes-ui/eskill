@@ -9,14 +9,14 @@ use PDO;
 
 /**
  * AI Chatbot Service - Conversational Assistant
- * 
+ *
  * Assistente conversacional inteligente para responder perguntas sobre:
  * - Métricas e dados do dashboard
  * - Como usar funcionalidades
  * - Interpretação de resultados
  * - Sugestões personalizadas
  * - Troubleshooting
- * 
+ *
  * @package App\Services\AI\SEO
  * @version 2.0.0
  * @since 2025-12-31
@@ -34,7 +34,7 @@ class AIChatbotService
         $this->db = Database::getInstance();
         $this->accountId = $accountId;
         $this->apiKey = $_ENV['OPENAI_API_KEY'] ?? $_SERVER['OPENAI_API_KEY'] ?? getenv('OPENAI_API_KEY') ?? '';
-        
+
         if (empty($this->apiKey)) {
             // Try to load .env one last time if not found
             if (file_exists(__DIR__ . '/../../../../.env')) {
@@ -51,7 +51,7 @@ class AIChatbotService
 
     /**
      * Envia mensagem ao chatbot e recebe resposta
-     * 
+     *
      * @param string $message Mensagem do usuário
      * @param array $context Contexto adicional
      * @return array Resposta do chatbot
@@ -67,7 +67,7 @@ class AIChatbotService
 
             // Preparar contexto
             $systemContext = $this->buildSystemContext($context);
-            
+
             // Montar mensagens
             $messages = array_merge(
                 [['role' => 'system', 'content' => $systemContext]],
@@ -76,7 +76,7 @@ class AIChatbotService
 
             // Chamar GPT-4 (ou fallback offline)
             $response = $this->callGPT4($messages);
-            
+
             // Adicionar resposta ao histórico
             $this->conversationHistory[] = [
                 'role' => 'assistant',
@@ -99,7 +99,7 @@ class AIChatbotService
                 'error' => $e->getMessage(),
             ]);
 
-            $fallback = $this->getFallbackResponse([]);
+            $fallback = $this->getFallbackResponse([], 'unavailable');
 
             return [
                 'message' => $fallback,
@@ -112,7 +112,7 @@ class AIChatbotService
 
     /**
      * Responde pergunta sobre métrica específica
-     * 
+     *
      * @param string $metric Nome da métrica
      * @param mixed $value Valor atual
      * @return array Explicação detalhada
@@ -125,7 +125,7 @@ class AIChatbotService
 
     /**
      * Ajuda com funcionalidade específica
-     * 
+     *
      * @param string $feature Nome da feature
      * @return array Guia de uso
      */
@@ -137,7 +137,7 @@ class AIChatbotService
 
     /**
      * Sugestão de próximas ações
-     * 
+     *
      * @return array Ações recomendadas
      */
     public function suggestNextActions(): array
@@ -162,10 +162,18 @@ class AIChatbotService
         $this->conversationHistory = [];
     }
 
-    private function getFallbackResponse(array $messages): string
+    private function getFallbackResponse(array $messages, string $reason = 'unavailable'): string
     {
-        return "I apologize, but I'm currently operating in offline mode because the AI service is temporarily unavailable or not fully configured. " .
-               "I can still help you with basic information based on your account data.";
+        return match ($reason) {
+            'quota' => 'O assistente de IA está temporariamente indisponível: a conta OpenAI ficou sem créditos (HTTP 429). '
+                . 'Recarregue o saldo em platform.openai.com/settings/organization/billing e tente novamente. '
+                . 'Enquanto isso, use o diagnóstico e as ferramentas do SEO Killer para ações básicas.',
+            'missing_key' => 'O assistente de IA não está configurado: falta OPENAI_API_KEY no ambiente. '
+                . 'Configure a chave e tente novamente.',
+            'network' => 'Não foi possível conectar à API da OpenAI agora. Tente novamente em instantes.',
+            default => 'O assistente de IA está temporariamente indisponível. '
+                . 'Tente novamente em instantes ou use as ferramentas do SEO Killer enquanto isso.',
+        };
     }
 
     // ==================== MÉTODOS PRIVADOS ====================
@@ -173,10 +181,11 @@ class AIChatbotService
     private function buildSystemContext(array $context): string
     {
         $accountData = $this->getAccountData();
-        
+
         return "You are an expert assistant for a Mercado Livre SEO optimization platform. " .
                "You help users understand their metrics, use features, and improve their listings. " .
                "Be concise, practical, and always provide actionable advice. " .
+               "Respond always in Brazilian Portuguese. " .
                "Current account has {$accountData['total_items']} items with average score of {$accountData['avg_score']}.";
     }
 
@@ -184,9 +193,9 @@ class AIChatbotService
     {
         // Verificar se API key está disponível
         if (empty($this->apiKey)) {
-            return $this->getFallbackResponse($messages);
+            return $this->getFallbackResponse($messages, 'missing_key');
         }
-        
+
         $data = [
             'model' => 'gpt-4o',
             'messages' => $messages,
@@ -201,9 +210,9 @@ class AIChatbotService
             CURLOPT_POSTFIELDS => json_encode($data),
             CURLOPT_HTTPHEADER => [
                 'Content-Type: application/json',
-                'Authorization: Bearer ' . $this->apiKey
+                'Authorization: Bearer ' . $this->apiKey,
             ],
-            CURLOPT_TIMEOUT => 30
+            CURLOPT_TIMEOUT => 30,
         ]);
 
         $response = curl_exec($ch);
@@ -217,18 +226,22 @@ class AIChatbotService
                         'http_code' => $httpCode,
                         'error' => $error,
                     ]);
-                    return $this->getFallbackResponse($messages);
+                    return $this->getFallbackResponse($messages, 'network');
                 }
 
                 curl_close($ch);
-        
+
                 if ($httpCode !== 200) {
                     log_error('Chatbot GPT-4: erro na API', [
                         'service' => 'AIChatbotService',
                         'http_code' => $httpCode,
                         'response_preview' => substr((string)$response, 0, 300),
                     ]);
-                    return $this->getFallbackResponse($messages);
+                    $reason = 'unavailable';
+                    if ($httpCode === 429 || str_contains((string) $response, 'insufficient_quota') || str_contains((string) $response, 'credit_balance_exhausted')) {
+                        $reason = 'quota';
+                    }
+                    return $this->getFallbackResponse($messages, $reason);
                 }
 
                 $decoded = json_decode($response, true);
@@ -276,7 +289,7 @@ class AIChatbotService
     {
         try {
             $stmt = $this->db->prepare("
-                SELECT 
+                SELECT
                     COUNT(DISTINCT item_id) as total_items,
                     AVG(score_after) as avg_score
                 FROM seo_optimizations
@@ -323,7 +336,7 @@ class AIChatbotService
 
         try {
             $stmt = $this->db->prepare("
-                SELECT 
+                SELECT
                     COUNT(*) as optimizations_count,
                     COUNT(DISTINCT item_id) as optimized_items,
                     AVG(score_after) as avg_score,
@@ -365,12 +378,12 @@ class AIChatbotService
         try {
             $limitSql = max(1, min(50, (int)$limit));
             $stmt = $this->db->prepare("
-                SELECT 
+                SELECT
                     i.id, i.title, i.price, i.sold_quantity, i.thumbnail,
                     COALESCE(o.score_after, 0) as score
                 FROM ml_items i
                 LEFT JOIN seo_optimizations o ON i.id = o.item_id
-                WHERE i.account_id = ? 
+                WHERE i.account_id = ?
                 AND i.status = 'active'
                 AND (o.score_after IS NULL OR o.score_after < 70)
                 ORDER BY i.sold_quantity DESC, i.price DESC
@@ -410,14 +423,14 @@ class AIChatbotService
             $score = (float)$item['score'];
             $title = mb_strimwidth($item['title'] ?? 'Item', 0, 25, '...');
             $sales = (int)($item['sold_quantity'] ?? 0);
-            
+
             if ($score < 60) {
                 $add(
                     "Corrigir item crítico: '{$title}'",
                     sprintf('Item com %d vendas mas score baixo (%d). Otimize agora para não perder ranking.', $sales, $score),
                     0.99,
                     'optimize_item',
-                    $item['id']
+                    isset($item['id']) ? (string) $item['id'] : null
                 );
             } else {
                 $add(
@@ -425,7 +438,7 @@ class AIChatbotService
                     sprintf('Aumente o score atual (%d) para maximizar a conversão.', $score),
                     0.88,
                     'optimize_item',
-                    $item['id']
+                    isset($item['id']) ? (string) $item['id'] : null
                 );
             }
         }

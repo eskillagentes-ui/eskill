@@ -381,23 +381,50 @@ class AutoPilot
      */
     public function getScoreEvolution(int $days = 30): array
     {
+        // Fonte principal: seo_scores_history (SEOScoreCalculator).
+        // Fallback: seo_item_scores (AutoPilot).
         $stmt = $this->db->prepare("
             SELECT
-                score_date,
-                AVG(overall_score) as avg_score,
-                AVG(title_score) as avg_title,
-                AVG(description_score) as avg_description,
-                AVG(attributes_score) as avg_attributes,
-                COUNT(*) as items_count
-            FROM seo_item_scores
+                DATE(created_at) AS score_date,
+                AVG(overall_score) AS avg_score,
+                COUNT(*) AS items_count
+            FROM seo_scores_history
             WHERE account_id = ?
-            AND score_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
-            GROUP BY score_date
+            AND created_at >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+            GROUP BY DATE(created_at)
             ORDER BY score_date ASC
         ");
         $stmt->execute([$this->accountId, $days]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($rows === []) {
+            $stmt = $this->db->prepare("
+                SELECT
+                    score_date,
+                    AVG(overall_score) as avg_score,
+                    AVG(title_score) as avg_title,
+                    AVG(description_score) as avg_description,
+                    AVG(attributes_score) as avg_attributes,
+                    COUNT(*) as items_count
+                FROM seo_item_scores
+                WHERE account_id = ?
+                AND score_date >= DATE_SUB(CURDATE(), INTERVAL ? DAY)
+                GROUP BY score_date
+                ORDER BY score_date ASC
+            ");
+            $stmt->execute([$this->accountId, $days]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+
+        // Contrato UI (performance-tracker-tab): date + score
+        return array_map(static function (array $row): array {
+            $date = (string) ($row['score_date'] ?? '');
+            $score = round((float) ($row['avg_score'] ?? 0), 1);
+            return array_merge($row, [
+                'date' => $date,
+                'score' => $score,
+            ]);
+        }, $rows);
     }
 
     /**

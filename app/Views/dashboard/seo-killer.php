@@ -17,10 +17,12 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
 
 $seoKillerAssetBase = dirname(__DIR__, 2) . '/public/assets';
 $seoKillerCssVersion = @filemtime($seoKillerAssetBase . '/css/seo-killer.css') ?: time();
+$seoKillerChatbotCssVersion = @filemtime($seoKillerAssetBase . '/css/seo-killer-chatbot.css') ?: time();
 $seoKillerJsVersion = @filemtime($seoKillerAssetBase . '/js/seo-killer.js') ?: time();
 ?>
 
 <link rel="stylesheet" href="/assets/css/seo-killer.css?v=<?= $seoKillerCssVersion ?>">
+<link rel="stylesheet" href="/assets/css/seo-killer-chatbot.css?v=<?= $seoKillerChatbotCssVersion ?>">
 
 <link rel="stylesheet" type="text/css" href="https://cdn.jsdelivr.net/npm/toastify-js/src/toastify.min.css">
 
@@ -382,26 +384,41 @@ $seoKillerJsVersion = @filemtime($seoKillerAssetBase . '/js/seo-killer.js') ?: t
 <script nonce="<?= CSP_NONCE ?>" src="/assets/js/seo-killer-chatbot.js?v=<?= $seoKillerJsVersion ?>" defer></script>
 <script nonce="<?= CSP_NONCE ?>" src="/assets/js/ai-optimization.js?v=<?= $seoKillerJsVersion ?>" defer></script>
 <script nonce="<?= CSP_NONCE ?>">
-    // Deep-link support: activate tab from URL hash (e.g. #technical-sheet)
     document.addEventListener('DOMContentLoaded', function() {
-        var hash = window.location.hash.replace('#', '');
-        if (hash) {
-            var tabBtn = document.querySelector('[data-bs-target="#' + hash + '"]');
-            if (tabBtn) {
-                var tab = new bootstrap.Tab(tabBtn);
-                tab.show();
-            }
-        }
-        // Update hash on tab change
-        document.querySelectorAll('#seoKillerTabs button[data-bs-toggle="tab"]').forEach(function(btn) {
-            btn.addEventListener('shown.bs.tab', function(e) {
-                var target = e.target.getAttribute('data-bs-target').replace('#', '');
-                if (target !== 'dashboard') {
-                    history.replaceState(null, null, '#' + target);
-                } else {
-                    history.replaceState(null, null, window.location.pathname);
+        function resolveTabIdFromLocation() {
+            var rawHash = (window.location.hash || '').replace('#', '').trim();
+            var hash = rawHash.split('?')[0].split('/')[0];
+
+            if (!hash) {
+                var tabParam = new URLSearchParams(window.location.search).get('tab');
+                if (tabParam) {
+                    hash = tabParam;
                 }
-            });
+            }
+
+            return hash || '';
+        }
+
+        function activateTabFromLocation() {
+            var hash = resolveTabIdFromLocation();
+            if (!hash || !window.bootstrap || !window.bootstrap.Tab) {
+                return false;
+            }
+
+            var tabBtn = document.querySelector('#seoKillerTabs button[data-bs-toggle="tab"][data-bs-target="#' + hash + '"]');
+            if (!tabBtn) {
+                return false;
+            }
+
+            var tab = new window.bootstrap.Tab(tabBtn);
+            tab.show();
+            return true;
+        }
+
+        activateTabFromLocation();
+
+        window.addEventListener('hashchange', function() {
+            activateTabFromLocation();
         });
     });
 </script>

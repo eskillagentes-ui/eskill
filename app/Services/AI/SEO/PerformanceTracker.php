@@ -246,32 +246,96 @@ class PerformanceTracker
 
     /**
      * 🏆 Ranking de items por performance pós-otimização
+     * Com fallback para top por receita quando ainda não há optimization events.
+     *
+     * @return array{items: list<array<string, mixed>>}
      */
     public function getTopPerformers(int $limit = 10): array
     {
-        $limitSql = max(1, min(200, (int)$limit));
+        $limitSql = max(1, min(200, (int) $limit));
+
         $stmt = $this->db->prepare("
             SELECT
                 pm.item_id,
-                i.title,
-                MAX(oe.optimized_at) as last_optimized,
+                MAX(i.title) as title,
+                MAX(i.thumbnail) as thumbnail,
+                MAX(oe.optimized_at) as optimized_at,
                 AVG(pm.views) as avg_views,
                 SUM(pm.sold_quantity) as total_sales,
                 SUM(pm.revenue) as total_revenue,
-                MAX(oe.score_after) as current_score,
+                MAX(oe.score_before) as score_before,
+                MAX(oe.score_after) as score_after,
                 MAX(oe.score_after) - MAX(oe.score_before) as score_improvement
             FROM seo_performance_metrics pm
             INNER JOIN seo_optimization_events oe ON pm.item_id = oe.item_id
+                AND oe.account_id = pm.account_id
             LEFT JOIN items i ON pm.item_id COLLATE utf8mb4_unicode_ci = i.ml_item_id
+                AND i.account_id = pm.account_id
             WHERE pm.account_id = ?
             AND pm.metric_date >= DATE(oe.optimized_at)
-            GROUP BY pm.item_id, i.title
+            GROUP BY pm.item_id
             ORDER BY total_revenue DESC
             LIMIT {$limitSql}
         ");
         $stmt->execute([$this->accountId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        if ($rows === []) {
+            $accountId = (int) $this->accountId;
+            $stmt = $this->db->prepare("
+                SELECT
+                    pm.item_id,
+                    MAX(i.title) as title,
+                    MAX(i.thumbnail) as thumbnail,
+                    NULL as optimized_at,
+                    AVG(pm.views) as avg_views,
+                    SUM(pm.sold_quantity) as total_sales,
+                    SUM(pm.revenue) as total_revenue,
+                    (
+                        SELECT h.overall_score
+                        FROM seo_scores_history h
+                        WHERE h.account_id = {$accountId}
+                          AND h.item_id = pm.item_id
+                        ORDER BY h.created_at DESC
+                        LIMIT 1
+                    ) as score_after
+                FROM seo_performance_metrics pm
+                LEFT JOIN items i ON pm.item_id COLLATE utf8mb4_unicode_ci = i.ml_item_id
+                    AND i.account_id = pm.account_id
+                WHERE pm.account_id = ?
+                AND pm.metric_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
+                GROUP BY pm.item_id
+                ORDER BY total_revenue DESC
+                LIMIT {$limitSql}
+            ");
+            $stmt->execute([$this->accountId]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        }
+
+        $items = array_map(static function (array $row): array {
+            $scoreAfter = $row['score_after'] !== null ? (int) round((float) $row['score_after']) : 0;
+            $scoreBefore = array_key_exists('score_before', $row) && $row['score_before'] !== null
+                ? (int) round((float) $row['score_before'])
+                : $scoreAfter;
+            $improvement = array_key_exists('score_improvement', $row) && $row['score_improvement'] !== null
+                ? (int) round((float) $row['score_improvement'])
+                : ($scoreAfter - $scoreBefore);
+
+            return [
+                'item_id' => (string) ($row['item_id'] ?? ''),
+                'title' => (string) ($row['title'] ?? $row['item_id'] ?? ''),
+                'thumbnail' => (string) ($row['thumbnail'] ?? ''),
+                'score_before' => $scoreBefore,
+                'score_after' => $scoreAfter,
+                'score_improvement' => $improvement,
+                'sales_increase' => 0,
+                'total_sales' => (int) ($row['total_sales'] ?? 0),
+                'total_revenue' => round((float) ($row['total_revenue'] ?? 0), 2),
+                'optimized_at' => $row['optimized_at'] ?? null,
+            ];
+        }, $rows);
+
+        return ['items' => $items];
     }
 
     /**
@@ -291,7 +355,12 @@ class PerformanceTracker
             AND metric_date >= DATE_SUB(CURDATE(), INTERVAL 30 DAY)
         ");
         $stmt->execute([$this->accountId]);
-        $overall = $stmt->fetch(PDO::FETCH_ASSOC);
+        $overall = $stmt->fetch(PDO::FETCH_ASSOC) ?: [
+            'total_items' => 0,
+            'total_views' => 0,
+            'total_sales' => 0,
+            'total_revenue' => 0,
+        ];
 
         // Optimized vs non-optimized
         $stmt = $this->db->prepare("
@@ -309,11 +378,63 @@ class PerformanceTracker
         $comparison = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         // Top performers
-        $topPerformers = $this->getTopPerformers(5);
+        $topPerformers = $this->getTopPerformers(5)['items'];
 
         // Score evolution
         $autoPilot = new AutoPilot($this->accountId);
         $scoreEvolution = $autoPilot->getScoreEvolution(30);
+
+        // Campos flat esperados por performance-tracker-tab.php
+        $optStmt = $this->db->prepare("
+            SELECT
+                COUNT(*) as total_optimizations,
+                AVG(score_before) as average_score_before,
+                AVG(score_after) as average_score_after,
+                AVG(score_after - score_before) as score_improvement
+            FROM seo_optimization_events
+            WHERE account_id = ?
+            AND optimized_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+        ");
+        $optStmt->execute([$this->accountId]);
+        $opt = $optStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+        $totalOptimizations = (int) ($opt['total_optimizations'] ?? 0);
+        $avgBefore = $opt['average_score_before'] !== null ? (int) round((float) $opt['average_score_before']) : null;
+        $avgAfter = $opt['average_score_after'] !== null ? (int) round((float) $opt['average_score_after']) : null;
+        $scoreImprovement = $opt['score_improvement'] !== null ? (int) round((float) $opt['score_improvement']) : 0;
+
+        // Sem eventos de otimização: usa média atual de seo_scores_history
+        if ($avgBefore === null || $avgAfter === null) {
+            $histAvg = null;
+            if ($scoreEvolution !== []) {
+                $last = $scoreEvolution[array_key_last($scoreEvolution)];
+                $histAvg = isset($last['score']) ? (int) round((float) $last['score']) : null;
+            }
+            if ($histAvg === null) {
+                $histStmt = $this->db->prepare("
+                    SELECT AVG(overall_score) AS avg_score
+                    FROM seo_scores_history
+                    WHERE account_id = ?
+                    AND created_at >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                ");
+                $histStmt->execute([$this->accountId]);
+                $histRow = $histStmt->fetch(PDO::FETCH_ASSOC) ?: [];
+                if ($histRow['avg_score'] !== null) {
+                    $histAvg = (int) round((float) $histRow['avg_score']);
+                }
+            }
+            if ($histAvg !== null) {
+                $avgBefore = $avgBefore ?? $histAvg;
+                $avgAfter = $avgAfter ?? $histAvg;
+            }
+        }
+
+        $totalViews = (int) ($overall['total_views'] ?? 0);
+        $totalSales = (int) ($overall['total_sales'] ?? 0);
+        $totalRevenue = (float) ($overall['total_revenue'] ?? 0);
+        $conversionsIncrease = $totalViews > 0
+            ? (int) round(($totalSales / $totalViews) * 100)
+            : 0;
 
         return [
             'period' => 'últimos 30 dias',
@@ -321,6 +442,16 @@ class PerformanceTracker
             'optimized_vs_not' => $comparison,
             'top_performers' => $topPerformers,
             'score_evolution' => $scoreEvolution,
+            // Contrato UI (cards Overview Geral)
+            'total_optimizations' => $totalOptimizations,
+            'optimizations_change' => 0,
+            'average_score_before' => $avgBefore ?? '-',
+            'average_score_after' => $avgAfter ?? '-',
+            'score_improvement' => $scoreImprovement,
+            'estimated_roi' => round($totalRevenue, 2),
+            'roi_change' => 0,
+            'conversions_increase' => $conversionsIncrease,
+            'views_increase' => 0,
         ];
     }
 
@@ -646,7 +777,7 @@ class PerformanceTracker
         $dashboard = $this->getDashboard();
         $consolidated = $this->getConsolidatedMetrics();
         $evolution = $this->getMetricsEvolution(30);
-        $topPerformers = $this->getTopPerformers(20);
+        $topPerformers = $this->getTopPerformers(20)['items'];
 
         $report = [
             'generated_at' => date('Y-m-d H:i:s'),

@@ -336,20 +336,40 @@ const SEOKiller = {
     },
 
     initTabs() {
-        const tabParam = new URLSearchParams(window.location.search).get('tab');
-        if (tabParam) {
-            const links = document.querySelectorAll('#seoKillerTabs [data-bs-toggle="tab"]');
-            for (const link of links) {
-                const target = link.getAttribute('data-bs-target');
-                if (target === `#${tabParam}`) {
-                    try {
-                        const tab = new bootstrap.Tab(link);
-                        tab.show();
-                    } catch (e) { }
-                    break;
-                }
+        const resolveTabIdFromLocation = () => {
+            const rawHash = (window.location.hash || '').replace('#', '').trim();
+            const hash = rawHash.split('?')[0].split('/')[0];
+
+            if (hash) {
+                return hash;
             }
-        }
+
+            const tabParam = new URLSearchParams(window.location.search).get('tab');
+            return tabParam ? tabParam : '';
+        };
+
+        const activateTabFromLocation = () => {
+            const targetId = resolveTabIdFromLocation();
+            if (!targetId) {
+                return false;
+            }
+
+            const link = document.querySelector(`#seoKillerTabs [data-bs-toggle="tab"][data-bs-target="#${targetId}"]`);
+            if (!link || !window.bootstrap?.Tab) {
+                return false;
+            }
+
+            try {
+                const tab = new window.bootstrap.Tab(link);
+                tab.show();
+                return true;
+            } catch (error) {
+                console.warn('Não foi possível ativar a aba SEO Killer via deep-link:', error);
+                return false;
+            }
+        };
+
+        activateTabFromLocation();
 
         document.addEventListener('shown.bs.tab', (event) => {
             const link = event.target;
@@ -357,8 +377,20 @@ const SEOKiller = {
             if (!target || !target.startsWith('#')) return;
             const tabId = target.slice(1);
             const url = new URL(window.location.href);
-            url.searchParams.set('tab', tabId);
+
+            if (tabId && tabId !== 'dashboard') {
+                url.searchParams.set('tab', tabId);
+                url.hash = tabId;
+            } else {
+                url.searchParams.delete('tab');
+                url.hash = '';
+            }
+
             window.history.replaceState({}, '', url.toString());
+        });
+
+        window.addEventListener('hashchange', () => {
+            activateTabFromLocation();
         });
     },
 
@@ -383,8 +415,24 @@ const SEOKiller = {
         if (!key) return Promise.resolve(false);
         if (this._assetPromises.scripts[key]) return this._assetPromises.scripts[key];
 
+        const pathname = key.split('?')[0];
+        // Também dedupe por pathname sem query (evita carregar chatbot.js duas vezes)
+        const existingPromiseKey = Object.keys(this._assetPromises.scripts || {}).find((k) => k.split('?')[0] === pathname);
+        if (existingPromiseKey) {
+            this._assetPromises.scripts[key] = this._assetPromises.scripts[existingPromiseKey];
+            return this._assetPromises.scripts[key];
+        }
+
         this._assetPromises.scripts[key] = new Promise((resolve, reject) => {
-            const existing = document.querySelector(`script[src="${CSS.escape(key)}"]`);
+            const existing = [...document.querySelectorAll('script[src]')].find((el) => {
+                const attr = el.getAttribute('src') || '';
+                if (attr === key || attr.split('?')[0] === pathname) return true;
+                try {
+                    return new URL(el.src, window.location.origin).pathname === pathname;
+                } catch (e) {
+                    return false;
+                }
+            });
             if (existing) {
                 resolve(true);
                 return;
@@ -405,8 +453,23 @@ const SEOKiller = {
         if (!key) return Promise.resolve(false);
         if (this._assetPromises.styles[key]) return this._assetPromises.styles[key];
 
+        const pathname = key.split('?')[0];
+        const existingPromiseKey = Object.keys(this._assetPromises.styles || {}).find((k) => k.split('?')[0] === pathname);
+        if (existingPromiseKey) {
+            this._assetPromises.styles[key] = this._assetPromises.styles[existingPromiseKey];
+            return this._assetPromises.styles[key];
+        }
+
         this._assetPromises.styles[key] = new Promise((resolve) => {
-            const existing = document.querySelector(`link[rel="stylesheet"][href="${CSS.escape(key)}"]`);
+            const existing = [...document.querySelectorAll('link[rel="stylesheet"][href]')].find((el) => {
+                const attr = el.getAttribute('href') || '';
+                if (attr === key || attr.split('?')[0] === pathname) return true;
+                try {
+                    return new URL(el.href, window.location.origin).pathname === pathname;
+                } catch (e) {
+                    return false;
+                }
+            });
             if (existing) {
                 resolve(true);
                 return;
@@ -437,9 +500,19 @@ const SEOKiller = {
     },
 
     initChatbotWidget() {
+        // CSS é obrigatório (widget fica position:static sem ele). Sempre garantir.
+        const ensureCss = this.ensureStyle('/assets/css/seo-killer-chatbot.css');
+
+        // Página já inclui seo-killer-chatbot.js com handlers CSP-safe
+        if (typeof window.toggleChatWidget === 'function'
+            && document.getElementById('aiChatbotWidget')?.dataset?.chatEventsBound === '1') {
+            ensureCss.catch(() => { });
+            return;
+        }
+
         if (!this._ensureChatbotPromise) {
             this._ensureChatbotPromise = Promise.all([
-                this.ensureStyle('/assets/css/seo-killer-chatbot.css'),
+                ensureCss,
                 this.ensureScript('/assets/js/seo-killer-chatbot.js'),
             ]);
         }
@@ -448,11 +521,13 @@ const SEOKiller = {
 
         const stub = (name) => {
             if (typeof window[name] === 'function') return;
-            window[name] = (...args) => ensure().then(() => {
-                if (typeof window[name] === 'function') {
-                    return window[name](...args);
+            const lazy = (...args) => ensure().then(() => {
+                const fn = window[name];
+                if (typeof fn === 'function' && fn !== lazy) {
+                    return fn(...args);
                 }
             });
+            window[name] = lazy;
         };
 
         stub('toggleChatWidget');
@@ -1098,6 +1173,7 @@ SEOKiller.techSheet = {
             const params = new URLSearchParams({
                 page: String(this.state.page),
                 per_page: String(this.state.perPage),
+                status: 'active',
             });
             if (this.state.q) params.set('q', this.state.q);
             if (this.state.tab && this.state.tab !== 'all') params.set('tab', this.state.tab);
@@ -1125,12 +1201,16 @@ SEOKiller.techSheet = {
     async loadStats(params) {
         const totalEl = document.getElementById('tech-sheet-kpi-total');
         const criticalEl = document.getElementById('tech-sheet-kpi-critical');
+        const hiddenEl = document.getElementById('tech-sheet-kpi-hidden');
+        const modelEl = document.getElementById('tech-sheet-kpi-model');
         const pendingEl = document.getElementById('tech-sheet-kpi-pending');
         const avgEl = document.getElementById('tech-sheet-kpi-avg');
 
         const setLoading = () => {
             if (totalEl) totalEl.textContent = '...';
             if (criticalEl) criticalEl.textContent = '...';
+            if (hiddenEl) hiddenEl.textContent = '...';
+            if (modelEl) modelEl.textContent = '...';
             if (pendingEl) pendingEl.textContent = '...';
             if (avgEl) avgEl.textContent = '...';
         };
@@ -1142,6 +1222,7 @@ SEOKiller.techSheet = {
         p.delete('page');
         p.delete('per_page');
         p.delete('sort');
+        if (!p.has('status')) p.set('status', 'active');
 
         const stats = await this.fetchJSON(`/api/seo/technical-sheet/stats?${p.toString()}`);
         if (!(stats?.success)) {
@@ -1150,15 +1231,84 @@ SEOKiller.techSheet = {
 
         const total = Number(stats.total_items ?? 0);
         const critical = Number(stats.critical_gap_items ?? 0);
+        const hidden = Number(stats.hidden_gap_items ?? 0);
         const pendingTotal = Number(stats.pending_suggestions_total ?? 0);
         const avg = stats.avg_completeness_analyzed;
+        const modelStats = stats.model_suggestions || {};
+        const modelWith = Number(modelStats.items_with_suggestions ?? 0);
+        const modelNeed = Number(modelStats.items_needing_model ?? 0);
+        this.renderEanBanner(stats.ean_balance || {});
+        this.renderHiddenBanner(stats);
 
         if (totalEl) totalEl.textContent = String(total);
         if (criticalEl) criticalEl.textContent = String(critical);
+        if (hiddenEl) hiddenEl.textContent = String(hidden);
+        if (modelEl) modelEl.textContent = `${modelWith}/${modelNeed}`;
         if (pendingEl) pendingEl.textContent = String(pendingTotal);
         if (avgEl) {
             avgEl.textContent = (avg === null || avg === undefined) ? '—' : `${Number(avg).toFixed(1)}%`;
         }
+    },
+
+    renderEanBanner(eanBalance) {
+        const el = document.getElementById('tech-sheet-ean-banner');
+        if (!el) return;
+        const available = Number(eanBalance.available ?? 0);
+        if (!Number.isFinite(available)) {
+            el.classList.add('d-none');
+            el.innerHTML = '';
+            return;
+        }
+        if (available > 0) {
+            el.classList.remove('d-none', 'alert-warning');
+            el.classList.add('alert-light');
+            el.innerHTML = `Inventário EAN: <strong>${available}</strong> disponíveis — sugestões GTIN usarão o pool (<span class="text-muted">origem: EAN do pool</span>).`;
+            return;
+        }
+        el.classList.remove('d-none', 'alert-light');
+        el.classList.add('alert-warning');
+        el.innerHTML = `Sem EAN no inventário — sugestões usarão <strong>EMPTY_GTIN_REASON</strong> (motivo sem GTIN). <a href="/dashboard/ean">Abrir EAN</a>`;
+    },
+
+    techSheetSourceLabel(source) {
+        const map = {
+            ean_pool: 'EAN do pool',
+            empty_gtin_policy: 'Motivo sem GTIN',
+            hidden_seo: 'Hidden SEO',
+            title: 'Título',
+            benchmark: 'Benchmark',
+            ai: 'IA',
+            inference: 'Inferência',
+            default: 'Padrão',
+            manual: 'Manual',
+            search_strategy: 'Estratégia de busca',
+        };
+        return map[source] || source || 'inference';
+    },
+
+    techSheetPolicyLabel(meta) {
+        const policy = (meta && meta.policy) ? String(meta.policy) : '';
+        const map = {
+            semantic_field_mapping: 'ID limpo',
+            umbrella_multi_compatible: 'Guarda-chuva multi',
+            semantic_clean: 'ID limpo',
+            hidden_seo_evidence: 'Evidência Hidden',
+        };
+        return map[policy] || '';
+    },
+
+    renderHiddenBanner(stats) {
+        const el = document.getElementById('tech-sheet-hidden-banner');
+        if (!el) return;
+        const hidden = Number(stats?.hidden_gap_items ?? 0);
+        if (!Number.isFinite(hidden) || hidden < 10) {
+            el.classList.add('d-none');
+            el.innerHTML = '';
+            return;
+        }
+        el.classList.remove('d-none');
+        el.classList.add('alert-info');
+        el.innerHTML = `🔮 <strong>${hidden}</strong> itens com lacunas Hidden SEO — priorize LINE/MPN/HANDLE_RISER com evidência (origem: Hidden SEO). Use generate ou <code>suggest-hidden</code>.`;
     },
 
     renderList(data) {
@@ -1166,16 +1316,40 @@ SEOKiller.techSheet = {
         if (!container) return;
 
         const items = data.items || [];
+        const minConfEmpty = (typeof this.state.bulkMinConfidence === 'number' && this.state.bulkMinConfidence >= 0 && this.state.bulkMinConfidence <= 100)
+            ? this.state.bulkMinConfidence
+            : 85;
+        const confOptionsEmpty = [70, 80, 85, 90, 95].map(v => {
+            const sel = v === minConfEmpty ? 'selected' : '';
+            return `<option value="${v}" ${sel}>${v}%</option>`;
+        }).join('');
+
         if (!items.length) {
             container.innerHTML = `
+                <div class="tech-sheet-toolbar d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+                    <div class="text-muted small">0 itens nesta página</div>
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        <div class="input-group input-group-sm" style="width: 210px;">
+                            <span class="input-group-text">Auto-aprovar ≥</span>
+                            <select class="form-select" data-tech-change="setBulkMinConfidence">
+                                ${confOptionsEmpty}
+                            </select>
+                        </div>
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button class="btn btn-outline-warning" type="button" title="Aprova elegíveis mesmo sem linhas na tela" data-tech-action="bulkApprovePendingSelected">Aprovar pendentes ≥ ${minConfEmpty}%</button>
+                            <button class="btn btn-outline-primary" type="button" disabled>Gerar sugestões</button>
+                            <button class="btn btn-outline-success" type="button" title="Aplica aprovadas elegíveis (escreve no ML)" data-tech-action="bulkApplySelected">Aplicar aprovadas</button>
+                        </div>
+                    </div>
+                </div>
                 <div class="tech-sheet-empty border rounded p-3">
                     <div class="fw-semibold mb-1">Nenhum anúncio encontrado</div>
                     <div class="text-muted">Isso normalmente acontece quando o cache local (tabela <code>items</code>) ainda não foi sincronizado.</div>
                     <div class="d-flex gap-2 mt-3">
-                        <button class="btn btn-sm btn-primary" type="button" onclick="SEOKiller.techSheet.syncItems()">
+                        <button class="btn btn-sm btn-primary" type="button" data-tech-action="syncItems">
                             <i class="bi bi-arrow-repeat"></i> Sincronizar anúncios
                         </button>
-                        <button class="btn btn-sm btn-outline-secondary" type="button" onclick="SEOKiller.techSheet.loadList()">
+                        <button class="btn btn-sm btn-outline-secondary" type="button" data-tech-action="loadList">
                             <i class="bi bi-arrow-clockwise"></i> Tentar novamente
                         </button>
                     </div>
@@ -1192,6 +1366,27 @@ SEOKiller.techSheet = {
             const sel = v === minConf ? 'selected' : '';
             return `<option value="${v}" ${sel}>${v}%</option>`;
         }).join('');
+
+        const pagination = data.pagination || {};
+        const page = Number(pagination.page ?? this.state.page ?? 1) || 1;
+        const pages = Math.max(1, Number(pagination.pages ?? 1) || 1);
+        const totalItems = Number(pagination.total ?? items.length) || 0;
+        this.state.page = page;
+        const itemLabel = items.length === 1 ? 'item' : 'itens';
+        const paginationHtml = pages > 1 ? `
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mt-3" id="tech-sheet-pagination">
+                <div class="text-muted small">Página ${page} de ${pages} · ${totalItems} no total</div>
+                <div class="btn-group btn-group-sm" role="group" aria-label="Paginação ficha técnica">
+                    <button type="button" class="btn btn-outline-secondary" ${page <= 1 ? 'disabled' : ''}
+                        data-tech-action="goToPage" data-tech-args="${this.escapeAttr(JSON.stringify([page - 1]))}">Anterior</button>
+                    <button type="button" class="btn btn-outline-secondary" disabled>${page}/${pages}</button>
+                    <button type="button" class="btn btn-outline-secondary" ${page >= pages ? 'disabled' : ''}
+                        data-tech-action="goToPage" data-tech-args="${this.escapeAttr(JSON.stringify([page + 1]))}">Próxima</button>
+                </div>
+            </div>
+        ` : `
+            <div class="text-muted small mt-2">${totalItems} ${totalItems === 1 ? 'anúncio' : 'anúncios'} no total</div>
+        `;
 
         const asNumber = (v) => {
             const n = Number(v);
@@ -1247,10 +1442,10 @@ SEOKiller.techSheet = {
                     <td class="ts-col-check" style="width: 44px;">
                         <input class="form-check-input" type="checkbox" ${checked}
                             aria-label="Selecionar ${this.escapeAttr(it.item_id)}"
-                            onchange="SEOKiller.techSheet.toggleSelect('${this.escapeAttr(it.item_id)}', this.checked)" />
+                            data-tech-change="toggleSelect" data-tech-args="${this.escapeAttr(JSON.stringify([it.item_id]))}" />
                     </td>
                     <td class="ts-col-actions" style="width: 120px;">
-                        <button class="btn btn-sm btn-outline-primary" onclick="SEOKiller.techSheet.openItem('${it.item_id}')">Ver</button>
+                        <button class="btn btn-sm btn-outline-primary" data-tech-action="openItem" data-tech-args="${this.escapeAttr(JSON.stringify([it.item_id]))}">Ver</button>
                     </td>
                     <td>
                         <div class="ts-title">${this.escapeHtml(it.title || it.item_id)}</div>
@@ -1267,21 +1462,21 @@ SEOKiller.techSheet = {
 
         container.innerHTML = `
             <div class="tech-sheet-toolbar d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
-                <div class="text-muted small">${items.length} item(ns) nesta página</div>
+                <div class="text-muted small">${items.length} ${itemLabel} nesta página</div>
                 <div class="d-flex flex-wrap gap-2 align-items-center">
                     <div class="text-muted small">Selecionados: <span class="fw-semibold">${selectedCount}</span></div>
                     <div id="tech-sheet-bulk-progress" class="text-muted small"></div>
                     <div class="input-group input-group-sm" style="width: 210px;">
                         <span class="input-group-text">Auto-aprovar ≥</span>
-                        <select class="form-select" onchange="SEOKiller.techSheet.setBulkMinConfidence(this.value)">
+                        <select class="form-select" data-tech-change="setBulkMinConfidence">
                             ${confOptions}
                         </select>
                     </div>
                     <div class="btn-group btn-group-sm" role="group">
-                        <button class="btn btn-outline-warning" type="button" ${selectedCount ? '' : 'disabled'} onclick="SEOKiller.techSheet.bulkApprovePendingSelected()">Aprovar pendentes ≥ ${minConf}%</button>
-                        <button class="btn btn-outline-primary" type="button" ${selectedCount ? '' : 'disabled'} onclick="SEOKiller.techSheet.bulkGenerateSelected()">Gerar sugestões</button>
-                        <button class="btn btn-outline-success" type="button" ${selectedCount ? '' : 'disabled'} onclick="SEOKiller.techSheet.bulkApplySelected()">Aplicar aprovadas</button>
-                        <button class="btn btn-outline-secondary" type="button" ${selectedCount ? '' : 'disabled'} onclick="SEOKiller.techSheet.clearSelection()">Limpar</button>
+                        <button class="btn btn-outline-warning" type="button" title="Sem seleção: aprova todas elegíveis (active ≥ confiança). Com seleção: só os marcados." data-tech-action="bulkApprovePendingSelected">Aprovar pendentes ≥ ${minConf}%</button>
+                        <button class="btn btn-outline-primary" type="button" ${selectedCount ? '' : 'disabled'} data-tech-action="bulkGenerateSelected">Gerar sugestões</button>
+                        <button class="btn btn-outline-success" type="button" title="Sem seleção: aplica todas aprovadas em active. Com seleção: só os marcados. ESCREVE NO ML." data-tech-action="bulkApplySelected">Aplicar aprovadas</button>
+                        <button class="btn btn-outline-secondary" type="button" ${selectedCount ? '' : 'disabled'} data-tech-action="clearSelection">Limpar</button>
                     </div>
                 </div>
             </div>
@@ -1290,7 +1485,7 @@ SEOKiller.techSheet = {
                     <thead>
                         <tr>
                             <th style="width: 44px;" scope="col">
-                                <input class="form-check-input" type="checkbox" onchange="SEOKiller.techSheet.toggleSelectAll(this.checked)" />
+                                <input class="form-check-input" type="checkbox" data-tech-change="toggleSelectAll" />
                             </th>
                             <th style="width: 120px;" scope="col"></th>
                             <th scope="col">Anúncio</th>
@@ -1306,7 +1501,18 @@ SEOKiller.techSheet = {
                     </tbody>
                 </table>
             </div>
+            ${paginationHtml}
         `;
+    },
+
+    goToPage(page) {
+        const p = Math.max(1, parseInt(String(page ?? 1), 10) || 1);
+        const maxPages = Number(this.state.lastResponse?.pagination?.pages ?? 0) || 0;
+        if (maxPages > 0 && p > maxPages) return;
+        if (p === this.state.page) return;
+        this.state.page = p;
+        this.state.selectedItemIds = new Set();
+        this.loadList();
     },
 
     toggleSelect(itemId, checked) {
@@ -1367,11 +1573,21 @@ SEOKiller.techSheet = {
         }
 
         try {
-            this.setBulkProgress('Criando job...');
+            this.setBulkProgress('Gerando sugestões...');
             const data = await this.fetchJSON('/api/seo/technical-sheet/batch/suggestions/generate', {
                 method: 'POST',
                 body: JSON.stringify({ item_ids: ids })
             });
+
+            if (data?.mode === 'sync' || data?.suggestions_created_total !== undefined) {
+                const created = Number(data.suggestions_created_total ?? 0);
+                const failed = Number(data.failed_items ?? 0);
+                const processed = Number(data.total_items ?? 0);
+                this.setBulkProgress('');
+                SEOKiller.showSuccess(`Geração concluída: ${created} sugestão(ões) em ${processed} anúncio(s)${failed ? ` · falhas: ${failed}` : ''}`);
+                await this.loadList();
+                return;
+            }
 
             const jobId = data.job_id;
             if (!jobId) {
@@ -1382,7 +1598,6 @@ SEOKiller.techSheet = {
             const details = await this.pollJob(jobId, 'Gerando sugestões');
             await this.loadList();
 
-            // Se houver falhas, mostra modal com detalhes e botão de retry
             this.showJobFailuresModal(
                 details,
                 'Gerando sugestões',
@@ -1391,35 +1606,53 @@ SEOKiller.techSheet = {
             );
         } catch (e) {
             this.setBulkProgress('');
-            SEOKiller.showError(`Erro ao criar job: ${e.message}`);
+            SEOKiller.showError(`Erro ao gerar: ${e.message}`);
         }
     },
 
     async bulkApprovePendingSelected() {
         const ids = Array.from(this.state.selectedItemIds || []);
-        if (!ids.length) return;
-
         const minConf = (typeof this.state.bulkMinConfidence === 'number' && this.state.bulkMinConfidence >= 0 && this.state.bulkMinConfidence <= 100)
             ? this.state.bulkMinConfidence
             : 85;
 
-        if (!confirm(`Aprovar sugestões pendentes (com confiança ≥ ${minConf}%) para ${ids.length} anúncio(s) selecionado(s)?\n\nIsso NÃO aplica no Mercado Livre — apenas marca como aprovado.`)) {
+        const useEligibleScope = ids.length === 0;
+        const confirmMsg = useEligibleScope
+            ? `Aprovar TODAS as sugestões pendentes com confiança ≥ ${minConf}% em anúncios active?\n\nIsso NÃO aplica no Mercado Livre — apenas marca como aprovado.`
+            : `Aprovar sugestões pendentes (com confiança ≥ ${minConf}%) para ${ids.length} anúncio(s) selecionado(s)?\n\nIsso NÃO aplica no Mercado Livre — apenas marca como aprovado.`;
+
+        if (!confirm(confirmMsg)) {
             return;
         }
 
+        const payload = useEligibleScope
+            ? { item_ids: [], scope: 'eligible', min_confidence: minConf }
+            : { item_ids: ids, min_confidence: minConf };
+
         try {
-            this.setBulkProgress('Criando job...');
+            this.setBulkProgress('Aprovando...');
             const data = await this.fetchJSON('/api/seo/technical-sheet/batch/approve', {
                 method: 'POST',
-                body: JSON.stringify({ item_ids: ids, min_confidence: minConf })
+                body: JSON.stringify(payload)
             });
+
+            // Compat: resposta síncrona (mode=sync) ou job legado (job_id)
+            if (data?.mode === 'sync' || data?.suggestions_approved_total !== undefined) {
+                const approved = Number(data.suggestions_approved_total ?? 0);
+                const failed = Number(data.failed_items ?? 0);
+                const processed = Number(data.total_items ?? 0);
+                this.setBulkProgress('');
+                SEOKiller.showSuccess(`Aprovação concluída: ${approved} sugestão(ões) em ${processed} anúncio(s)${failed ? ` · falhas: ${failed}` : ''}`);
+                await this.loadList();
+                return;
+            }
 
             const jobId = data.job_id;
             if (!jobId) {
                 throw new Error('job_id ausente na resposta');
             }
 
-            SEOKiller.showSuccess(`Job #${jobId} criado. Aprovando pendentes em background...`);
+            SEOKiller.showSuccess(`Job #${jobId} criado. Aprovando pendentes em background (${data.total_items ?? '?'} itens)...`);
             const details = await this.pollJob(jobId, `Aprovando pendentes ≥ ${minConf}%`);
             await this.loadList();
 
@@ -1428,28 +1661,45 @@ SEOKiller.techSheet = {
                 `Aprovando pendentes ≥ ${minConf}%`,
                 '/api/seo/technical-sheet/batch/approve',
                 `Aprovando pendentes ≥ ${minConf}% (retry)`,
-                { min_confidence: minConf }
+                { min_confidence: minConf, scope: useEligibleScope ? 'eligible' : undefined }
             );
         } catch (e) {
             this.setBulkProgress('');
-            SEOKiller.showError(`Erro ao criar job: ${e.message}`);
+            SEOKiller.showError(`Erro ao aprovar: ${e.message}`);
         }
     },
 
     async bulkApplySelected() {
         const ids = Array.from(this.state.selectedItemIds || []);
-        if (!ids.length) return;
+        const useEligibleScope = ids.length === 0;
+        const confirmMsg = useEligibleScope
+            ? 'Aplicar TODAS as sugestões aprovadas de anúncios active no Mercado Livre?\n\nIsso ALTERA os anúncios no ML.'
+            : `Aplicar sugestões aprovadas para ${ids.length} anúncio(s) selecionado(s) no Mercado Livre?`;
 
-        if (!confirm(`Aplicar sugestões aprovadas para ${ids.length} anúncio(s) selecionado(s) no Mercado Livre?`)) {
+        if (!confirm(confirmMsg)) {
             return;
         }
 
+        const payload = useEligibleScope
+            ? { item_ids: [], scope: 'eligible' }
+            : { item_ids: ids };
+
         try {
-            this.setBulkProgress('Criando job...');
+            this.setBulkProgress('Aplicando no ML...');
             const data = await this.fetchJSON('/api/seo/technical-sheet/batch/apply', {
                 method: 'POST',
-                body: JSON.stringify({ item_ids: ids })
+                body: JSON.stringify(payload)
             });
+
+            if (data?.mode === 'sync' || data?.attributes_applied_total !== undefined) {
+                const applied = Number(data.attributes_applied_total ?? 0);
+                const failed = Number(data.failed_items ?? 0);
+                const processed = Number(data.total_items ?? 0);
+                this.setBulkProgress('');
+                SEOKiller.showSuccess(`Aplicação concluída: ${applied} atributo(s) em ${processed} anúncio(s)${failed ? ` · falhas: ${failed}` : ''}`);
+                await this.loadList();
+                return;
+            }
 
             const jobId = data.job_id;
             if (!jobId) {
@@ -1468,7 +1718,7 @@ SEOKiller.techSheet = {
             );
         } catch (e) {
             this.setBulkProgress('');
-            SEOKiller.showError(`Erro ao criar job: ${e.message}`);
+            SEOKiller.showError(`Erro ao aplicar: ${e.message}`);
         }
     },
 
@@ -1628,6 +1878,8 @@ SEOKiller.techSheet = {
                 const attributeName = s.attribute_name || attributeId;
                 const value = s.suggested_value || '';
                 const source = s.source || 'inference';
+                const sourceLabel = this.techSheetSourceLabel(source);
+                const policyLabel = this.techSheetPolicyLabel(s.meta || {});
                 const confidence = (s.confidence ?? null);
                 const status = s.status || 'pending';
 
@@ -1648,18 +1900,19 @@ SEOKiller.techSheet = {
                             <input id="${this.escapeAttr(inputId)}" class="form-control form-control-sm" value="${this.escapeAttr(value)}" ${disabled} />
                         </td>
                         <td class="text-nowrap">
-                            <div class="text-muted small">${this.escapeHtml(source)}</div>
+                            <div class="text-muted small">${this.escapeHtml(sourceLabel)}</div>
+                            ${policyLabel ? `<div class="text-muted small">${this.escapeHtml(policyLabel)}</div>` : ''}
                             <div class="small">${confLabel}</div>
                         </td>
                         <td class="text-nowrap">${statusBadge(status)}</td>
                         <td class="text-nowrap" style="width: 220px;">
                             <div class="btn-group btn-group-sm" role="group">
                                 <button class="btn btn-outline-success" type="button" ${disabled}
-                                    onclick="SEOKiller.techSheet.approveSuggestion('${this.escapeAttr(item.item_id)}','${this.escapeAttr(attributeId)}','${this.escapeAttr(inputId)}')">
+                                    data-tech-action="approveSuggestion" data-tech-args="${this.escapeAttr(JSON.stringify([item.item_id, attributeId, inputId]))}">
                                     Aprovar
                                 </button>
                                 <button class="btn btn-outline-danger" type="button" ${disabled}
-                                    onclick="SEOKiller.techSheet.rejectSuggestion('${this.escapeAttr(item.item_id)}','${this.escapeAttr(attributeId)}')">
+                                    data-tech-action="rejectSuggestion" data-tech-args="${this.escapeAttr(JSON.stringify([item.item_id, attributeId]))}">
                                     Rejeitar
                                 </button>
                             </div>
@@ -1701,9 +1954,9 @@ SEOKiller.techSheet = {
             </div>
 
             <div class="d-flex gap-2 mb-3">
-                <button class="btn btn-sm btn-primary" onclick="SEOKiller.techSheet.generateSuggestions('${this.escapeAttr(item.item_id)}')">Gerar sugestões</button>
-                <button class="btn btn-sm btn-success" onclick="SEOKiller.techSheet.applyApproved('${this.escapeAttr(item.item_id)}')">Aplicar aprovadas</button>
-                <button class="btn btn-sm btn-outline-success" onclick="SEOKiller.techSheet.approveAllPending('${this.escapeAttr(item.item_id)}', 85)">Aprovar pendentes ≥ 85%</button>
+                <button class="btn btn-sm btn-primary" data-tech-action="generateSuggestions" data-tech-args="${this.escapeAttr(JSON.stringify([item.item_id]))}">Gerar sugestões</button>
+                <button class="btn btn-sm btn-success" data-tech-action="applyApproved" data-tech-args="${this.escapeAttr(JSON.stringify([item.item_id]))}">Aplicar aprovadas</button>
+                <button class="btn btn-sm btn-outline-success" data-tech-action="approveAllPending" data-tech-args="${this.escapeAttr(JSON.stringify([item.item_id, 85]))}">Aprovar pendentes ≥ 85%</button>
             </div>
 
             <div class="border rounded p-2 mb-3">
@@ -1912,8 +2165,50 @@ SEOKiller.techSheet = {
 
     escapeAttr(str) {
         return this.escapeHtml(str).replace(/\s/g, ' ');
+    },
+
+    // CSP (nonce + strict-dynamic) bloqueia onclick/onchange inline: toda
+    // interação da Ficha Técnica usa delegação via data-tech-action/data-tech-change.
+    bindDelegatedEvents() {
+        if (this._delegatedEventsBound) return;
+        this._delegatedEventsBound = true;
+
+        const parseArgs = (el) => {
+            if (!el.dataset.techArgs) return [];
+            try {
+                const parsed = JSON.parse(el.dataset.techArgs);
+                return Array.isArray(parsed) ? parsed : [];
+            } catch (e) {
+                return [];
+            }
+        };
+
+        document.addEventListener('click', (e) => {
+            const el = e.target.closest('[data-tech-action]');
+            if (!el) return;
+            const action = el.dataset.techAction;
+            if (typeof this[action] !== 'function') return;
+            const args = parseArgs(el);
+            if (action === 'setTab') {
+                this[action](...args, el);
+            } else {
+                this[action](...args);
+            }
+        });
+
+        document.addEventListener('change', (e) => {
+            const el = e.target.closest('[data-tech-change]');
+            if (!el) return;
+            const action = el.dataset.techChange;
+            if (typeof this[action] !== 'function') return;
+            const args = parseArgs(el);
+            const value = (el.type === 'checkbox') ? el.checked : el.value;
+            this[action](...args, value);
+        });
     }
 };
+
+SEOKiller.techSheet.bindDelegatedEvents();
 
 // Auto-carregar lista ao abrir o TAB
 document.addEventListener('shown.bs.tab', function (event) {

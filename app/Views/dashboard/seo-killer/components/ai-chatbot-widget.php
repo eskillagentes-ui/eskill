@@ -1,7 +1,7 @@
 <!-- AI Chatbot Widget - Floating Assistant -->
 <div id="aiChatbotWidget" class="ai-chatbot-widget">
     <!-- Chat Button (Collapsed State) -->
-    <button id="chatToggleBtn" class="chat-toggle-btn" onclick="toggleChatWidget()">
+    <button type="button" id="chatToggleBtn" class="chat-toggle-btn" data-chat-action="toggle" aria-label="Abrir assistente IA">
         <i class="bi bi-robot"></i>
         <span class="notification-badge" id="chatNotificationBadge" style="display: none;"></span>
     </button>
@@ -20,10 +20,10 @@
                 </div>
             </div>
             <div class="chat-actions">
-                <button class="btn btn-sm btn-link text-white" onclick="clearChatHistory()" title="Limpar conversa">
+                <button type="button" class="btn btn-sm btn-link text-white" data-chat-action="clear" title="Limpar conversa">
                     <i class="bi bi-trash"></i>
                 </button>
-                <button class="btn btn-sm btn-link text-white" onclick="toggleChatWidget()" title="Minimizar">
+                <button type="button" class="btn btn-sm btn-link text-white" data-chat-action="toggle" title="Minimizar">
                     <i class="bi bi-dash-lg"></i>
                 </button>
             </div>
@@ -31,13 +31,13 @@
 
         <!-- Quick Actions Bar -->
         <div class="quick-actions-bar">
-            <button class="quick-action-btn" onclick="sendQuickMessage('Como melhorar meu SEO?')">
+            <button type="button" class="quick-action-btn" data-chat-action="quick" data-chat-message="Como melhorar meu SEO?">
                 <i class="bi bi-search"></i> SEO
             </button>
-            <button class="quick-action-btn" onclick="sendQuickMessage('Analisar meus preços')">
+            <button type="button" class="quick-action-btn" data-chat-action="quick" data-chat-message="Analisar meus preços">
                 <i class="bi bi-tag"></i> Preços
             </button>
-            <button class="quick-action-btn" onclick="sendQuickMessage('Próximas ações')">
+            <button type="button" class="quick-action-btn" data-chat-action="quick" data-chat-message="Próximas ações">
                 <i class="bi bi-list-check"></i> Ações
             </button>
         </div>
@@ -80,15 +80,14 @@
         <!-- Input Area -->
         <div class="chat-input-container">
             <div class="input-group">
-                <input 
-                    type="text" 
-                    id="chatInput" 
-                    class="form-control chat-input" 
+                <input
+                    type="text"
+                    id="chatInput"
+                    class="form-control chat-input"
                     placeholder="Digite sua mensagem..."
-                    onkeypress="handleChatKeyPress(event)"
                     autocomplete="off"
                 >
-                <button class="btn btn-primary" onclick="sendChatMessage()" id="sendChatBtn">
+                <button type="button" class="btn btn-primary" data-chat-action="send" id="sendChatBtn">
                     <i class="bi bi-send-fill"></i>
                 </button>
             </div>

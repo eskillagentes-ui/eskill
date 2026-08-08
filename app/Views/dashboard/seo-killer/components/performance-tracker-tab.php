@@ -418,6 +418,22 @@
         return fetch(url, options);
     }
 
+    // Local: ApiClient.request devolve body cru; este tab espera {response, data}
+    async function requestJson(url, options = {}) {
+        if (window.ApiClient && typeof window.ApiClient.json === 'function') {
+            return window.ApiClient.json(url, options);
+        }
+        const response = await fetch(url, {
+            credentials: 'include',
+            ...options
+        });
+        const data = await response.json().catch(() => null);
+        return {
+            response,
+            data
+        };
+    }
+
     const PerformanceTracker = {
         charts: {
             evolution: null,
@@ -502,7 +518,7 @@
             if (changeElement && change !== undefined) {
                 const isPositive = change >= 0;
                 changeElement.innerHTML = `
-                <i class="bi bi-arrow-${isPositive ? 'up' : 'down'}"></i> 
+                <i class="bi bi-arrow-${isPositive ? 'up' : 'down'}"></i>
                 ${isPositive ? '+' : ''}${change}%
             `;
                 changeElement.className = isPositive ? 'text-success me-1' : 'text-danger me-1';
@@ -537,6 +553,12 @@
             const container = document.getElementById('scoreEvolutionChart');
             if (!container) return;
 
+            const points = Array.isArray(data) ? data : [];
+            if (points.length === 0) {
+                container.innerHTML = '<div class="text-muted text-center py-5">Sem histórico de score nos últimos 30 dias</div>';
+                return;
+            }
+
             // Clear loading state
             container.innerHTML = '<canvas id="evolutionCanvas"></canvas>';
 
@@ -546,13 +568,16 @@
                 this.charts.evolution.destroy();
             }
 
+            const labels = points.map(d => d.date || d.score_date || '');
+            const scores = points.map(d => Number(d.score ?? d.avg_score ?? 0));
+
             this.charts.evolution = new Chart(ctx, {
                 type: 'line',
                 data: {
-                    labels: data.map(d => d.date),
+                    labels,
                     datasets: [{
                         label: 'Score Médio',
-                        data: data.map(d => d.score),
+                        data: scores,
                         borderColor: '#0066FF',
                         backgroundColor: 'rgba(0, 102, 255, 0.1)',
                         borderWidth: 2,
@@ -594,30 +619,32 @@
 
                 if (!tbody) return;
 
-                if (!data.items || data.items.length === 0) {
+                const items = Array.isArray(data) ? data : (data?.items || []);
+
+                if (items.length === 0) {
                     tbody.innerHTML = `
                     <tr>
                         <td colspan="7" class="text-center py-5 text-muted">
                             <i class="bi bi-inbox fs-1 d-block mb-2"></i>
-                            Nenhum produto otimizado ainda
+                            Nenhum produto com métricas ainda
                         </td>
                     </tr>
                 `;
                     return;
                 }
 
-                tbody.innerHTML = data.items.map((item, index) => `
+                tbody.innerHTML = items.map((item, index) => `
                 <tr>
                     <td>
-                        ${index === 0 ? '<span class="badge bg-warning">🏆 1º</span>' : 
+                        ${index === 0 ? '<span class="badge bg-warning">🏆 1º</span>' :
                           index === 1 ? '<span class="badge bg-light text-dark">🥈 2º</span>' :
                           index === 2 ? '<span class="badge bg-light text-dark">🥉 3º</span>' :
                           `<span class="text-muted">${index + 1}º</span>`}
                     </td>
                     <td>
-                            <img src="${normalizeExternalUrl(item.thumbnail) || '/assets/placeholder.png'}" 
-                             alt="${this.escapeHtml(item.title)}" 
-                             class="img-thumbnail" 
+                            <img src="${normalizeExternalUrl(item.thumbnail) || '/assets/placeholder.png'}"
+                             alt="${this.escapeHtml(item.title)}"
+                             class="img-thumbnail"
                              style="width: 60px; height: 60px; object-fit: cover;">
                     </td>
                     <td>
@@ -642,10 +669,10 @@
                         <small class="text-muted">${item.total_sales} vendas</small>
                     </td>
                     <td>
-                        <small>${this.formatDate(item.optimized_at)}</small>
+                        <small>${item.optimized_at ? this.formatDate(item.optimized_at) : '—'}</small>
                     </td>
                     <td>
-                        <button class="btn btn-sm btn-outline-primary" 
+                        <button class="btn btn-sm btn-outline-primary"
                                 onclick="PerformanceTracker.viewProductDetails('${item.item_id}')">
                             <i class="bi bi-eye"></i>
                         </button>
@@ -728,7 +755,7 @@
 
             valueEl.textContent = after;
             changeEl.innerHTML = `
-            <i class="bi bi-arrow-${isPositive ? (metric === 'Position' ? 'down' : 'up') : 'down'}"></i> 
+            <i class="bi bi-arrow-${isPositive ? (metric === 'Position' ? 'down' : 'up') : 'down'}"></i>
             ${metric === 'Position' ? Math.abs(change) : (change > 0 ? '+' : '')}${change}${metric === 'Position' ? ' posições' : '%'}
         `;
             changeEl.className = isPositive ? 'text-success' : 'text-danger';
@@ -897,7 +924,7 @@
                         ${this.getStatusBadge(run.status)}
                     </td>
                     <td>
-                        <button class="btn btn-sm btn-outline-primary" 
+                        <button class="btn btn-sm btn-outline-primary"
                                 onclick="PerformanceTracker.viewRunDetails('${run.id}')">
                             <i class="bi bi-eye"></i>
                         </button>
@@ -967,7 +994,7 @@
                         </tr>
                     </table>
                 </div>
-                
+
                 <div class="mb-3">
                     <h6>Otimizações Realizadas</h6>
                     <ul class="list-group">
@@ -985,7 +1012,7 @@
                         </li>
                     </ul>
                 </div>
-                
+
                 ${data.errors && data.errors.length > 0 ? `
                     <div class="mb-3">
                         <h6 class="text-danger">Erros Encontrados</h6>
@@ -1040,7 +1067,10 @@
         },
 
         formatDate(dateString) {
-            return new Date(dateString).toLocaleDateString('pt-BR');
+            if (!dateString) return '—';
+            const d = new Date(dateString);
+            if (Number.isNaN(d.getTime())) return '—';
+            return d.toLocaleDateString('pt-BR');
         },
 
         formatTime(dateString) {
@@ -1102,6 +1132,29 @@
             }
         }
     });
+
+    // Deep-link / reload com ?tab=performance-tracker: tab já ativa sem shown.bs.tab
+    function bootPerformanceTrackerIfActive() {
+        const pane = document.getElementById('performance-tracker');
+        const btn = document.getElementById('performance-tracker-tab');
+        const active = pane?.classList.contains('active') ||
+            pane?.classList.contains('show') ||
+            btn?.classList.contains('active') ||
+            window.location.hash === '#performance-tracker' ||
+            new URLSearchParams(window.location.search).get('tab') === 'performance-tracker';
+        if (!active) return;
+        const run = () => PerformanceTracker.init();
+        if (window.SEOKiller && typeof window.SEOKiller.ensureChartJs === 'function') {
+            window.SEOKiller.ensureChartJs().then(run).catch(run);
+        } else {
+            run();
+        }
+    }
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', bootPerformanceTrackerIfActive);
+    } else {
+        bootPerformanceTrackerIfActive();
+    }
 </script>
 
 <!-- Additional CSS for Timeline -->

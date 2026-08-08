@@ -175,6 +175,7 @@
         init() {
             if (this.state.initialized) return;
             this.state.initialized = true;
+            this.bindDomEvents();
             this.restoreHistory();
             this.loadDismissedActions();
             this.loadSuggestionStats();
@@ -191,6 +192,52 @@
                 this.loadProactiveSuggestions();
                 setInterval(() => this.loadProactiveSuggestions(), 5 * 60 * 1000);
             }, 800);
+        },
+
+        /**
+         * CSP (nonce + strict-dynamic) bloqueia handlers onclick= inline.
+         * Bind via addEventListener a partir do script com nonce.
+         */
+        bindDomEvents() {
+            const widget = document.getElementById('aiChatbotWidget');
+            if (!widget || widget.dataset.chatEventsBound === '1') return;
+            widget.dataset.chatEventsBound = '1';
+
+            widget.addEventListener('click', (event) => {
+                const target = event.target.closest('[data-chat-action]');
+                if (!target || !widget.contains(target)) return;
+
+                const action = target.getAttribute('data-chat-action');
+
+                if (action === 'toggle') {
+                    event.preventDefault();
+                    this.toggle();
+                    return;
+                }
+                if (action === 'clear') {
+                    event.preventDefault();
+                    this.clearHistory();
+                    return;
+                }
+                if (action === 'send') {
+                    event.preventDefault();
+                    this.sendMessage();
+                    return;
+                }
+                if (action === 'quick') {
+                    event.preventDefault();
+                    const message = target.getAttribute('data-chat-message') || '';
+                    if (message) this.sendQuickMessage(message);
+                }
+            });
+
+            const input = document.getElementById('chatInput');
+            if (input && input.dataset.chatKeyBound !== '1') {
+                input.dataset.chatKeyBound = '1';
+                input.addEventListener('keydown', (event) => {
+                    this.handleKeyPress(event);
+                });
+            }
         },
 
         getEls() {
@@ -288,7 +335,7 @@
                     conversationId: this.state.conversationId,
                     messages: this.state.messages
                 }));
-            } catch (e) {}
+            } catch (e) { }
         },
 
         persistSuggestions() {
@@ -297,7 +344,7 @@
                     actions: this.state.suggestedActions,
                     savedAt: this.state.suggestedSavedAt || Date.now(),
                 }));
-            } catch (e) {}
+            } catch (e) { }
         },
 
         loadDismissedActions() {
@@ -309,7 +356,7 @@
                     this.state.dismissedActions = parsed;
                     this.pruneDismissedActions();
                 }
-            } catch (e) {}
+            } catch (e) { }
         },
 
         loadSuggestionStats() {
@@ -321,13 +368,13 @@
                     this.state.suggestionStats = parsed;
                     this.pruneSuggestionStats();
                 }
-            } catch (e) {}
+            } catch (e) { }
         },
 
         persistSuggestionStats() {
             try {
                 localStorage.setItem(SUGGESTIONS_STATS_KEY, JSON.stringify(this.state.suggestionStats));
-            } catch (e) {}
+            } catch (e) { }
         },
 
         pruneSuggestionStats() {
@@ -412,7 +459,7 @@
         persistDismissedActions() {
             try {
                 localStorage.setItem(SUGGESTIONS_DISMISSED_KEY, JSON.stringify(this.state.dismissedActions));
-            } catch (e) {}
+            } catch (e) { }
         },
 
         pruneDismissedActions() {
@@ -449,7 +496,7 @@
         },
 
         clearPersistedSuggestions() {
-            try { localStorage.removeItem(SUGGESTIONS_KEY); } catch (e) {}
+            try { localStorage.removeItem(SUGGESTIONS_KEY); } catch (e) { }
         },
 
         restoreHistory() {
@@ -472,7 +519,7 @@
                     const content = safeText(m?.content || '');
                     this.addMessage(type, content);
                 }
-            } catch (e) {}
+            } catch (e) { }
         },
 
         restoreSuggestions() {
@@ -695,7 +742,7 @@
                     window.SEOKiller.openDescriptionGenerator?.(itemId);
                     return;
                 }
-                 // Default specific action
+                // Default specific action
                 window.SEOKiller.openTitleGenerator?.(itemId);
                 return;
             }
@@ -781,7 +828,7 @@
             if (!confirm('Limpar histórico de conversa?')) return;
             try {
                 await apiFetch('/api/ai/chat/history', { method: 'DELETE' });
-            } catch (e) {}
+            } catch (e) { }
 
             const { messages } = this.getEls();
             if (messages) {
@@ -794,7 +841,7 @@
             }
             this.state.messages = [];
             this.state.conversationId = null;
-            try { localStorage.removeItem(STORAGE_KEY); } catch (e) {}
+            try { localStorage.removeItem(STORAGE_KEY); } catch (e) { }
             notify.success('Histórico de conversa limpo');
         },
 
@@ -806,7 +853,7 @@
             try {
                 // Add delay to help with rate limiting
                 await new Promise(resolve => setTimeout(resolve, 100));
-                
+
                 const res = await fetch('/api/ai/chat/suggest-actions', { headers: { 'Accept': 'application/json' } });
                 if (!res.ok) {
                     this.state.suggestionsError = true;

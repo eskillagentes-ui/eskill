@@ -13,13 +13,13 @@ use App\Services\MercadoLivreClient;
 
 /**
  * AIController - Endpoints para funcionalidades de IA powered by GPT-4
- * 
+ *
  * Este controller integra 4 serviços de IA:
  * - AIInsightsService: Análises estratégicas e recomendações
  * - AIImageAnalyzer: Análise de qualidade de imagens
  * - AIPricingOptimizer: Otimização dinâmica de preços
  * - AIChatbotService: Assistente conversacional
- * 
+ *
  * @package App\Controllers
  * @version 2.0.0
  */
@@ -46,7 +46,11 @@ class AIController
 
         if (!$this->accountId) {
             http_response_code(401);
-            echo json_encode(['error' => 'Account not authenticated', 'success' => false]);
+            echo json_encode([
+                'error' => 'Nenhuma conta Mercado Livre ativa',
+                'success' => false,
+                'code' => 'missing_ml_account',
+            ]);
             exit;
         }
 
@@ -72,7 +76,7 @@ class AIController
     /**
      * POST /api/ai/insights/strategic
      * Gera insights estratégicos completos sobre a conta
-     * 
+     *
      * Body:
      * {
      *   "include_opportunities": true,
@@ -122,7 +126,7 @@ class AIController
     /**
      * POST /api/ai/insights/ab-tests
      * Sugere testes A/B baseados em performance atual
-     * 
+     *
      * Body:
      * {
      *   "focus_area": "all|title|description|price|images"
@@ -215,7 +219,7 @@ class AIController
     /**
      * POST /api/ai/insights/explain-metric
      * Explica uma métrica em linguagem natural
-     * 
+     *
      * Body:
      * {
      *   "metric": "conversion_rate",
@@ -349,7 +353,7 @@ class AIController
     /**
      * POST /api/ai/images/analyze
      * Analisa todas as imagens de um produto
-     * 
+     *
      * Body:
      * {
      *   "item_id": "MLB123456789"
@@ -428,7 +432,7 @@ class AIController
     /**
      * POST /api/ai/images/compare-practices
      * Compara imagens com best practices do Mercado Livre
-     * 
+     *
      * Body:
      * {
      *   "image_url": "https://..."
@@ -473,7 +477,7 @@ class AIController
     /**
      * POST /api/ai/images/suggest-order
      * Sugere ordem ótima para as imagens
-     * 
+     *
      * Body:
      * {
      *   "images": [
@@ -521,7 +525,7 @@ class AIController
     /**
      * POST /api/ai/images/detect-similar
      * Detecta imagens similares/duplicadas
-     * 
+     *
      * Body:
      * {
      *   "images": [
@@ -980,7 +984,7 @@ class AIController
     /**
      * POST /api/ai/pricing/suggest
      * Sugere preço ótimo baseado em múltiplos fatores
-     * 
+     *
      * Body:
      * {
      *   "item_id": "MLB123456789",
@@ -1033,7 +1037,7 @@ class AIController
     /**
      * POST /api/ai/pricing/elasticity
      * Analisa elasticidade de preço do produto
-     * 
+     *
      * Body:
      * {
      *   "item_id": "MLB123456789"
@@ -1078,7 +1082,7 @@ class AIController
     /**
      * POST /api/ai/pricing/optimize-margin
      * Otimiza margem de lucro
-     * 
+     *
      * Body:
      * {
      *   "cost": 100.00,
@@ -1133,7 +1137,7 @@ class AIController
     /**
      * POST /api/ai/pricing/dynamic-rules
      * Cria regras de precificação dinâmica
-     * 
+     *
      * Body:
      * {
      *   "item_id": "MLB123456789",
@@ -1222,7 +1226,7 @@ class AIController
     /**
      * POST /api/ai/pricing/forecast
      * Prevê receita em diferentes cenários de preço
-     * 
+     *
      * Body:
      * {
      *   "item_id": "MLB123456789",
@@ -1276,7 +1280,7 @@ class AIController
     /**
      * POST /api/ai/chat
      * Conversa com o assistente de IA
-     * 
+     *
      * Body:
      * {
      *   "message": "Como melhorar minhas vendas?",
@@ -1328,7 +1332,7 @@ class AIController
     /**
      * POST /api/ai/chat/explain-metric
      * Explicação rápida de uma métrica
-     * 
+     *
      * Body:
      * {
      *   "metric": "conversion_rate",
@@ -1377,7 +1381,7 @@ class AIController
     /**
      * POST /api/ai/chat/help-feature
      * Ajuda com uma funcionalidade específica
-     * 
+     *
      * Body:
      * {
      *   "feature": "bulk-optimizer"
