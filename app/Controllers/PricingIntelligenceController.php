@@ -42,6 +42,7 @@ use PDO;
  */
 class PricingIntelligenceController extends BaseController
 {
+
     private int $accountId;
     private MarginCalculatorService $marginService;
     private DynamicPricingService $dynamicService;
@@ -65,6 +66,7 @@ class PricingIntelligenceController extends BaseController
         $this->mlClient = new MercadoLivreClient($accountId);
         $this->db = Database::getInstance();
     }
+
 
     /**
      * POST /api/pricing/:accountId/margin/calculate
@@ -213,29 +215,29 @@ class PricingIntelligenceController extends BaseController
 
         $custos = $this->marginService->getCustosProduto($itemId);
 
-        if (!$custos) {
-            // Tenta buscar dados básicos do ML
-            $item = $this->mlClient->get("/items/{$itemId}");
-
-            echo json_encode([
-                'success' => true,
-                'item_id' => $itemId,
-                'custos' => null,
-                'item_info' => $item ? [
+        $itemInfo = null;
+        try {
+            $item = $this->mlClient->get('/items/' . $itemId);
+            if (is_array($item) && !isset($item['error'])) {
+                $itemInfo = [
                     'titulo' => $item['title'] ?? null,
-                    'preco' => $item['price'] ?? null,
+                    'preco' => isset($item['price']) ? (float) $item['price'] : null,
                     'categoria' => $item['category_id'] ?? null,
-                    'tipo_anuncio' => $item['listing_type_id'] ?? null
-                ] : null,
-                'message' => 'Custos não cadastrados. Configure os custos para cálculo preciso.'
-            ]);
-            return;
+                    'tipo_anuncio' => $item['listing_type_id'] ?? null,
+                    'thumbnail' => $item['thumbnail'] ?? null,
+                ];
+            }
+        } catch (\Throwable $e) {
+            // item_info opcional — custos ainda podem ser retornados
+            $itemInfo = null;
         }
 
         echo json_encode([
             'success' => true,
             'item_id' => $itemId,
-            'custos' => $custos
+            'custos' => $custos,
+            'item_info' => $itemInfo,
+            'message' => $custos ? null : 'Custos não cadastrados. Configure os custos para cálculo preciso.',
         ]);
     }
 
@@ -442,7 +444,7 @@ class PricingIntelligenceController extends BaseController
         try {
             $nivel = $this->request->get('nivel');
             $naoLidos = $this->request->get('nao_lidos') !== null;
-            $limit = $this->request->getInt('limit', 50);
+            $limit = max(1, min(200, $this->request->getInt('limit', 50)));
 
             $days = $this->request->getInt('days', 0);
             if ($days <= 0) {
@@ -471,7 +473,8 @@ class PricingIntelligenceController extends BaseController
                 $params['cutoff'] = $cutoff;
             }
 
-            $sql .= " ORDER BY criado_em DESC LIMIT {$limit}";
+            $limitSql = (int) $limit;
+            $sql .= " ORDER BY criado_em DESC LIMIT {$limitSql}";
 
             $stmt = $this->db->prepare($sql);
             $stmt->execute($params);
@@ -562,6 +565,10 @@ class PricingIntelligenceController extends BaseController
         }
 
         $novoPreco = (float)$data['novo_preco'];
+        if ($novoPreco <= 0) {
+            $this->error('novo_preco deve ser maior que zero', 400);
+            return;
+        }
 
         try {
             // Buscar preço atual
@@ -572,19 +579,33 @@ class PricingIntelligenceController extends BaseController
                 return;
             }
 
+            // Garantir que o anúncio pertence à conta da rota (anti-IDOR)
+            $sellerId = isset($item['seller_id']) ? (string)$item['seller_id'] : '';
+            $accountMlUserId = $this->getAccountMlUserId();
+            if ($accountMlUserId !== '' && $sellerId !== '' && $sellerId !== $accountMlUserId) {
+                $this->error('Item não pertence a esta conta', 403);
+                return;
+            }
+
             $precoAtual = (float)$item['price'];
 
             // Verificar impacto no ranking
             $impacto = $this->marginService->analisarImpactoRanking($precoAtual, $novoPreco);
 
-            if ($impacto['alerta'] === 'vermelho' && empty($data['force'])) {
+            $force = !empty($data['force']);
+            $confirmRisk = ($data['confirm_risk'] ?? null) === true
+                || ($data['confirm_risk'] ?? null) === 1
+                || ($data['confirm_risk'] ?? null) === '1'
+                || ($data['confirm_risk'] ?? null) === 'true';
+
+            if ($impacto['alerta'] === 'vermelho' && !($force && $confirmRisk)) {
                 echo json_encode([
                     'success' => false,
                     'warning' => true,
                     'message' => $impacto['mensagem'],
                     'recomendacao' => $impacto['recomendacao'],
                     'preco_maximo_seguro' => $impacto['preco_maximo_seguro'],
-                    'action_required' => 'Envie force=true para aplicar mesmo assim'
+                    'action_required' => 'Envie force=true e confirm_risk=true para aplicar mesmo assim'
                 ]);
                 return;
             }
@@ -644,6 +665,7 @@ class PricingIntelligenceController extends BaseController
     public function getStatus(): void
     {
         $this->jsonResponse();
+
 
         try {
             // Verificar conta no banco
@@ -707,10 +729,15 @@ class PricingIntelligenceController extends BaseController
                 $mlError = $e->getMessage();
             }
 
-            // Estatísticas do módulo de pricing
-            $statsStmt = $this->db->prepare("SELECT COUNT(*) as total FROM product_costs WHERE account_id = :id");
-            $statsStmt->execute(['id' => $this->accountId]);
+            // Estatísticas do módulo de pricing (product_costs + sku_custos)
+            $statsStmt = $this->db->prepare("
+                SELECT
+                    (SELECT COUNT(*) FROM product_costs WHERE account_id = :id) AS pc_total,
+                    (SELECT COUNT(*) FROM sku_custos WHERE account_id = :id2) AS sc_total
+            ");
+            $statsStmt->execute(['id' => $this->accountId, 'id2' => $this->accountId]);
             $stats = $statsStmt->fetch(\PDO::FETCH_ASSOC);
+            $productsWithCosts = max((int)($stats['pc_total'] ?? 0), (int)($stats['sc_total'] ?? 0));
 
             $localItemsCount = 0;
             try {
@@ -737,7 +764,9 @@ class PricingIntelligenceController extends BaseController
                 'ml_error' => $mlError,
                 'token_renewed' => $tokenRenovado,
                 'pricing_stats' => [
-                    'products_with_costs' => (int)($stats['total'] ?? 0)
+                    'products_with_costs' => $productsWithCosts,
+                    'product_costs' => (int)($stats['pc_total'] ?? 0),
+                    'sku_custos' => (int)($stats['sc_total'] ?? 0),
                 ],
                 'preview_mode_available' => $localItemsCount > 0,
                 'local_items_count' => $localItemsCount,
@@ -803,7 +832,6 @@ class PricingIntelligenceController extends BaseController
         try {
             $page = max(1, (int)$this->request->getInt('page', 1));
             $limit = $this->request->getIntClamped('limit', 1, 100, 20);
-            $offset = max(0, min(1000000, ($page - 1) * $limit));
 
             $status = $this->request->get('status');
             $margemMin = $this->request->get('margem_min');
@@ -811,12 +839,42 @@ class PricingIntelligenceController extends BaseController
             $categoria = $this->request->get('categoria');
             $search = $this->request->get('q');
             $previewMode = $this->request->getBool('preview') || $this->request->getBool('demo');
+            $custosFilter = $this->request->get('custos'); // com|sem|null
+            if ($custosFilter === null || $custosFilter === '') {
+                // Compat: filtro de margem "sem" no front
+                if ($this->request->get('margem_max') === '0' || $this->request->getBool('sem_custos')) {
+                    $custosFilter = 'sem';
+                }
+            }
 
-            // Modo preview local - retorna dados reais do cache local
-            if ($previewMode) {
-                echo json_encode($this->getPreviewItems($page, $limit));
+            $localCount = 0;
+            try {
+                $localCountStmt = $this->db->prepare('SELECT COUNT(*) FROM ml_items WHERE account_id = :id');
+                $localCountStmt->execute(['id' => $this->accountId]);
+                $localCount = (int)$localCountStmt->fetchColumn();
+            } catch (\Throwable $e) {
+                $localCount = 0;
+            }
+
+            // Catálogo local: permite ordenar por custo/margem (a page 1 da API ML
+            // frequentemente não inclui os MLB com sku_custos cadastrados).
+            if ($previewMode || $localCount > 0) {
+                $payload = $this->buildLocalItemsList($page, $limit, [
+                    'status' => $status,
+                    'search' => $search,
+                    'categoria' => $categoria,
+                    'margem_min' => $margemMin,
+                    'margem_max' => $margemMax,
+                    'custos' => $custosFilter,
+                    'preview_mode' => $previewMode,
+                ]);
+
+                echo json_encode($payload);
                 return;
             }
+
+            // Sem cache local: seguir via API ML (legado)
+            $offset = max(0, min(1000000, ($page - 1) * $limit));
 
             // Verificar e renovar token automaticamente se necessário
             $tokenRefreshed = false;
@@ -853,152 +911,16 @@ class PricingIntelligenceController extends BaseController
 
             // Se falhar ao buscar do ML, tentar retornar itens com custos cadastrados no banco
             if (!$mlItems || isset($mlItems['error']) || empty($mlItems['results'])) {
-                // Fallback real: combinar custos cadastrados com dados locais sincronizados
-                $where = ["pc.account_id = :account_id"];
-                $params = ['account_id' => $this->accountId];
-
-                if (!empty($status)) {
-                    $where[] = 'm.status = :status';
-                    $params['status'] = $status;
-                }
-
-                if (!empty($categoria)) {
-                    $where[] = 'm.category_id = :categoria';
-                    $params['categoria'] = $categoria;
-                }
-
-                if (!empty($search)) {
-                    $where[] = '(pc.item_id LIKE :search OR pc.sku LIKE :search OR m.title LIKE :search)';
-                    $params['search'] = '%' . $search . '%';
-                }
-
-                $whereSql = implode(' AND ', $where);
-
-                $stmt = $this->db->prepare("
-                    SELECT
-                        pc.item_id,
-                        pc.sku,
-                        pc.custo_producao,
-                        pc.custo_embalagem,
-                        pc.custo_etiqueta,
-                        pc.custo_frete_gratis,
-                        pc.taxa_comissao_ml,
-                        pc.taxa_imposto,
-                        pc.acos_medio,
-                        pc.margem_minima,
-                        pc.margem_alvo,
-                        m.title AS local_title,
-                        m.price AS local_price,
-                        m.status AS local_status,
-                        m.category_id AS local_category,
-                        m.available_quantity AS local_stock,
-                        m.sold_quantity AS local_sold,
-                        m.thumbnail AS local_thumbnail
-                    FROM product_costs pc
-                    LEFT JOIN ml_items m
-                        ON m.account_id = pc.account_id
-                       AND m.id = pc.item_id
-                    WHERE {$whereSql}
-                    ORDER BY pc.atualizado_em DESC
-                    LIMIT {$limit} OFFSET {$offset}
-                ");
-
-                foreach ($params as $key => $value) {
-                    $stmt->bindValue($key, $value);
-                }
-                $stmt->execute();
-                $itemsFromDb = $stmt->fetchAll(\PDO::FETCH_ASSOC);
-
-                // Contar total
-                $countStmt = $this->db->prepare("
-                    SELECT COUNT(*)
-                    FROM product_costs pc
-                    LEFT JOIN ml_items m
-                        ON m.account_id = pc.account_id
-                       AND m.id = pc.item_id
-                    WHERE {$whereSql}
-                ");
-                foreach ($params as $key => $value) {
-                    $countStmt->bindValue($key, $value);
-                }
-                $countStmt->execute();
-                $total = (int)$countStmt->fetchColumn();
-
-                // Se não há itens cadastrados localmente
-                if (empty($itemsFromDb)) {
-                    echo json_encode([
-                        'success' => true,
-                        'page' => $page,
-                        'limit' => $limit,
-                        'total' => 0,
-                        'items' => [],
-                        'ml_status' => 'desconectado',
-                        'aviso' => 'Nenhum item local encontrado. Sincronize itens do Mercado Livre para análise completa.'
-                    ]);
-                    return;
-                }
-
-                $items = [];
-                foreach ($itemsFromDb as $custos) {
-                    $price = isset($custos['local_price']) ? (float)$custos['local_price'] : null;
-                    $margem = null;
-                    $lucro = null;
-                    $indicador = 'cinza';
-
-                    if ($price !== null && $price > 0) {
-                        $calc = $this->marginService->calcularMargem($price, [
-                            'sku' => $custos['sku'] ?? null,
-                            'custo_producao' => (float)($custos['custo_producao'] ?? 0),
-                            'custo_embalagem' => (float)($custos['custo_embalagem'] ?? 0),
-                            'custo_etiqueta' => (float)($custos['custo_etiqueta'] ?? 0),
-                            'custo_frete_gratis' => (float)($custos['custo_frete_gratis'] ?? 0),
-                            'taxa_comissao_ml' => (float)($custos['taxa_comissao_ml'] ?? 0),
-                            'taxa_imposto' => (float)($custos['taxa_imposto'] ?? 0),
-                            'acos_medio' => (float)($custos['acos_medio'] ?? 0),
-                            'margem_minima' => (float)($custos['margem_minima'] ?? 0),
-                            'margem_alvo' => (float)($custos['margem_alvo'] ?? 0),
-                        ]);
-
-                        $margem = isset($calc['margem_real']) ? (float)$calc['margem_real'] : null;
-                        $lucro = isset($calc['lucro_unitario']) ? (float)$calc['lucro_unitario'] : null;
-                        $indicador = $calc['indicador'] ?? 'cinza';
-                    }
-
-                    if ($margemMin !== null && ($margem === null || $margem < (float)$margemMin)) {
-                        continue;
-                    }
-                    if ($margemMax !== null && ($margem === null || $margem > (float)$margemMax)) {
-                        continue;
-                    }
-
-                    $items[] = [
-                        'id' => $custos['item_id'],
-                        'titulo' => $custos['local_title'] ?? ('Item ' . $custos['item_id']),
-                        'sku' => $custos['sku'],
-                        'preco' => $price,
-                        'status' => $custos['local_status'] ?? 'unknown',
-                        'categoria' => $custos['local_category'] ?? null,
-                        'tipo_anuncio' => null,
-                        'estoque' => isset($custos['local_stock']) ? (int)$custos['local_stock'] : null,
-                        'vendidos' => isset($custos['local_sold']) ? (int)$custos['local_sold'] : null,
-                        'thumbnail' => $custos['local_thumbnail'] ?? null,
-                        'margem' => $margem,
-                        'lucro_unitario' => $lucro,
-                        'indicador' => $indicador,
-                        'custos_cadastrados' => true,
-                        'aviso' => 'Dados obtidos do cache local. Conecte ao Mercado Livre para sincronização em tempo real.'
-                    ];
-                }
-
-                echo json_encode([
-                    'success' => true,
-                    'page' => $page,
-                    'limit' => $limit,
-                    'total' => $total,
-                    'items' => $items,
-                    'ml_status' => 'desconectado',
-                    'aviso' => 'Conexão com Mercado Livre indisponível. Mostrando dados locais sincronizados.'
-                ]);
+                echo json_encode($this->buildLocalItemsList($page, $limit, [
+                    'status' => $status,
+                    'search' => $search,
+                    'categoria' => $categoria,
+                    'margem_min' => $margemMin,
+                    'margem_max' => $margemMax,
+                    'custos' => $custosFilter,
+                    'preview_mode' => true,
+                    'aviso' => 'Conexão com Mercado Livre indisponível. Mostrando dados locais sincronizados.',
+                ]));
                 return;
             }
 
@@ -1019,17 +941,23 @@ class PricingIntelligenceController extends BaseController
                     $margem = null;
                     $lucro = null;
                     $indicador = 'cinza';
+                    $custoValor = null;
 
                     if ($custos) {
                         $calc = $this->marginService->calcularMargem((float)$item['price'], $custos);
                         $margem = $calc['margem_real'] ?? null;
                         $lucro = $calc['lucro_unitario'] ?? null;
                         $indicador = $calc['indicador'] ?? 'cinza';
+                        $custoValor = (float)($custos['custo_producao'] ?? 0)
+                            + (float)($custos['custo_embalagem'] ?? 0)
+                            + (float)($custos['custo_etiqueta'] ?? 0);
                     }
 
                     // Filtrar por margem se solicitado
                     if ($margemMin !== null && ($margem === null || $margem < (float)$margemMin)) continue;
                     if ($margemMax !== null && ($margem === null || $margem > (float)$margemMax)) continue;
+                    if ($custosFilter === 'com' && $custos === null) continue;
+                    if ($custosFilter === 'sem' && $custos !== null) continue;
 
                     $items[] = [
                         'id' => $itemId,
@@ -1042,6 +970,7 @@ class PricingIntelligenceController extends BaseController
                         'estoque' => $item['available_quantity'] ?? 0,
                         'vendidos' => $item['sold_quantity'] ?? 0,
                         'thumbnail' => $item['thumbnail'] ?? null,
+                        'custo' => $custoValor,
                         'margem' => $margem,
                         'lucro_unitario' => $lucro,
                         'indicador' => $indicador,
@@ -1205,14 +1134,7 @@ class PricingIntelligenceController extends BaseController
     private function getEstatisticasGerais(): array
     {
         try {
-            // Conta total de produtos com custos cadastrados
-            $stmt = $this->db->prepare("
-                SELECT COUNT(*) as total_produtos
-                FROM product_costs
-                WHERE account_id = :account_id
-            ");
-            $stmt->execute(['account_id' => $this->accountId]);
-            $stats = $stmt->fetch(PDO::FETCH_ASSOC);
+            $dist = $this->computeRealMarginDistribution();
 
             // Conta alterações de preço por período
             $stmt2 = $this->db->prepare("
@@ -1229,18 +1151,24 @@ class PricingIntelligenceController extends BaseController
             $stmt2->execute(['account_id' => $this->accountId]);
             $histStats = $stmt2->fetch(PDO::FETCH_ASSOC);
 
+            $margemMedia = (float)($histStats['margem_media'] ?? 0);
+            if ($margemMedia <= 0 && ($dist['margem_media_real'] ?? 0) > 0) {
+                $margemMedia = (float)$dist['margem_media_real'];
+            }
+
             return [
-                'total_produtos' => (int)($stats['total_produtos'] ?? 0),
+                'total_produtos' => (int)$dist['total_com_custos'],
                 'total_alteracoes_30d' => (int)($histStats['total_alteracoes'] ?? 0),
-                'margem_media' => round((float)($histStats['margem_media'] ?? 0), 2),
+                'margem_media' => round($margemMedia, 2),
                 'margem_minima' => round((float)($histStats['margem_minima'] ?? 0), 2),
                 'margem_maxima' => round((float)($histStats['margem_maxima'] ?? 0), 2),
                 'distribuicao' => [
-                    'critica' => 0,
-                    'baixa' => 0,
-                    'media' => 0,
-                    'boa' => 0
-                ]
+                    'critica' => (int)$dist['critica'],
+                    'baixa' => (int)$dist['baixa'],
+                    'media' => (int)$dist['media'],
+                    'boa' => (int)$dist['boa'],
+                    'sem_custos' => (int)$dist['sem_custos'],
+                ],
             ];
         } catch (\Throwable $e) {
             return [
@@ -1249,9 +1177,186 @@ class PricingIntelligenceController extends BaseController
                 'margem_media' => 0,
                 'margem_minima' => 0,
                 'margem_maxima' => 0,
-                'distribuicao' => ['critica' => 0, 'baixa' => 0, 'media' => 0, 'boa' => 0]
+                'distribuicao' => ['critica' => 0, 'baixa' => 0, 'media' => 0, 'boa' => 0, 'sem_custos' => 0],
             ];
         }
+    }
+
+    /**
+     * Distribuição de margem real (product_costs + sku_custos) usando preço de ml_items.
+     *
+     * @return array{critica:int,baixa:int,media:int,boa:int,sem_custos:int,total_com_custos:int,margem_media_real:float}
+     */
+    private function computeRealMarginDistribution(): array
+    {
+        $result = [
+            'critica' => 0,
+            'baixa' => 0,
+            'media' => 0,
+            'boa' => 0,
+            'sem_custos' => 0,
+            'total_com_custos' => 0,
+            'margem_media_real' => 0.0,
+            'active_total' => 0,
+            'active_with_cost' => 0,
+            'margens_count' => 0,
+        ];
+
+        $seen = [];
+        $margens = [];
+
+        // product_costs + preço local (somente anúncios active — mesmo universo dos cards/tabela)
+        $pcStmt = $this->db->prepare("
+            SELECT
+                pc.item_id,
+                pc.sku,
+                pc.custo_producao,
+                pc.custo_embalagem,
+                pc.custo_etiqueta,
+                pc.custo_frete_gratis,
+                pc.taxa_comissao_ml,
+                pc.taxa_imposto,
+                pc.acos_medio,
+                pc.margem_minima,
+                pc.margem_alvo,
+                m.price AS local_price
+            FROM product_costs pc
+            INNER JOIN ml_items m
+                ON m.account_id = pc.account_id
+               AND m.ml_item_id = pc.item_id
+               AND m.status = 'active'
+            WHERE pc.account_id = :account_id
+        ");
+        $pcStmt->execute(['account_id' => $this->accountId]);
+        foreach ($pcStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $itemId = (string)($row['item_id'] ?? '');
+            if ($itemId === '' || isset($seen[$itemId])) {
+                continue;
+            }
+            $seen[$itemId] = true;
+            $price = isset($row['local_price']) ? (float)$row['local_price'] : 0.0;
+            if ($price <= 0) {
+                continue;
+            }
+            $calc = $this->marginService->calcularMargem($price, [
+                'sku' => $row['sku'] ?? null,
+                'custo_producao' => (float)($row['custo_producao'] ?? 0),
+                'custo_embalagem' => (float)($row['custo_embalagem'] ?? 0),
+                'custo_etiqueta' => (float)($row['custo_etiqueta'] ?? 0),
+                'custo_frete_gratis' => (float)($row['custo_frete_gratis'] ?? 0),
+                'taxa_comissao_ml' => (float)($row['taxa_comissao_ml'] ?? 0),
+                'taxa_imposto' => (float)($row['taxa_imposto'] ?? 0),
+                'acos_medio' => (float)($row['acos_medio'] ?? 0),
+                'margem_minima' => (float)($row['margem_minima'] ?? 0),
+                'margem_alvo' => (float)($row['margem_alvo'] ?? 0),
+            ]);
+            $margem = isset($calc['margem_real']) ? (float)$calc['margem_real'] : null;
+            if ($margem === null) {
+                continue;
+            }
+            $margens[] = $margem;
+            if ($margem < 5) {
+                $result['critica']++;
+            } elseif ($margem < 10) {
+                $result['baixa']++;
+            } elseif ($margem < 20) {
+                $result['media']++;
+            } else {
+                $result['boa']++;
+            }
+        }
+
+        // sku_custos (fonte Vendas) — itens active ainda não cobertos por product_costs
+        $scStmt = $this->db->prepare("
+            SELECT
+                sc.mlb_id AS item_id,
+                sc.custo_produto,
+                sc.comissao_pct,
+                sc.frete_medio,
+                sc.custos_operacionais_pct,
+                m.price AS local_price
+            FROM sku_custos sc
+            INNER JOIN ml_items m
+                ON m.account_id = sc.account_id
+               AND m.ml_item_id = sc.mlb_id
+               AND m.status = 'active'
+            WHERE sc.account_id = :account_id
+              AND sc.custo_produto > 0
+        ");
+        $scStmt->execute(['account_id' => $this->accountId]);
+        foreach ($scStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $itemId = (string)($row['item_id'] ?? '');
+            if ($itemId === '' || isset($seen[$itemId])) {
+                continue;
+            }
+            $seen[$itemId] = true;
+            $price = isset($row['local_price']) ? (float)$row['local_price'] : 0.0;
+            if ($price <= 0) {
+                continue;
+            }
+            $custos = $this->marginService->getCustosProduto($itemId);
+            if ($custos === null) {
+                continue;
+            }
+            $calc = $this->marginService->calcularMargem($price, $custos);
+            $margem = isset($calc['margem_real']) ? (float)$calc['margem_real'] : null;
+            if ($margem === null) {
+                continue;
+            }
+            $margens[] = $margem;
+            if ($margem < 5) {
+                $result['critica']++;
+            } elseif ($margem < 10) {
+                $result['baixa']++;
+            } elseif ($margem < 20) {
+                $result['media']++;
+            } else {
+                $result['boa']++;
+            }
+        }
+
+        $result['total_com_custos'] = count($seen);
+
+        $activeTotal = 0;
+        try {
+            $activeStmt = $this->db->prepare("
+                SELECT COUNT(*) FROM ml_items
+                WHERE account_id = :account_id AND status = 'active'
+            ");
+            $activeStmt->execute(['account_id' => $this->accountId]);
+            $activeTotal = (int)$activeStmt->fetchColumn();
+        } catch (\Throwable $e) {
+            $activeTotal = 0;
+        }
+
+        $activeWithCost = 0;
+        try {
+            $awc = $this->db->prepare("
+                SELECT COUNT(DISTINCT m.ml_item_id)
+                FROM ml_items m
+                LEFT JOIN product_costs pc
+                    ON pc.account_id = m.account_id AND pc.item_id = m.ml_item_id
+                LEFT JOIN sku_custos sc
+                    ON sc.account_id = m.account_id AND sc.mlb_id = m.ml_item_id AND sc.custo_produto > 0
+                WHERE m.account_id = :account_id
+                  AND m.status = 'active'
+                  AND (pc.id IS NOT NULL OR sc.id IS NOT NULL)
+            ");
+            $awc->execute(['account_id' => $this->accountId]);
+            $activeWithCost = (int)$awc->fetchColumn();
+        } catch (\Throwable $e) {
+            $activeWithCost = 0;
+        }
+
+        $result['sem_custos'] = max(0, $activeTotal - $activeWithCost);
+        $result['active_total'] = $activeTotal;
+        $result['active_with_cost'] = $activeWithCost;
+        $result['margens_count'] = count($margens);
+        if (!empty($margens)) {
+            $result['margem_media_real'] = round(array_sum($margens) / count($margens), 2);
+        }
+
+        return $result;
     }
 
     private function jsonResponse(): void
@@ -1419,7 +1524,7 @@ class PricingIntelligenceController extends BaseController
      * GET /api/pricing/:accountId/promotion/history/:itemId?
      * Histórico de simulações de promoção
      */
-    public function getPromotionHistory(string $itemId = null): void
+    public function getPromotionHistory(?string $itemId = null): void
     {
         $this->jsonResponse();
 
@@ -2120,25 +2225,15 @@ class PricingIntelligenceController extends BaseController
         $days = $this->request->getInt('days', 30);
 
         try {
-            // Total de produtos com custos cadastrados
-            $stmtTotal = $this->db->prepare("
-                SELECT COUNT(*) as total FROM product_costs WHERE account_id = :account_id
-            ");
-            $stmtTotal->execute(['account_id' => $this->accountId]);
-            $totalProdutos = (int)$stmtTotal->fetchColumn();
-
-            // Distribuição de margens (usando margem_alvo configurada pelo usuário)
-            $stmtMargens = $this->db->prepare("
-                SELECT
-                    SUM(CASE WHEN margem_alvo < 5 THEN 1 ELSE 0 END) as critica,
-                    SUM(CASE WHEN margem_alvo >= 5 AND margem_alvo < 10 THEN 1 ELSE 0 END) as baixa,
-                    SUM(CASE WHEN margem_alvo >= 10 AND margem_alvo < 20 THEN 1 ELSE 0 END) as media,
-                    SUM(CASE WHEN margem_alvo >= 20 THEN 1 ELSE 0 END) as boa
-                FROM product_costs
-                WHERE account_id = :account_id
-            ");
-            $stmtMargens->execute(['account_id' => $this->accountId]);
-            $distribuicao = $stmtMargens->fetch(\PDO::FETCH_ASSOC);
+            $distReal = $this->computeRealMarginDistribution();
+            $totalProdutos = (int)$distReal['total_com_custos'];
+            $distribuicao = [
+                'critica' => (int)$distReal['critica'],
+                'baixa' => (int)$distReal['baixa'],
+                'media' => (int)$distReal['media'],
+                'boa' => (int)$distReal['boa'],
+                'sem_custos' => (int)$distReal['sem_custos'],
+            ];
 
             // Alterações de preço por período
             $alteracoes = ['total_alteracoes' => 0, 'aumentos' => 0, 'reducoes' => 0, 'com_alerta' => 0, 'variacao_media' => 0];
@@ -2257,12 +2352,8 @@ class PricingIntelligenceController extends BaseController
                 ];
             }
 
-            // Calcular margem média a partir dos custos
-            $stmtMargemMedia = $this->db->prepare("
-                SELECT AVG(margem_alvo) as media FROM product_costs WHERE account_id = :account_id
-            ");
-            $stmtMargemMedia->execute(['account_id' => $this->accountId]);
-            $margemMedia = (float)($stmtMargemMedia->fetchColumn() ?? 0);
+            // Margem média real (product_costs + sku_custos)
+            $margemMedia = (float)($distReal['margem_media_real'] ?? 0);
 
             echo json_encode([
                 'success' => true,
@@ -2273,7 +2364,7 @@ class PricingIntelligenceController extends BaseController
                     'baixa' => (int)($distribuicao['baixa'] ?? 0),
                     'media' => (int)($distribuicao['media'] ?? 0),
                     'boa' => (int)($distribuicao['boa'] ?? 0),
-                    'sem_custos' => 0 // Calculado na listagem
+                    'sem_custos' => (int)($distribuicao['sem_custos'] ?? 0),
                 ],
                 'margens' => [
                     'media' => round($margemMedia, 2)
@@ -2562,22 +2653,86 @@ class PricingIntelligenceController extends BaseController
 
     /**
      * Preview de itens para interface quando ?preview=true
-     * Prioriza dados reais do banco local (ml_items + product_costs).
+     * Prioriza dados reais do banco local (ml_items + product_costs/sku_custos).
      */
     private function getPreviewItems(int $page, int $limit): array
+    {
+        return $this->buildLocalItemsList($page, $limit, ['preview_mode' => true]);
+    }
+
+    /**
+     * Lista anúncios do catálogo local com margem/custo.
+     * Ordena itens COM custo primeiro para a tela de precificação.
+     *
+     * @param array{
+     *   status?:?string,
+     *   search?:?string,
+     *   categoria?:?string,
+     *   margem_min?:mixed,
+     *   margem_max?:mixed,
+     *   custos?:?string,
+     *   preview_mode?:bool,
+     *   aviso?:?string
+     * } $opts
+     */
+    private function buildLocalItemsList(int $page, int $limit, array $opts = []): array
     {
         $page = max(1, (int)$page);
         $limit = max(1, min(100, (int)$limit));
         $offset = max(0, min(1000000, ($page - 1) * $limit));
 
+        $status = $opts['status'] ?? null;
+        $search = $opts['search'] ?? null;
+        $categoria = $opts['categoria'] ?? null;
+        $margemMin = $opts['margem_min'] ?? null;
+        $margemMax = $opts['margem_max'] ?? null;
+        $custosFilter = $opts['custos'] ?? null;
+        $previewMode = (bool)($opts['preview_mode'] ?? false);
+
         try {
-            $countStmt = $this->db->prepare("SELECT COUNT(*) FROM ml_items WHERE account_id = :account_id");
-            $countStmt->execute(['account_id' => $this->accountId]);
+            $where = ['m.account_id = :account_id'];
+            $params = ['account_id' => $this->accountId];
+
+            if (!empty($status)) {
+                $where[] = 'm.status = :status';
+                $params['status'] = $status;
+            }
+            if (!empty($categoria)) {
+                $where[] = 'm.category_id = :categoria';
+                $params['categoria'] = $categoria;
+            }
+            if (!empty($search)) {
+                $where[] = '(m.ml_item_id LIKE :search OR m.sku LIKE :search OR m.title LIKE :search)';
+                $params['search'] = '%' . $search . '%';
+            }
+            if ($custosFilter === 'com') {
+                $where[] = '(COALESCE(pc.custo_producao, sc.custo_produto, 0) > 0)';
+            } elseif ($custosFilter === 'sem') {
+                $where[] = '(COALESCE(pc.custo_producao, sc.custo_produto, 0) <= 0)';
+            }
+
+            $whereSql = implode(' AND ', $where);
+
+            $countStmt = $this->db->prepare("
+                SELECT COUNT(*)
+                FROM ml_items m
+                LEFT JOIN product_costs pc
+                    ON pc.account_id = m.account_id AND pc.item_id = m.ml_item_id
+                LEFT JOIN sku_custos sc
+                    ON sc.account_id = m.account_id AND sc.mlb_id = m.ml_item_id
+                WHERE {$whereSql}
+            ");
+            foreach ($params as $key => $value) {
+                $countStmt->bindValue($key, $value);
+            }
+            $countStmt->execute();
             $total = (int)$countStmt->fetchColumn();
 
+            $limitSql = (int) $limit;
+            $offsetSql = (int) $offset;
             $stmt = $this->db->prepare("
                 SELECT
-                    m.id,
+                    m.ml_item_id,
                     m.title,
                     m.sku,
                     m.price,
@@ -2586,24 +2741,31 @@ class PricingIntelligenceController extends BaseController
                     m.available_quantity,
                     m.sold_quantity,
                     m.thumbnail,
-                    pc.custo_producao,
+                    COALESCE(pc.custo_producao, sc.custo_produto) AS custo_producao,
                     pc.custo_embalagem,
                     pc.custo_etiqueta,
-                    pc.custo_frete_gratis,
-                    pc.taxa_comissao_ml,
+                    COALESCE(pc.custo_frete_gratis, sc.frete_medio) AS custo_frete_gratis,
+                    COALESCE(pc.taxa_comissao_ml, sc.comissao_pct) AS taxa_comissao_ml,
                     pc.taxa_imposto,
                     pc.acos_medio,
                     pc.margem_minima,
-                    pc.margem_alvo
+                    pc.margem_alvo,
+                    sc.custos_operacionais_pct,
+                    CASE WHEN COALESCE(pc.custo_producao, sc.custo_produto, 0) > 0 THEN 1 ELSE 0 END AS has_cost
                 FROM ml_items m
                 LEFT JOIN product_costs pc
                     ON pc.account_id = m.account_id
-                   AND pc.item_id = m.id
-                WHERE m.account_id = :account_id
-                ORDER BY m.updated_at DESC
-                LIMIT {$limit} OFFSET {$offset}
+                   AND pc.item_id = m.ml_item_id
+                LEFT JOIN sku_custos sc
+                    ON sc.account_id = m.account_id
+                   AND sc.mlb_id = m.ml_item_id
+                WHERE {$whereSql}
+                ORDER BY has_cost DESC, m.sold_quantity DESC, m.updated_at DESC
+                LIMIT {$limitSql} OFFSET {$offsetSql}
             ");
-            $stmt->bindValue('account_id', $this->accountId, \PDO::PARAM_INT);
+            foreach ($params as $key => $value) {
+                $stmt->bindValue($key, $value);
+            }
             $stmt->execute();
             $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
@@ -2612,33 +2774,39 @@ class PricingIntelligenceController extends BaseController
                 $margem = null;
                 $lucro = null;
                 $indicador = 'cinza';
+                $custoTotal = null;
 
                 $hasCosts = $row['custo_producao'] !== null
-                    || $row['custo_embalagem'] !== null
-                    || $row['custo_etiqueta'] !== null
-                    || $row['custo_frete_gratis'] !== null;
+                    && (float)$row['custo_producao'] > 0;
 
                 if ($hasCosts) {
-                    $custos = [
-                        'custo_producao' => (float)($row['custo_producao'] ?? 0),
-                        'custo_embalagem' => (float)($row['custo_embalagem'] ?? 0),
-                        'custo_etiqueta' => (float)($row['custo_etiqueta'] ?? 0),
-                        'custo_frete_gratis' => (float)($row['custo_frete_gratis'] ?? 0),
-                        'taxa_comissao_ml' => (float)($row['taxa_comissao_ml'] ?? 0),
-                        'taxa_imposto' => (float)($row['taxa_imposto'] ?? 0),
-                        'acos_medio' => (float)($row['acos_medio'] ?? 0),
-                        'margem_minima' => (float)($row['margem_minima'] ?? 0),
-                        'margem_alvo' => (float)($row['margem_alvo'] ?? 0),
-                    ];
+                    $price = (float)$row['price'];
+                    $custos = $this->marginService->getCustosProduto((string)$row['ml_item_id']);
+                    if ($custos !== null) {
+                        $custoTotal = round(
+                            (float)($custos['custo_producao'] ?? 0)
+                            + (float)($custos['custo_embalagem'] ?? 0)
+                            + (float)($custos['custo_etiqueta'] ?? 0),
+                            2
+                        );
+                        $calc = $this->marginService->calcularMargem($price, $custos);
+                        $margem = $calc['margem_real'] ?? null;
+                        $lucro = $calc['lucro_unitario'] ?? null;
+                        $indicador = $calc['indicador'] ?? 'cinza';
+                    } else {
+                        $hasCosts = false;
+                    }
+                }
 
-                    $calc = $this->marginService->calcularMargem((float)$row['price'], $custos);
-                    $margem = $calc['margem_real'] ?? null;
-                    $lucro = $calc['lucro_unitario'] ?? null;
-                    $indicador = $calc['indicador'] ?? 'cinza';
+                if ($margemMin !== null && $margemMin !== '' && ($margem === null || $margem < (float)$margemMin)) {
+                    continue;
+                }
+                if ($margemMax !== null && $margemMax !== '' && ($margem === null || $margem > (float)$margemMax)) {
+                    continue;
                 }
 
                 $items[] = [
-                    'id' => $row['id'],
+                    'id' => $row['ml_item_id'],
                     'titulo' => $row['title'],
                     'sku' => $row['sku'],
                     'preco' => (float)$row['price'],
@@ -2648,6 +2816,7 @@ class PricingIntelligenceController extends BaseController
                     'estoque' => (int)($row['available_quantity'] ?? 0),
                     'vendidos' => (int)($row['sold_quantity'] ?? 0),
                     'thumbnail' => $row['thumbnail'],
+                    'custo' => $custoTotal,
                     'margem' => $margem,
                     'lucro_unitario' => $lucro !== null ? round((float)$lucro, 2) : null,
                     'indicador' => $indicador,
@@ -2655,27 +2824,33 @@ class PricingIntelligenceController extends BaseController
                 ];
             }
 
-            if (empty($items)) {
+            if (empty($items) && $total === 0) {
                 return [
                     'success' => true,
                     'page' => $page,
                     'limit' => $limit,
                     'total' => 0,
                     'items' => [],
-                    'preview_mode' => true,
-                    'aviso' => 'Nenhum item local disponível para preview. Sincronize os itens para visualizar dados reais.'
+                    'preview_mode' => $previewMode,
+                    'ml_status' => $previewMode ? 'desconectado' : 'conectado',
+                    'aviso' => $opts['aviso'] ?? 'Nenhum item local disponível. Sincronize os itens para visualizar dados reais.',
                 ];
             }
 
-            return [
+            $payload = [
                 'success' => true,
                 'page' => $page,
                 'limit' => $limit,
                 'total' => $total,
                 'items' => $items,
-                'preview_mode' => true,
-                'aviso' => 'Preview com dados reais locais (ml_items/product_costs).'
+                'ml_status' => $previewMode ? 'local' : 'conectado',
+                'source' => 'ml_items',
             ];
+            if ($previewMode) {
+                $payload['preview_mode'] = true;
+                $payload['aviso'] = $opts['aviso'] ?? 'Preview com dados reais locais (ml_items + custos).';
+            }
+            return $payload;
         } catch (\Throwable $e) {
             return [
                 'success' => false,
@@ -2683,8 +2858,8 @@ class PricingIntelligenceController extends BaseController
                 'limit' => $limit,
                 'total' => 0,
                 'items' => [],
-                'preview_mode' => true,
-                'error' => 'Não foi possível montar preview real de itens.',
+                'preview_mode' => $previewMode,
+                'error' => 'Não foi possível listar itens locais.',
                 'details' => $e->getMessage(),
             ];
         }
@@ -4842,4 +5017,17 @@ class PricingIntelligenceController extends BaseController
             $this->error('Erro ao listar eventos: ' . $e->getMessage());
         }
     }
+
+    private function getAccountMlUserId(): string
+    {
+        try {
+            $stmt = $this->db->prepare('SELECT ml_user_id FROM ml_accounts WHERE id = :id LIMIT 1');
+            $stmt->execute(['id' => $this->accountId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            return isset($row['ml_user_id']) ? (string)$row['ml_user_id'] : '';
+        } catch (\Throwable $e) {
+            return '';
+        }
+    }
+
 }

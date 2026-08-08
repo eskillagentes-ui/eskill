@@ -163,7 +163,7 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
 
             <a href="/dashboard/orders" class="nav-item <?= isActive('/orders') ? 'active' : '' ?>">
                 <i class="bi bi-cart3"></i>
-                <span>Pedidos</span>
+                <span>Vendas</span>
                 <?php if ($pendingOrders > 0): ?>
                     <span class="nav-badge count"><?= $pendingOrders ?></span>
                 <?php endif; ?>
@@ -260,7 +260,7 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
         <div class="nav-section">
             <div class="nav-section-title">Financeiro</div>
 
-            <a href="/dashboard/pricing" class="nav-item <?= isActive('/pricing') ? 'active' : '' ?>">
+            <a href="/dashboard/pricing-v2" class="nav-item <?= isActive('/pricing') ? 'active' : '' ?>">
                 <i class="bi bi-calculator"></i>
                 <span>Precificador</span>
                 <span class="badge bg-success" style="font-size: 0.6rem; margin-left: auto;">NEW</span>
@@ -271,9 +271,14 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
                 <span>Relatórios</span>
             </a>
 
-            <a href="/dashboard/financials/conciliation" class="nav-item <?= isActive('/conciliation') ? 'active' : '' ?>">
+            <a href="/dashboard/financials/conciliation" class="nav-item <?= isActive('/conciliation') && (($_GET['view'] ?? '') !== 'discrepancies') ? 'active' : '' ?>">
                 <i class="bi bi-bank"></i>
                 <span>Conciliação</span>
+            </a>
+
+            <a href="/dashboard/financials/conciliation?view=discrepancies" class="nav-item <?= (($_GET['view'] ?? '') === 'discrepancies') ? 'active' : '' ?>">
+                <i class="bi bi-exclamation-diamond"></i>
+                <span>Divergências</span>
             </a>
         </div>
 
@@ -451,6 +456,7 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
         align-items: center;
         justify-content: space-between;
         border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        flex: 0 0 auto;
     }
 
     .brand-link {
@@ -495,6 +501,7 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
         align-items: center;
         gap: 0.75rem;
         border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+        flex: 0 0 auto;
     }
 
     .user-avatar {
@@ -558,6 +565,7 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
     /* Search */
     .sidebar-search {
         padding: 0.75rem 1rem;
+        flex: 0 0 auto;
     }
 
     .search-box {
@@ -608,7 +616,8 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
 
     /* Navigation */
     .sidebar-nav {
-        flex: 1;
+        flex: 1 1 auto;
+        min-height: 0;
         overflow-y: auto;
         padding: 0.5rem 0;
     }
@@ -754,6 +763,7 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
     .sidebar-footer {
         border-top: 1px solid rgba(255, 255, 255, 0.06);
         padding: 0.5rem 0;
+        flex: 0 0 auto;
     }
 
     .sidebar-footer .nav-item.logout {
@@ -792,17 +802,22 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
         }
     }
 
-    /* Light Theme Adjustments */
+    /* Light Theme Adjustments
+     * theme.css applies background-color: var(--bg-sidebar) !important —
+     * keep local overrides equally important so brand stays readable.
+     */
     [data-theme="light"] .sidebar {
         --sidebar-bg: #ffffff;
         --sidebar-text: #64748b;
-        background: #ffffff;
+        background: #ffffff !important;
+        background-color: #ffffff !important;
         border-right: 1px solid #e2e8f0;
     }
 
     [data-theme="light"] .brand-link,
+    [data-theme="light"] .brand-text,
     [data-theme="light"] .user-name {
-        color: #1e293b;
+        color: #1e293b !important;
     }
 
     [data-theme="light"] .search-box {

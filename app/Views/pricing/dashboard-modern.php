@@ -42,10 +42,10 @@ $accountId = SessionHelper::getActiveAccountId();
                     <i class="bi bi-download me-1"></i> Exportar
                 </button>
                 <ul class="dropdown-menu">
-                    <li><a class="dropdown-item" href="#" onclick="exportarDados()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="exportarDados">
                             <i class="bi bi-file-earmark-spreadsheet me-2"></i>Custos (CSV)
                         </a></li>
-                    <li><a class="dropdown-item" href="#" onclick="exportarHistorico()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="exportarHistorico">
                             <i class="bi bi-clock-history me-2"></i>Histórico de Preços
                         </a></li>
                 </ul>
@@ -55,22 +55,22 @@ $accountId = SessionHelper::getActiveAccountId();
                     <i class="bi bi-graph-up me-1"></i> Relatórios
                 </button>
                 <ul class="dropdown-menu">
-                    <li><a class="dropdown-item" href="#" onclick="abrirRelatorioPerformance()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirRelatorioPerformance">
                             <i class="bi bi-speedometer2 me-2"></i>Performance (30 dias)
                         </a></li>
-                    <li><a class="dropdown-item" href="#" onclick="abrirMonitorConcorrentes()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirMonitorConcorrentes">
                             <i class="bi bi-people me-2"></i>Monitorar Concorrentes
                         </a></li>
-                    <li><a class="dropdown-item" href="#" onclick="abrirPrevisaoMargem()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirPrevisaoMargem">
                             <i class="bi bi-calculator me-2"></i>Previsão de Margem
                         </a></li>
-                    <li><a class="dropdown-item" href="#" onclick="abrirRentabilidade()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirRentabilidade">
                             <i class="bi bi-piggy-bank me-2"></i>Análise de Rentabilidade
                         </a></li>
                     <li>
                         <hr class="dropdown-divider">
                     </li>
-                    <li><a class="dropdown-item" href="#" onclick="abrirPrecoIdeal()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirPrecoIdeal">
                             <i class="bi bi-bullseye me-2"></i>Calcular Preço Ideal
                         </a></li>
                     <li><a class="dropdown-item" href="#" data-bs-toggle="modal" data-bs-target="#autoSuggestModal">
@@ -79,28 +79,28 @@ $accountId = SessionHelper::getActiveAccountId();
                     <li>
                         <hr class="dropdown-divider">
                     </li>
-                    <li><a class="dropdown-item" href="#" onclick="abrirAlertasPreco()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirAlertasPreco">
                             <i class="bi bi-bell me-2"></i>Alertas de Preço
                         </a></li>
                     <li>
                         <hr class="dropdown-divider">
                     </li>
-                    <li><a class="dropdown-item" href="#" onclick="abrirAutoOptimizer()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirAutoOptimizer">
                             <i class="bi bi-robot me-2 text-success"></i>Auto-Otimizador
                             <span class="badge bg-success ms-2">Novo</span>
                         </a></li>
-                    <li><a class="dropdown-item" href="#" onclick="abrirAbTests()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirAbTests">
                             <i class="bi bi-signpost-split me-2 text-info"></i>Testes A/B
                             <span class="badge bg-info ms-2">Novo</span>
                         </a></li>
-                    <li><a class="dropdown-item" href="#" onclick="abrirCompetitorMonitor()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirCompetitorMonitor">
                             <i class="bi bi-eye me-2 text-dark"></i>Monitor de Concorrentes
                             <span class="badge bg-dark ms-2">Novo</span>
                         </a></li>
                     <li>
                         <hr class="dropdown-divider">
                     </li>
-                    <li><a class="dropdown-item" href="#" onclick="abrirAIPricing()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirAIPricing">
                             <i class="bi bi-cpu me-2 text-purple"></i>IA Preditiva
                             <span class="badge bg-purple ms-2">AI</span>
                         </a></li>
@@ -108,23 +108,23 @@ $accountId = SessionHelper::getActiveAccountId();
                         <hr class="dropdown-divider">
                     </li>
                     <li class="dropdown-header">🚀 Phase 3 - Automação Avançada</li>
-                    <li><a class="dropdown-item" href="#" onclick="abrirRulesEngine()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirRulesEngine">
                             <i class="bi bi-gear-wide-connected me-2 text-primary"></i>Motor de Regras
                             <span class="badge bg-primary ms-2">Novo</span>
                         </a></li>
-                    <li><a class="dropdown-item" href="#" onclick="abrirScheduledPrices()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirScheduledPrices">
                             <i class="bi bi-calendar-event me-2 text-success"></i>Agendamento de Preços
                             <span class="badge bg-success ms-2">Novo</span>
                         </a></li>
-                    <li><a class="dropdown-item" href="#" onclick="abrirPriceAnalytics()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirPriceAnalytics">
                             <i class="bi bi-graph-up-arrow me-2 text-info"></i>Analytics Avançado
                             <span class="badge bg-info ms-2">Novo</span>
                         </a></li>
-                    <li><a class="dropdown-item" href="#" onclick="abrirBulkEditor()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirBulkEditor">
                             <i class="bi bi-pencil-square me-2 text-warning"></i>Editor em Massa
                             <span class="badge bg-warning text-dark ms-2">Novo</span>
                         </a></li>
-                    <li><a class="dropdown-item" href="#" onclick="abrirNotifications()">
+                    <li><a class="dropdown-item" href="#" data-pricing-cmd="abrirNotifications">
                             <i class="bi bi-bell-fill me-2 text-danger"></i>Central de Notificações
                             <span class="badge bg-danger ms-2">Novo</span>
                         </a></li>
@@ -136,7 +136,7 @@ $accountId = SessionHelper::getActiveAccountId();
             <button type="button" class="btn btn-outline-warning" data-bs-toggle="modal" data-bs-target="#bulkActionsModal">
                 <i class="bi bi-lightning me-1"></i> Ações em Lote
             </button>
-            <button type="button" class="btn btn-primary" onclick="refreshItems()">
+            <button type="button" class="btn btn-primary" data-pricing-cmd="refreshItems">
                 <i class="bi bi-arrow-clockwise me-1"></i> Atualizar
             </button>
         </div>
@@ -307,16 +307,32 @@ $accountId = SessionHelper::getActiveAccountId();
                     </select>
                 </div>
                 <div class="col-md-3 text-end">
-                    <button class="btn btn-outline-secondary me-2" onclick="limparFiltros()">
+                    <button class="btn btn-outline-secondary me-2" data-pricing-cmd="limparFiltros">
                         <i class="bi bi-x-lg me-1"></i> Limpar
                     </button>
-                    <button class="btn btn-primary" onclick="aplicarFiltros()">
+                    <button class="btn btn-primary" data-pricing-cmd="aplicarFiltros">
                         <i class="bi bi-funnel me-1"></i> Filtrar
                     </button>
                 </div>
             </div>
         </div>
     </div>
+
+    <?php if (!$accountId): ?>
+    <div class="alert alert-warning border-0 shadow-sm mb-4" id="pricingNoAccountState" data-pricing-state="no-account" role="status">
+        <div class="d-flex flex-wrap align-items-center gap-3">
+            <i class="bi bi-link-45deg fs-3" aria-hidden="true"></i>
+            <div class="flex-grow-1">
+                <strong class="d-block">Nenhuma conta Mercado Livre conectada</strong>
+                <span class="small">Conecte ou selecione uma conta ML para listar anúncios e usar o precificador.</span>
+            </div>
+            <div class="d-flex flex-wrap gap-2">
+                <a href="/auth/authorize" class="btn btn-primary btn-sm">Conectar conta ML</a>
+                <a href="/dashboard/settings" class="btn btn-outline-secondary btn-sm">Configurações</a>
+            </div>
+        </div>
+    </div>
+    <?php endif; ?>
 
     <!-- Tabela de Anúncios -->
     <div class="card">
@@ -332,10 +348,19 @@ $accountId = SessionHelper::getActiveAccountId();
                             <th class="text-center" style="width: 100px;">Margem</th>
                             <th class="text-center" style="width: 100px;">Lucro/Un</th>
                             <th class="text-center" style="width: 80px;">Vendidos</th>
-                            <th class="text-center" style="width: 100px;">Ações</th>
+                            <th class="text-center" style="width: 160px;">Ações</th>
                         </tr>
                     </thead>
                     <tbody id="itemsTableBody">
+                        <?php if (!$accountId): ?>
+                        <tr data-pricing-state="no-account">
+                            <td colspan="8" class="text-center py-5 text-muted">
+                                <i class="bi bi-inbox fs-1 d-block mb-2" aria-hidden="true"></i>
+                                <p class="mb-1 fw-semibold">Sem anúncios para exibir</p>
+                                <p class="mb-0 small">Conecte uma conta Mercado Livre para carregar o catálogo.</p>
+                            </td>
+                        </tr>
+                        <?php else: ?>
                         <tr>
                             <td colspan="8" class="text-center py-5">
                                 <div class="spinner-border text-primary" role="status">
@@ -344,6 +369,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                 <p class="mt-2 mb-0 text-muted">Carregando anúncios...</p>
                             </td>
                         </tr>
+                        <?php endif; ?>
                     </tbody>
                 </table>
             </div>
@@ -438,7 +464,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                     <div class="input-group input-group-lg">
                                         <span class="input-group-text">R$</span>
                                         <input type="number" class="form-control form-control-lg" id="newPriceInput"
-                                            step="0.01" min="0" placeholder="0,00" oninput="calcularSimulacao()">
+                                            step="0.01" min="0" placeholder="0,00" data-pricing-simulate>
                                     </div>
                                     <div class="form-text" id="priceChangePercent"></div>
                                 </div>
@@ -510,7 +536,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                     <label class="form-label small">Custo de Aquisição</label>
                                     <div class="input-group input-group-sm">
                                         <span class="input-group-text">R$</span>
-                                        <input type="number" class="form-control" id="costProducao" step="0.01" oninput="calcularSimulacao()">
+                                        <input type="number" class="form-control" id="costProducao" step="0.01" data-pricing-simulate>
                                     </div>
                                 </div>
 
@@ -518,7 +544,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                     <label class="form-label small">Embalagem</label>
                                     <div class="input-group input-group-sm">
                                         <span class="input-group-text">R$</span>
-                                        <input type="number" class="form-control" id="costEmbalagem" step="0.01" value="0" oninput="calcularSimulacao()">
+                                        <input type="number" class="form-control" id="costEmbalagem" step="0.01" value="0" data-pricing-simulate>
                                     </div>
                                 </div>
 
@@ -526,7 +552,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                     <label class="form-label small">Frete Grátis</label>
                                     <div class="input-group input-group-sm">
                                         <span class="input-group-text">R$</span>
-                                        <input type="number" class="form-control" id="costFreteGratis" step="0.01" value="0" oninput="calcularSimulacao()">
+                                        <input type="number" class="form-control" id="costFreteGratis" step="0.01" value="0" data-pricing-simulate>
                                     </div>
                                 </div>
 
@@ -534,14 +560,14 @@ $accountId = SessionHelper::getActiveAccountId();
                                     <div class="col-6">
                                         <label class="form-label small">Comissão ML</label>
                                         <div class="input-group input-group-sm">
-                                            <input type="number" class="form-control" id="taxaComissao" step="0.1" value="16" oninput="calcularSimulacao()">
+                                            <input type="number" class="form-control" id="taxaComissao" step="0.1" value="16" data-pricing-simulate>
                                             <span class="input-group-text">%</span>
                                         </div>
                                     </div>
                                     <div class="col-6">
                                         <label class="form-label small">Impostos</label>
                                         <div class="input-group input-group-sm">
-                                            <input type="number" class="form-control" id="taxaImposto" step="0.1" value="9" oninput="calcularSimulacao()">
+                                            <input type="number" class="form-control" id="taxaImposto" step="0.1" value="9" data-pricing-simulate>
                                             <span class="input-group-text">%</span>
                                         </div>
                                     </div>
@@ -550,12 +576,12 @@ $accountId = SessionHelper::getActiveAccountId();
                                 <div class="mb-3">
                                     <label class="form-label small">ACOS Médio (Ads)</label>
                                     <div class="input-group input-group-sm">
-                                        <input type="number" class="form-control" id="taxaAcos" step="0.1" value="0" oninput="calcularSimulacao()">
+                                        <input type="number" class="form-control" id="taxaAcos" step="0.1" value="0" data-pricing-simulate>
                                         <span class="input-group-text">%</span>
                                     </div>
                                 </div>
 
-                                <button class="btn btn-outline-primary btn-sm w-100 mb-3" onclick="salvarCustos()">
+                                <button type="button" class="btn btn-outline-primary btn-sm w-100 mb-3" data-pricing-action="salvar-custos">
                                     <i class="bi bi-save me-1"></i> Salvar Custos
                                 </button>
 
@@ -589,7 +615,7 @@ $accountId = SessionHelper::getActiveAccountId();
 
                                 <div class="mb-4">
                                     <label class="form-label">Percentual de Desconto</label>
-                                    <input type="range" class="form-range" id="promoDesconto" min="5" max="50" step="5" value="10" oninput="updatePromoPreview()">
+                                    <input type="range" class="form-range" id="promoDesconto" min="5" max="50" step="5" value="10" data-pricing-promo-range>
                                     <div class="d-flex justify-content-between">
                                         <span class="text-muted small">5%</span>
                                         <span class="badge bg-danger fs-6" id="promoDescontoValue">10%</span>
@@ -621,7 +647,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                     <span id="promoAlertaText"></span>
                                 </div>
 
-                                <button class="btn btn-danger w-100" onclick="simularPromocao()">
+                                <button type="button" class="btn btn-danger w-100" data-pricing-action="simular-promocao">
                                     <i class="bi bi-calculator me-1"></i> Simular Promoção Completa
                                 </button>
                             </div>
@@ -651,7 +677,7 @@ $accountId = SessionHelper::getActiveAccountId();
 
                                 <h6 class="mb-2"><i class="bi bi-shop me-1"></i> Central de Ofertas ML</h6>
                                 <p class="text-muted small mb-2">Simule participação em campanhas do Mercado Livre</p>
-                                <button class="btn btn-outline-warning btn-sm w-100" onclick="simularCentralOfertas()">
+                                <button type="button" class="btn btn-outline-warning btn-sm w-100" data-pricing-action="simular-central-ofertas">
                                     <i class="bi bi-stars me-1"></i> Simular Central de Ofertas
                                 </button>
 
@@ -738,7 +764,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                     <label class="form-check-label" for="regraAtiva">Ativar imediatamente</label>
                                 </div>
 
-                                <button class="btn btn-primary w-100" onclick="criarRegraAutomatica()">
+                                <button type="button" class="btn btn-primary w-100" data-pricing-action="criar-regra">
                                     <i class="bi bi-plus-lg me-1"></i> Criar Regra
                                 </button>
                             </div>
@@ -755,7 +781,7 @@ $accountId = SessionHelper::getActiveAccountId();
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                <button type="button" class="btn btn-primary" onclick="aplicarPreco()" id="btnAplicarPreco">
+                <button type="button" class="btn btn-primary" data-pricing-action="aplicar-preco" id="btnAplicarPreco">
                     <i class="bi bi-check-lg me-1"></i> Aplicar Preço no ML
                 </button>
             </div>
@@ -778,7 +804,7 @@ $accountId = SessionHelper::getActiveAccountId();
             </div>
             <div class="modal-footer">
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-                <button type="button" class="btn btn-primary" onclick="processarImportacao()">
+                <button type="button" class="btn btn-primary" data-pricing-cmd="processarImportacao">
                     <i class="bi bi-upload me-1"></i> Importar
                 </button>
             </div>
@@ -830,7 +856,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                 Apenas simular (não aplicar alterações)
                             </label>
                         </div>
-                        <button class="btn btn-primary" onclick="executarBulkRules()">
+                        <button class="btn btn-primary" data-pricing-cmd="executarBulkRules">
                             <i class="bi bi-play me-1"></i> Executar
                         </button>
                         <div id="bulkRulesResult" class="mt-3"></div>
@@ -862,7 +888,7 @@ $accountId = SessionHelper::getActiveAccountId();
                             <label class="form-label">Novo Valor</label>
                             <input type="number" class="form-control" id="bulkCostValue" step="0.01" placeholder="0.00">
                         </div>
-                        <button class="btn btn-warning" onclick="executarBulkCosts()">
+                        <button class="btn btn-warning" data-pricing-cmd="executarBulkCosts">
                             <i class="bi bi-pencil me-1"></i> Atualizar Custos
                         </button>
                         <div id="bulkCostsResult" class="mt-3"></div>
@@ -949,7 +975,7 @@ $accountId = SessionHelper::getActiveAccountId();
                             </div>
                         </div>
                         <div class="mt-3">
-                            <button class="btn btn-primary" onclick="salvarCustosPadrao()">
+                            <button class="btn btn-primary" data-pricing-cmd="salvarCustosPadrao">
                                 <i class="bi bi-check me-1"></i> Salvar Configurações
                             </button>
                         </div>
@@ -964,13 +990,13 @@ $accountId = SessionHelper::getActiveAccountId();
                             </div>
                         </div>
                         <div class="d-flex gap-2 flex-wrap">
-                            <button class="btn btn-outline-primary" onclick="verificarConexaoML()">
+                            <button class="btn btn-outline-primary" data-pricing-cmd="verificarConexaoML">
                                 <i class="bi bi-arrow-repeat me-1"></i> Verificar Conexão
                             </button>
                             <a href="/auth/authorize" class="btn btn-success">
                                 <i class="bi bi-box-arrow-in-right me-1"></i> Reconectar Conta ML
                             </a>
-                            <button class="btn btn-outline-danger" onclick="confirmarExclusaoConta()">
+                            <button class="btn btn-outline-danger" data-pricing-cmd="confirmarExclusaoConta">
                                 <i class="bi bi-trash me-1"></i> Excluir Conta
                             </button>
                         </div>
@@ -998,7 +1024,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                     <li>Simulações de promoções</li>
                                     <li>Alertas de ranking</li>
                                 </ul>
-                                <button class="btn btn-danger" onclick="confirmarExclusaoConta()">
+                                <button class="btn btn-danger" data-pricing-cmd="confirmarExclusaoConta">
                                     <i class="bi bi-trash me-1"></i> Excluir Esta Conta Permanentemente
                                 </button>
                             </div>
@@ -1044,7 +1070,7 @@ $accountId = SessionHelper::getActiveAccountId();
                             </div>
                         </div>
                         <div class="mt-3">
-                            <button class="btn btn-primary" onclick="salvarConfiguracaoAlertas()">
+                            <button class="btn btn-primary" data-pricing-cmd="salvarConfiguracaoAlertas">
                                 <i class="bi bi-check me-1"></i> Salvar Alertas
                             </button>
                         </div>
@@ -1068,7 +1094,7 @@ $accountId = SessionHelper::getActiveAccountId();
             <div class="modal-body">
                 <div class="mb-3">
                     <label class="form-label">Período</label>
-                    <select class="form-select" id="performancePeriodo" onchange="carregarPerformance()">
+                    <select class="form-select" id="performancePeriodo" data-pricing-change="carregarPerformance">
                         <option value="7">Últimos 7 dias</option>
                         <option value="30" selected>Últimos 30 dias</option>
                         <option value="60">Últimos 60 dias</option>
@@ -1102,7 +1128,7 @@ $accountId = SessionHelper::getActiveAccountId();
                     <input type="text" class="form-control" id="autoSuggestItemId"
                         placeholder="Ex: MLB1234567890">
                 </div>
-                <button type="button" class="btn btn-primary" onclick="buscarSugestaoAutomatica()">
+                <button type="button" class="btn btn-primary" data-pricing-cmd="buscarSugestaoAutomatica">
                     <i class="bi bi-search me-1"></i> Analisar
                 </button>
 
@@ -1130,7 +1156,7 @@ $accountId = SessionHelper::getActiveAccountId();
                     <input type="text" class="form-control" id="forecastItemId"
                         placeholder="Ex: MLB1234567890">
                 </div>
-                <button type="button" class="btn btn-warning" onclick="calcularPrevisao()">
+                <button type="button" class="btn btn-warning" data-pricing-cmd="calcularPrevisao">
                     <i class="bi bi-graph-up me-1"></i> Calcular Previsões
                 </button>
 
@@ -1158,7 +1184,7 @@ $accountId = SessionHelper::getActiveAccountId();
                     <input type="text" class="form-control" id="competitorItemId"
                         placeholder="Ex: MLB1234567890">
                 </div>
-                <button type="button" class="btn btn-success" onclick="monitorarConcorrentes()">
+                <button type="button" class="btn btn-success" data-pricing-cmd="monitorarConcorrentes">
                     <i class="bi bi-search me-1"></i> Buscar Concorrentes
                 </button>
 
@@ -1222,7 +1248,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                 </div>
                             </div>
                         </div>
-                        <button type="button" class="btn btn-danger mt-3" onclick="criarAlertaPreco()">
+                        <button type="button" class="btn btn-danger mt-3" data-pricing-cmd="criarAlertaPreco">
                             <i class="bi bi-bell-fill me-1"></i> Criar Alerta
                         </button>
                     </div>
@@ -1294,7 +1320,7 @@ $accountId = SessionHelper::getActiveAccountId();
                     <label class="form-label">Margem Desejada (%)</label>
                     <input type="number" class="form-control" id="idealMargem" value="20" min="1" max="100">
                 </div>
-                <button type="button" class="btn btn-primary w-100" onclick="calcularPrecoIdeal()">
+                <button type="button" class="btn btn-primary w-100" data-pricing-cmd="calcularPrecoIdeal">
                     <i class="bi bi-calculator me-1"></i> Calcular
                 </button>
 
@@ -1465,7 +1491,7 @@ $accountId = SessionHelper::getActiveAccountId();
                         </div>
 
                         <div class="mt-4">
-                            <button type="button" class="btn btn-primary" onclick="salvarConfigOptimizer()">
+                            <button type="button" class="btn btn-primary" data-pricing-cmd="salvarConfigOptimizer">
                                 <i class="bi bi-check-lg me-1"></i> Salvar Configuração
                             </button>
                         </div>
@@ -1478,7 +1504,7 @@ $accountId = SessionHelper::getActiveAccountId();
                             Execute a otimização manualmente para analisar todos os itens e gerar sugestões de preço.
                         </div>
 
-                        <button type="button" class="btn btn-success btn-lg mb-4" onclick="executarOptimizer()">
+                        <button type="button" class="btn btn-success btn-lg mb-4" data-pricing-cmd="executarOptimizer">
                             <i class="bi bi-play-fill me-1"></i> Executar Otimização
                         </button>
 
@@ -1546,10 +1572,10 @@ $accountId = SessionHelper::getActiveAccountId();
                     <div class="tab-pane fade show active" id="abtest-list">
                         <div class="mb-3">
                             <div class="btn-group">
-                                <button class="btn btn-sm btn-outline-secondary active" onclick="filtrarAbTests('all')">Todos</button>
-                                <button class="btn btn-sm btn-outline-success" onclick="filtrarAbTests('running')">Em Execução</button>
-                                <button class="btn btn-sm btn-outline-warning" onclick="filtrarAbTests('draft')">Rascunho</button>
-                                <button class="btn btn-sm btn-outline-primary" onclick="filtrarAbTests('completed')">Finalizados</button>
+                                <button class="btn btn-sm btn-outline-secondary active" data-pricing-cmd="filtrarAbTests" data-pricing-args='["all"]'>Todos</button>
+                                <button class="btn btn-sm btn-outline-success" data-pricing-cmd="filtrarAbTests" data-pricing-args='["running"]'>Em Execução</button>
+                                <button class="btn btn-sm btn-outline-warning" data-pricing-cmd="filtrarAbTests" data-pricing-args='["draft"]'>Rascunho</button>
+                                <button class="btn btn-sm btn-outline-primary" data-pricing-cmd="filtrarAbTests" data-pricing-args='["completed"]'>Finalizados</button>
                             </div>
                         </div>
                         <div id="abTestList">
@@ -1562,7 +1588,7 @@ $accountId = SessionHelper::getActiveAccountId();
 
                     <!-- Novo Teste -->
                     <div class="tab-pane fade" id="abtest-new">
-                        <form id="newAbTestForm" onsubmit="criarAbTest(event)">
+                        <form id="newAbTestForm" data-pricing-submit="criarAbTest" data-pricing-pass-event="1">
                             <div class="row g-3">
                                 <div class="col-md-6">
                                     <label class="form-label">Nome do Teste *</label>
@@ -1689,13 +1715,13 @@ $accountId = SessionHelper::getActiveAccountId();
                                 <div class="input-group">
                                     <input type="text" class="form-control" id="watchlistItemId" placeholder="ID do item (MLB...)">
                                     <input type="text" class="form-control" id="watchlistKeywords" placeholder="Palavras-chave (opcional)">
-                                    <button class="btn btn-primary" onclick="adicionarWatchlist()">
+                                    <button class="btn btn-primary" data-pricing-cmd="adicionarWatchlist">
                                         <i class="bi bi-plus"></i> Adicionar
                                     </button>
                                 </div>
                             </div>
                             <div class="col-md-4 text-end">
-                                <button class="btn btn-outline-secondary" onclick="carregarWatchlist()">
+                                <button class="btn btn-outline-secondary" data-pricing-cmd="carregarWatchlist">
                                     <i class="bi bi-arrow-clockwise"></i> Atualizar
                                 </button>
                             </div>
@@ -1720,7 +1746,7 @@ $accountId = SessionHelper::getActiveAccountId();
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">&nbsp;</label>
-                                <button class="btn btn-primary w-100" onclick="escanearConcorrentes()">
+                                <button class="btn btn-primary w-100" data-pricing-cmd="escanearConcorrentes">
                                     <i class="bi bi-search"></i> Escanear
                                 </button>
                             </div>
@@ -1737,12 +1763,12 @@ $accountId = SessionHelper::getActiveAccountId();
                     <div class="tab-pane fade" id="monitor-alerts">
                         <div class="mb-3">
                             <div class="btn-group btn-group-sm">
-                                <button class="btn btn-outline-secondary active" onclick="filtrarAlertas('all')">Todos</button>
-                                <button class="btn btn-outline-danger" onclick="filtrarAlertas('critical')">Críticos</button>
-                                <button class="btn btn-outline-warning" onclick="filtrarAlertas('high')">Altos</button>
-                                <button class="btn btn-outline-info" onclick="filtrarAlertas('medium')">Médios</button>
+                                <button class="btn btn-outline-secondary active" data-pricing-cmd="filtrarAlertas" data-pricing-args='["all"]'>Todos</button>
+                                <button class="btn btn-outline-danger" data-pricing-cmd="filtrarAlertas" data-pricing-args='["critical"]'>Críticos</button>
+                                <button class="btn btn-outline-warning" data-pricing-cmd="filtrarAlertas" data-pricing-args='["high"]'>Altos</button>
+                                <button class="btn btn-outline-info" data-pricing-cmd="filtrarAlertas" data-pricing-args='["medium"]'>Médios</button>
                             </div>
-                            <button class="btn btn-sm btn-outline-primary float-end" onclick="marcarTodosAlertasLidos()">
+                            <button class="btn btn-sm btn-outline-primary float-end" data-pricing-cmd="marcarTodosAlertasLidos">
                                 <i class="bi bi-check-all"></i> Marcar todos como lidos
                             </button>
                         </div>
@@ -1760,7 +1786,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                 <input type="text" class="form-control" id="analysisItemId" placeholder="ID do item para análise de mercado">
                             </div>
                             <div class="col-md-4">
-                                <button class="btn btn-primary" onclick="carregarAnalise()">
+                                <button class="btn btn-primary" data-pricing-cmd="carregarAnalise">
                                     <i class="bi bi-bar-chart"></i> Analisar Mercado
                                 </button>
                             </div>
@@ -1830,7 +1856,7 @@ $accountId = SessionHelper::getActiveAccountId();
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label">&nbsp;</label>
-                                <button class="btn btn-primary w-100" onclick="obterSugestaoIA()">
+                                <button class="btn btn-primary w-100" data-pricing-cmd="obterSugestaoIA">
                                     <i class="bi bi-cpu"></i> Analisar
                                 </button>
                             </div>
@@ -1852,7 +1878,7 @@ $accountId = SessionHelper::getActiveAccountId();
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">&nbsp;</label>
-                                <button class="btn btn-primary w-100" onclick="analisarElasticidade()">
+                                <button class="btn btn-primary w-100" data-pricing-cmd="analisarElasticidade">
                                     <i class="bi bi-graph-down"></i> Analisar Elasticidade
                                 </button>
                             </div>
@@ -1879,7 +1905,7 @@ $accountId = SessionHelper::getActiveAccountId();
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">&nbsp;</label>
-                                <button class="btn btn-primary w-100" onclick="preverReceita()">
+                                <button class="btn btn-primary w-100" data-pricing-cmd="preverReceita">
                                     <i class="bi bi-calculator"></i> Prever
                                 </button>
                             </div>
@@ -1915,7 +1941,7 @@ $accountId = SessionHelper::getActiveAccountId();
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">&nbsp;</label>
-                                <button class="btn btn-primary w-100" onclick="calcularPricingDinamico()">
+                                <button class="btn btn-primary w-100" data-pricing-cmd="calcularPricingDinamico">
                                     <i class="bi bi-lightning"></i> Calcular
                                 </button>
                             </div>
@@ -1986,7 +2012,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                     <option value="category_position">Por Posição</option>
                                 </select>
                             </div>
-                            <button class="btn btn-primary btn-sm" onclick="executeAllEngineRules()">
+                            <button class="btn btn-primary btn-sm" data-pricing-cmd="executeAllEngineRules">
                                 <i class="bi bi-play-fill me-1"></i>Executar Todas
                             </button>
                         </div>
@@ -2005,7 +2031,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label">Tipo</label>
-                                    <select class="form-select" id="ruleType" onchange="updateRuleConfigUI()">
+                                    <select class="form-select" id="ruleType" data-pricing-change="updateRuleConfigUI">
                                         <option value="match_competitor">Igualar Concorrente</option>
                                         <option value="floor_ceiling">Piso/Teto</option>
                                         <option value="time_based">Por Horário</option>
@@ -2047,7 +2073,7 @@ $accountId = SessionHelper::getActiveAccountId();
                             </div>
                             <div class="col-md-4">
                                 <label class="form-label">&nbsp;</label>
-                                <button class="btn btn-primary w-100" onclick="simulateEngineRules()">
+                                <button class="btn btn-primary w-100" data-pricing-cmd="simulateEngineRules">
                                     <i class="bi bi-play-fill me-1"></i>Simular
                                 </button>
                             </div>
@@ -2126,7 +2152,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label">Tipo</label>
-                                    <select class="form-select" id="scheduleType" onchange="toggleScheduleRecurrence()">
+                                    <select class="form-select" id="scheduleType" data-pricing-change="toggleScheduleRecurrence">
                                         <option value="single">Único</option>
                                         <option value="recurrent">Recorrente</option>
                                     </select>
@@ -2172,7 +2198,7 @@ $accountId = SessionHelper::getActiveAccountId();
                     </div>
                     <div class="tab-pane fade" id="schedules-campaigns">
                         <div class="mb-3">
-                            <button class="btn btn-success btn-sm" onclick="showCreateCampaignForm()">
+                            <button class="btn btn-success btn-sm" data-pricing-cmd="showCreateCampaignForm">
                                 <i class="bi bi-plus-lg me-1"></i>Nova Campanha
                             </button>
                         </div>
@@ -2226,7 +2252,7 @@ $accountId = SessionHelper::getActiveAccountId();
                     <div class="tab-pane fade show active" id="analytics-dashboard">
                         <div class="row mb-3">
                             <div class="col-md-4">
-                                <select class="form-select" id="analyticsPeriod" onchange="loadAnalyticsDashboard()">
+                                <select class="form-select" id="analyticsPeriod" data-pricing-change="loadAnalyticsDashboard">
                                     <option value="7d">Últimos 7 dias</option>
                                     <option value="30d" selected>Últimos 30 dias</option>
                                     <option value="90d">Últimos 90 dias</option>
@@ -2250,7 +2276,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                 </select>
                             </div>
                             <div class="col-md-3">
-                                <button class="btn btn-info w-100" onclick="loadPriceTrend()">
+                                <button class="btn btn-info w-100" data-pricing-cmd="loadPriceTrend">
                                     <i class="bi bi-graph-up me-1"></i>Analisar
                                 </button>
                             </div>
@@ -2265,7 +2291,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                 <input type="text" class="form-control" id="elasticityItemId" placeholder="ID do Item">
                             </div>
                             <div class="col-md-4">
-                                <button class="btn btn-info w-100" onclick="analyzeElasticity()">
+                                <button class="btn btn-info w-100" data-pricing-cmd="analyzeElasticity">
                                     <i class="bi bi-arrow-left-right me-1"></i>Calcular Elasticidade
                                 </button>
                             </div>
@@ -2295,7 +2321,7 @@ $accountId = SessionHelper::getActiveAccountId();
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label">&nbsp;</label>
-                                <button class="btn btn-info w-100" onclick="calculateROI()">
+                                <button class="btn btn-info w-100" data-pricing-cmd="calculateROI">
                                     <i class="bi bi-calculator me-1"></i>Calcular ROI
                                 </button>
                             </div>
@@ -2315,7 +2341,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                 </select>
                             </div>
                             <div class="col-md-3">
-                                <button class="btn btn-info w-100" onclick="forecastPrice()">
+                                <button class="btn btn-info w-100" data-pricing-cmd="forecastPrice">
                                     <i class="bi bi-stars me-1"></i>Prever
                                 </button>
                             </div>
@@ -2348,7 +2374,7 @@ $accountId = SessionHelper::getActiveAccountId();
                 <div class="row g-3 mb-4">
                     <div class="col-md-6">
                         <label class="form-label">Operação</label>
-                        <select class="form-select" id="bulkOperation" onchange="updateBulkValueLabel()">
+                        <select class="form-select" id="bulkOperation" data-pricing-change="updateBulkValueLabel">
                             <option value="percent_increase">Aumentar % </option>
                             <option value="percent_decrease">Diminuir %</option>
                             <option value="fixed_increase">Aumentar R$</option>
@@ -2383,10 +2409,10 @@ $accountId = SessionHelper::getActiveAccountId();
                 </div>
 
                 <div class="d-flex gap-2 mb-3">
-                    <button class="btn btn-primary" onclick="previewBulkEdit()">
+                    <button class="btn btn-primary" data-pricing-cmd="previewBulkEdit">
                         <i class="bi bi-eye me-1"></i>Preview
                     </button>
-                    <button class="btn btn-success" onclick="applyBulkEdit()" id="applyBulkBtn" disabled>
+                    <button class="btn btn-success" data-pricing-cmd="applyBulkEdit" id="applyBulkBtn" disabled>
                         <i class="bi bi-check-lg me-1"></i>Aplicar
                     </button>
                 </div>
@@ -2447,7 +2473,7 @@ $accountId = SessionHelper::getActiveAccountId();
                 <div class="tab-content">
                     <div class="tab-pane fade show active" id="notif-channels">
                         <div class="mb-3">
-                            <button class="btn btn-success btn-sm" onclick="showCreateChannelForm()">
+                            <button class="btn btn-success btn-sm" data-pricing-cmd="showCreateChannelForm">
                                 <i class="bi bi-plus-lg me-1"></i>Novo Canal
                             </button>
                         </div>
@@ -2462,7 +2488,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label">Tipo</label>
-                                    <select class="form-select" id="channelType" onchange="updateChannelConfigForm()">
+                                    <select class="form-select" id="channelType" data-pricing-change="updateChannelConfigForm">
                                         <option value="email">Email</option>
                                         <option value="webhook">Webhook</option>
                                         <option value="slack">Slack</option>
@@ -2474,10 +2500,10 @@ $accountId = SessionHelper::getActiveAccountId();
                                     <input type="email" class="form-control" id="channelConfigEmail">
                                 </div>
                                 <div class="col-12">
-                                    <button class="btn btn-success btn-sm" onclick="createNotificationChannel()">
+                                    <button class="btn btn-success btn-sm" data-pricing-cmd="createNotificationChannel">
                                         <i class="bi bi-check-lg me-1"></i>Criar
                                     </button>
-                                    <button class="btn btn-secondary btn-sm" onclick="hideCreateChannelForm()">Cancelar</button>
+                                    <button class="btn btn-secondary btn-sm" data-pricing-cmd="hideCreateChannelForm">Cancelar</button>
                                 </div>
                             </div>
                         </div>
@@ -2583,6 +2609,115 @@ $accountId = SessionHelper::getActiveAccountId();
     const API_BASE = HAS_ACCOUNT_ID ? `/api/pricing-intelligence/${ACCOUNT_ID}` : null;
     const MAX_AGENT_LOG_QUERY_LENGTH = 1800;
 
+    // CSP-safe command bus (substitui onclick/onchange/onsubmit inline)
+    function resolvePricingCmdArgs(el, event) {
+        const argsJson = el.getAttribute('data-pricing-args');
+        if (argsJson) {
+            try {
+                const parsed = JSON.parse(argsJson);
+                return Array.isArray(parsed) ? parsed.map((v) => (v && v.__event ? event : v)) : [parsed];
+            } catch (_) {
+                /* fall through */
+            }
+        }
+        const numbered = [];
+        for (let i = 0; i < 8; i++) {
+            if (!el.hasAttribute(`data-pricing-arg${i}`)) break;
+            let raw = el.getAttribute(`data-pricing-arg${i}`);
+            if (raw === 'true') numbered.push(true);
+            else if (raw === 'false') numbered.push(false);
+            else if (raw === 'null') numbered.push(null);
+            else if (raw !== '' && !Number.isNaN(Number(raw)) && /^-?\d+(\.\d+)?$/.test(raw)) numbered.push(Number(raw));
+            else numbered.push(raw);
+        }
+        if (numbered.length) return numbered;
+
+        const raw = el.getAttribute('data-pricing-args-raw');
+        if (raw == null || raw === '') {
+            return el.hasAttribute('data-pricing-pass-event') ? [event] : [];
+        }
+        // Ex.: "123", "123, true", "'MLB1', 9.9", "123, this.checked"
+        const parts = [];
+        let cur = '';
+        let inQuote = null;
+        for (let i = 0; i < raw.length; i++) {
+            const ch = raw[i];
+            if (inQuote) {
+                cur += ch;
+                if (ch === inQuote) inQuote = null;
+                continue;
+            }
+            if (ch === "'" || ch === '"') {
+                inQuote = ch;
+                cur += ch;
+                continue;
+            }
+            if (ch === ',') {
+                parts.push(cur.trim());
+                cur = '';
+                continue;
+            }
+            cur += ch;
+        }
+        if (cur.trim() !== '') parts.push(cur.trim());
+
+        return parts.map((p) => {
+            if (p === 'event' || p === 'e') return event;
+            if (p === 'this') return el;
+            if (p === 'this.checked') return !!el.checked;
+            if (p === 'this.value') return el.value;
+            if (p === 'true') return true;
+            if (p === 'false') return false;
+            if (p === 'null') return null;
+            if ((p.startsWith("'") && p.endsWith("'")) || (p.startsWith('"') && p.endsWith('"'))) {
+                return p.slice(1, -1);
+            }
+            if (/^-?\d+(\.\d+)?$/.test(p)) return Number(p);
+            return p;
+        });
+    }
+
+    function invokePricingCommand(el, event, attrName) {
+        const fnName = el.getAttribute(attrName);
+        if (!fnName) return false;
+        const fn = window[fnName];
+        if (typeof fn !== 'function') {
+            console.warn('[pricing] comando não encontrado:', fnName);
+            return false;
+        }
+        if (el.hasAttribute('data-pricing-prevent') || el.tagName === 'A') {
+            event.preventDefault();
+        }
+        const args = resolvePricingCmdArgs(el, event);
+        fn.apply(el, args);
+        return true;
+    }
+
+    if (!window.__pricingCmdBusBound) {
+        window.__pricingCmdBusBound = true;
+        document.addEventListener('click', function(event) {
+            const el = event.target.closest('[data-pricing-cmd]');
+            if (!el) return;
+            invokePricingCommand(el, event, 'data-pricing-cmd');
+        });
+        document.addEventListener('change', function(event) {
+            const el = event.target.closest('[data-pricing-change]');
+            if (!el) return;
+            invokePricingCommand(el, event, 'data-pricing-change');
+        });
+        document.addEventListener('input', function(event) {
+            const el = event.target.closest('[data-pricing-input]');
+            if (!el) return;
+            invokePricingCommand(el, event, 'data-pricing-input');
+        });
+        document.addEventListener('submit', function(event) {
+            const el = event.target.closest('[data-pricing-submit]');
+            if (!el) return;
+            event.preventDefault();
+            invokePricingCommand(el, event, 'data-pricing-submit');
+        });
+    }
+
     let currentPage = 1;
     let totalPages = 1;
     let currentItemId = null;
@@ -2593,7 +2728,7 @@ $accountId = SessionHelper::getActiveAccountId();
     // Inicialização
     document.addEventListener('DOMContentLoaded', async function() {
         if (!HAS_ACCOUNT_ID) {
-            showToast('Selecione uma conta Mercado Livre para usar o módulo de precificação.', 'warning');
+            // Empty-state já vem do HTML (banner + tabela). Evita toast efêmero + spinner eterno.
             return;
         }
 
@@ -2603,6 +2738,59 @@ $accountId = SessionHelper::getActiveAccountId();
         loadItems();
         loadDashboardStats();
         loadAdvancedMetrics();
+
+        // CSP bloqueia onclick inline — delegação no tbody
+        const itemsTableBody = document.getElementById('itemsTableBody');
+        if (itemsTableBody && !itemsTableBody.dataset.pricingActionsBound) {
+            itemsTableBody.dataset.pricingActionsBound = '1';
+            itemsTableBody.addEventListener('click', function(event) {
+                const btn = event.target.closest('[data-action="precificar"]');
+                if (!btn || !itemsTableBody.contains(btn)) return;
+                event.preventDefault();
+                const itemId = btn.getAttribute('data-item-id');
+                if (itemId) {
+                    abrirPrecificador(itemId);
+                }
+            });
+        }
+
+        // CSP-safe: simulador do modal (inputs/botões sem oninput/onclick)
+        const pricingModalEl = document.getElementById('pricingModal');
+        if (pricingModalEl && !pricingModalEl.dataset.pricingSimBound) {
+            pricingModalEl.dataset.pricingSimBound = '1';
+            pricingModalEl.addEventListener('input', function(event) {
+                const target = event.target;
+                if (!(target instanceof HTMLElement)) return;
+                if (target.matches('[data-pricing-simulate]')) {
+                    calcularSimulacao();
+                    return;
+                }
+                if (target.id === 'promoDesconto' || target.matches('[data-pricing-promo-range]')) {
+                    updatePromoPreview();
+                }
+            });
+            pricingModalEl.addEventListener('click', function(event) {
+                const btn = event.target.closest('[data-pricing-action]');
+                if (!btn || !pricingModalEl.contains(btn)) return;
+                const action = btn.getAttribute('data-pricing-action');
+                if (action === 'salvar-custos') {
+                    event.preventDefault();
+                    salvarCustos();
+                } else if (action === 'aplicar-preco') {
+                    event.preventDefault();
+                    aplicarPreco();
+                } else if (action === 'simular-promocao') {
+                    event.preventDefault();
+                    simularPromocao();
+                } else if (action === 'simular-central-ofertas') {
+                    event.preventDefault();
+                    simularCentralOfertas();
+                } else if (action === 'criar-regra') {
+                    event.preventDefault();
+                    criarRegraAutomatica();
+                }
+            });
+        }
 
         // Enter no campo de busca
         document.getElementById('searchInput').addEventListener('keypress', function(e) {
@@ -2743,7 +2931,7 @@ $accountId = SessionHelper::getActiveAccountId();
                 <a href="/auth/authorize" class="btn btn-sm btn-primary">
                     <i class="bi bi-box-arrow-in-right me-1"></i> Reconectar Conta
                 </a>
-                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="togglePreviewMode()">
+                <button type="button" class="btn btn-sm btn-outline-secondary" data-pricing-cmd="togglePreviewMode">
                     <i class="bi bi-eye me-1"></i> ${previewMode ? 'Tentar API Real' : 'Usar Preview Local'}
                 </button>
             </div>
@@ -2843,6 +3031,15 @@ $accountId = SessionHelper::getActiveAccountId();
     }
 
     // Renderizar tabela
+    function escapeHtml(value) {
+        return String(value ?? '')
+            .replace(/&/g, '&amp;')
+            .replace(/</g, '&lt;')
+            .replace(/>/g, '&gt;')
+            .replace(/"/g, '&quot;')
+            .replace(/'/g, '&#39;');
+    }
+
     function renderItems(items) {
         const tbody = document.getElementById('itemsTableBody');
 
@@ -2853,7 +3050,7 @@ $accountId = SessionHelper::getActiveAccountId();
                     <i class="bi bi-inbox fs-1 text-muted"></i>
                     <p class="mt-2 mb-0 text-muted">Nenhum anúncio encontrado</p>
                     <p class="small text-muted">
-                        ${previewMode ? '' : '<a href="#" onclick="togglePreviewMode(); return false;">Clique aqui para usar preview local</a>'}
+                        ${previewMode ? '' : '<a href="#" data-pricing-cmd="togglePreviewMode" data-pricing-prevent="1">Clique aqui para usar preview local</a>'}
                     </p>
                 </td>
             </tr>
@@ -2861,18 +3058,24 @@ $accountId = SessionHelper::getActiveAccountId();
             return;
         }
 
-        tbody.innerHTML = items.map(item => `
+        tbody.innerHTML = items.map(item => {
+            const safeId = escapeHtml(item.id);
+            const safeTitle = escapeHtml(item.titulo);
+            const safeSku = item.sku ? escapeHtml(item.sku) : '';
+            const safeThumb = escapeHtml(item.thumbnail || '/images/no-image.png');
+            const safeIndicador = escapeHtml(item.indicador || 'cinza');
+            return `
         <tr>
             <td>
-                <img src="${item.thumbnail || '/images/no-image.png'}"
-                     class="rounded" style="width: 50px; height: 50px; object-fit: cover;">
+                <img src="${safeThumb}"
+                     class="rounded" style="width: 50px; height: 50px; object-fit: cover;" alt="">
             </td>
             <td>
-                <div class="fw-semibold text-truncate" style="max-width: 300px;" title="${item.titulo}">
-                    ${item.titulo}
+                <div class="fw-semibold text-truncate" style="max-width: 300px;" title="${safeTitle}">
+                    ${safeTitle}
                 </div>
                 <small class="text-muted">
-                    ${item.id} ${item.sku ? `• SKU: ${item.sku}` : ''}
+                    ${safeId} ${safeSku ? `• SKU: ${safeSku}` : ''}
                 </small>
             </td>
             <td class="text-center">
@@ -2885,33 +3088,36 @@ $accountId = SessionHelper::getActiveAccountId();
                 }
             </td>
             <td class="text-center">
-                ${item.margem !== null
-                    ? `<span class="margin-indicator ${item.indicador}"></span>${formatNumber(item.margem)}%`
+                ${item.margem !== null && item.margem !== undefined
+                    ? `<span class="margin-indicator ${safeIndicador}"></span>${formatNumber(item.margem)}%`
                     : '<span class="badge bg-secondary">Configurar</span>'
                 }
             </td>
             <td class="text-center">
-                ${item.lucro_unitario !== null
+                ${item.lucro_unitario !== null && item.lucro_unitario !== undefined
                     ? `<span class="${item.lucro_unitario >= 0 ? 'text-success' : 'text-danger'}">
                          R$ ${formatNumber(item.lucro_unitario)}
                        </span>`
-                    : '-'
+                    : '<span class="text-muted">-</span>'
                 }
             </td>
             <td class="text-center">
                 <span class="badge bg-light text-dark">${item.vendidos || 0}</span>
             </td>
-            <td class="text-center">
-                <button class="btn btn-sm btn-primary" onclick="abrirPrecificador('${item.id}')" title="Precificador">
-                    <i class="bi bi-calculator"></i>
+            <td class="text-center text-nowrap" data-pricing-col="actions">
+                <button type="button" class="btn btn-sm btn-primary" data-action="precificar" data-item-id="${safeId}" title="Precificar" aria-label="Precificar">
+                    <i class="bi bi-calculator" aria-hidden="true"></i>
+                    <span class="ms-1">Precificar</span>
                 </button>
-                <a href="${mlItemUrl(item.id)}" target="_blank"
-                   class="btn btn-sm btn-outline-secondary" title="Ver no ML">
-                    <i class="bi bi-box-arrow-up-right"></i>
+                <a href="${mlItemUrl(item.id)}" target="_blank" rel="noopener noreferrer"
+                   class="btn btn-sm btn-outline-secondary" title="Ver no ML" aria-label="Ver no Mercado Livre">
+                    <i class="bi bi-box-arrow-up-right" aria-hidden="true"></i>
+                    <span class="ms-1">ML</span>
                 </a>
             </td>
         </tr>
-    `).join('');
+    `;
+        }).join('');
     }
 
     // Abrir modal do precificador
@@ -2962,6 +3168,9 @@ $accountId = SessionHelper::getActiveAccountId();
             showToast('Erro ao carregar dados', 'danger');
         }
     }
+    // Expor para handlers (CSP bloqueia onclick inline)
+    window.abrirPrecificador = abrirPrecificador;
+    window.calcularSimulacao = calcularSimulacao;
 
     // Calcular simulação em tempo real
     async function calcularSimulacao() {
@@ -3080,7 +3289,7 @@ $accountId = SessionHelper::getActiveAccountId();
                 const container = document.getElementById('discountScenarios');
                 container.innerHTML = data.cenarios.map(c => `
                 <span class="badge border discount-badge ${c.viavel ? 'viable text-success' : 'not-viable text-danger'}"
-                      onclick="aplicarDesconto(${c.preco})" title="Margem: ${formatNumber(c.margem)}%">
+                      data-pricing-cmd="aplicarDesconto" data-pricing-arg0="${c.preco}" title="Margem: ${formatNumber(c.margem)}%">
                     -${c.desconto}%<br>
                     <small>R$ ${formatNumber(c.preco)}</small>
                 </span>
@@ -3095,6 +3304,7 @@ $accountId = SessionHelper::getActiveAccountId();
         document.getElementById('newPriceInput').value = preco.toFixed(2);
         calcularSimulacao();
     }
+    window.aplicarDesconto = aplicarDesconto;
 
     // Salvar custos
     async function salvarCustos() {
@@ -3142,11 +3352,14 @@ $accountId = SessionHelper::getActiveAccountId();
         btn.innerHTML = '<span class="spinner-border spinner-border-sm me-1"></span> Aplicando...';
 
         try {
+            const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
+            const pricingHeaders = {
+                'Content-Type': 'application/json',
+                'X-CSRF-TOKEN': csrfToken
+            };
             const response = await fetch(`${API_BASE}/apply/${currentItemId}`, {
                 method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
+                headers: pricingHeaders,
                 body: JSON.stringify({
                     novo_preco: novoPreco,
                     motivo: 'Ajuste via Precificador Inteligente'
@@ -3160,15 +3373,14 @@ $accountId = SessionHelper::getActiveAccountId();
                 loadItems(currentPage);
             } else if (data.warning) {
                 if (confirm(`${data.message}\n\nDeseja aplicar mesmo assim?`)) {
-                    // Forçar aplicação
+                    // Forçar aplicação (exige confirm_risk no backend)
                     const forceResponse = await fetch(`${API_BASE}/apply/${currentItemId}`, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
+                        headers: pricingHeaders,
                         body: JSON.stringify({
                             novo_preco: novoPreco,
-                            force: true
+                            force: true,
+                            confirm_risk: true
                         })
                     });
                     const forceData = await forceResponse.json();
@@ -3189,6 +3401,8 @@ $accountId = SessionHelper::getActiveAccountId();
             btn.innerHTML = '<i class="bi bi-check-lg me-1"></i> Aplicar Preço no ML';
         }
     }
+    window.salvarCustos = salvarCustos;
+    window.aplicarPreco = aplicarPreco;
 
     // Carregar dados de concorrência
     async function loadCompetitorData(categoryId) {
@@ -3394,17 +3608,17 @@ $accountId = SessionHelper::getActiveAccountId();
         let html = '';
 
         if (current > 1) {
-            html += `<li class="page-item"><a class="page-link" href="#" onclick="loadItems(${current-1})">«</a></li>`;
+            html += `<li class="page-item"><a class="page-link" href="#" data-pricing-cmd="loadItems" data-pricing-arg0="${current-1}">«</a></li>`;
         }
 
         for (let i = Math.max(1, current - 2); i <= Math.min(total, current + 2); i++) {
             html += `<li class="page-item ${i === current ? 'active' : ''}">
-            <a class="page-link" href="#" onclick="loadItems(${i})">${i}</a>
+            <a class="page-link" href="#" data-pricing-cmd="loadItems" data-pricing-arg0="${i}">${i}</a>
         </li>`;
         }
 
         if (current < total) {
-            html += `<li class="page-item"><a class="page-link" href="#" onclick="loadItems(${current+1})">»</a></li>`;
+            html += `<li class="page-item"><a class="page-link" href="#" data-pricing-cmd="loadItems" data-pricing-arg0="${current+1}">»</a></li>`;
         }
 
         pagination.innerHTML = html;
@@ -4010,6 +4224,11 @@ $accountId = SessionHelper::getActiveAccountId();
         }
     }
 
+    window.updatePromoPreview = updatePromoPreview;
+    window.simularPromocao = simularPromocao;
+    window.simularCentralOfertas = simularCentralOfertas;
+    window.criarRegraAutomatica = criarRegraAutomatica;
+
     async function loadRegrasAtivas() {
         try {
             const response = await fetch(`${API_BASE}/rules`);
@@ -4041,7 +4260,7 @@ $accountId = SessionHelper::getActiveAccountId();
                 <div class="form-check form-switch">
                     <input class="form-check-input" type="checkbox"
                            ${r.ativa ? 'checked' : ''}
-                           onchange="toggleRegra(${r.id}, this.checked)">
+                           data-pricing-change="toggleRegra" data-pricing-args-raw="${r.id}, this.checked">
                 </div>
             </div>
         </div>
@@ -4244,7 +4463,7 @@ $accountId = SessionHelper::getActiveAccountId();
                         <strong>Ação necessária:</strong> Reconecte sua conta para acessar dados reais.
                     </div>
                     <div class="d-flex gap-2 mt-3">
-                        <button type="button" class="btn btn-sm btn-primary" onclick="renovarTokenML()">
+                        <button type="button" class="btn btn-sm btn-primary" data-pricing-cmd="renovarTokenML">
                             <i class="bi bi-arrow-repeat me-1"></i> Tentar Renovar Token
                         </button>
                         <a href="/auth/authorize" class="btn btn-sm btn-outline-primary">
@@ -4364,7 +4583,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                     Cancelar
                                 </button>
                                 <button type="button" class="btn btn-danger" id="btnConfirmDelete" disabled
-                                        onclick="executarExclusaoConta()">
+                                        data-pricing-cmd="executarExclusaoConta">
                                     <i class="bi bi-trash me-1"></i> Excluir Permanentemente
                                 </button>
                             </div>
@@ -4936,7 +5155,7 @@ $accountId = SessionHelper::getActiveAccountId();
                                 <td>${a.valor_gatilho}%</td>
                                 <td>${a.ativo == 1 ? '<span class="badge bg-success">Ativo</span>' : '<span class="badge bg-secondary">Inativo</span>'}</td>
                                 <td>
-                                    <button class="btn btn-sm btn-outline-danger" onclick="removerAlerta(${a.id})">
+                                    <button class="btn btn-sm btn-outline-danger" data-pricing-cmd="removerAlerta" data-pricing-args-raw="${a.id}">
                                         <i class="bi bi-trash"></i>
                                     </button>
                                 </td>
@@ -5441,7 +5660,7 @@ $accountId = SessionHelper::getActiveAccountId();
             </div>
 
             <div class="col-12 text-end">
-                <button type="button" class="btn btn-primary" onclick="salvarConfigOptimizer()">
+                <button type="button" class="btn btn-primary" data-pricing-cmd="salvarConfigOptimizer">
                     <i class="bi bi-check-lg me-1"></i>Salvar Configuração
                 </button>
             </div>
@@ -5579,7 +5798,7 @@ $accountId = SessionHelper::getActiveAccountId();
                     <td><span class="${varClass}"><i class="bi bi-${varIcon}"></i> ${variacao}%</span></td>
                     <td><small>${item.reason || '-'}</small></td>
                     <td>
-                        <button class="btn btn-sm btn-success" onclick="aplicarSugestaoOptimizer('${item.item_id}', ${item.suggested_price})">
+                        <button class="btn btn-sm btn-success" data-pricing-cmd="aplicarSugestaoOptimizer" data-pricing-args-raw="'${item.item_id}', ${item.suggested_price}">
                             <i class="bi bi-check"></i>
                         </button>
                     </td>
@@ -5936,16 +6155,16 @@ $accountId = SessionHelper::getActiveAccountId();
 
             let actions = '';
             if (test.status === 'draft' || test.status === 'paused') {
-                actions += `<button class="btn btn-sm btn-success me-1" onclick="iniciarAbTest(${test.id})" title="Iniciar"><i class="bi bi-play"></i></button>`;
+                actions += `<button class="btn btn-sm btn-success me-1" data-pricing-cmd="iniciarAbTest" data-pricing-args-raw="${test.id}" title="Iniciar"><i class="bi bi-play"></i></button>`;
             }
             if (test.status === 'running') {
-                actions += `<button class="btn btn-sm btn-warning me-1" onclick="pausarAbTest(${test.id})" title="Pausar"><i class="bi bi-pause"></i></button>`;
-                actions += `<button class="btn btn-sm btn-primary me-1" onclick="finalizarAbTest(${test.id})" title="Finalizar"><i class="bi bi-check-lg"></i></button>`;
+                actions += `<button class="btn btn-sm btn-warning me-1" data-pricing-cmd="pausarAbTest" data-pricing-args-raw="${test.id}" title="Pausar"><i class="bi bi-pause"></i></button>`;
+                actions += `<button class="btn btn-sm btn-primary me-1" data-pricing-cmd="finalizarAbTest" data-pricing-args-raw="${test.id}" title="Finalizar"><i class="bi bi-check-lg"></i></button>`;
             }
             if (test.status !== 'completed' && test.status !== 'cancelled') {
-                actions += `<button class="btn btn-sm btn-outline-danger me-1" onclick="cancelarAbTest(${test.id})" title="Cancelar"><i class="bi bi-x"></i></button>`;
+                actions += `<button class="btn btn-sm btn-outline-danger me-1" data-pricing-cmd="cancelarAbTest" data-pricing-args-raw="${test.id}" title="Cancelar"><i class="bi bi-x"></i></button>`;
             }
-            actions += `<button class="btn btn-sm btn-info" onclick="analisarAbTest(${test.id})" title="Analisar"><i class="bi bi-graph-up"></i></button>`;
+            actions += `<button class="btn btn-sm btn-info" data-pricing-cmd="analisarAbTest" data-pricing-args-raw="${test.id}" title="Analisar"><i class="bi bi-graph-up"></i></button>`;
 
             html += `
             <tr>
@@ -6351,13 +6570,13 @@ $accountId = SessionHelper::getActiveAccountId();
                 <td><small>${item.last_scan || 'Nunca'}</small></td>
                 <td>
                     <div class="btn-group btn-group-sm">
-                        <button class="btn btn-outline-primary" onclick="escanearItem('${item.item_id}')" title="Escanear">
+                        <button class="btn btn-outline-primary" data-pricing-cmd="escanearItem" data-pricing-args='["${item.item_id}"]' title="Escanear">
                             <i class="bi bi-search"></i>
                         </button>
-                        <button class="btn btn-outline-info" onclick="verAnaliseItem('${item.item_id}')" title="Análise">
+                        <button class="btn btn-outline-info" data-pricing-cmd="verAnaliseItem" data-pricing-args='["${item.item_id}"]' title="Análise">
                             <i class="bi bi-bar-chart"></i>
                         </button>
-                        <button class="btn btn-outline-danger" onclick="removerWatchlist('${item.item_id}')" title="Remover">
+                        <button class="btn btn-outline-danger" data-pricing-cmd="removerWatchlist" data-pricing-args='["${item.item_id}"]' title="Remover">
                             <i class="bi bi-trash"></i>
                         </button>
                     </div>
@@ -7032,7 +7251,7 @@ $accountId = SessionHelper::getActiveAccountId();
         ` : ''}
 
         <div class="text-end mt-3">
-            <button class="btn btn-success" onclick="aplicarPrecoSugerido('${data.item_id}', ${data.suggested_price})">
+            <button class="btn btn-success" data-pricing-cmd="aplicarPrecoSugerido" data-pricing-args-raw="'${data.item_id}', ${data.suggested_price}">
                 <i class="bi bi-check-circle me-1"></i>Aplicar Preço Sugerido
             </button>
         </div>
@@ -7398,7 +7617,7 @@ $accountId = SessionHelper::getActiveAccountId();
         ` : ''}
 
         <div class="text-end mt-3">
-            <button class="btn btn-success" onclick="aplicarPrecoSugerido('${data.item_id || ''}', ${data.optimal_price || 0})">
+            <button class="btn btn-success" data-pricing-cmd="aplicarPrecoSugerido" data-pricing-args-raw="'${data.item_id || ''}', ${data.optimal_price || 0}">
                 <i class="bi bi-check-circle me-1"></i>Aplicar Preço Ótimo
             </button>
         </div>
@@ -7477,13 +7696,13 @@ $accountId = SessionHelper::getActiveAccountId();
                             <span class="badge bg-light text-dark">Prioridade: ${rule.priority}</span>
                         </div>
                         <div class="btn-group">
-                            <button class="btn btn-sm btn-outline-primary" onclick="toggleEngineRule(${rule.id}, ${!rule.active})" title="${rule.active ? 'Desativar' : 'Ativar'}">
+                            <button class="btn btn-sm btn-outline-primary" data-pricing-cmd="toggleEngineRule" data-pricing-args-raw="${rule.id}, ${!rule.active}" title="${rule.active ? 'Desativar' : 'Ativar'}">
                                 <i class="bi bi-${rule.active ? 'pause' : 'play'}"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-success" onclick="executeRuleForItems(${rule.id})" title="Executar">
+                            <button class="btn btn-sm btn-outline-success" data-pricing-cmd="executeRuleForItems" data-pricing-args-raw="${rule.id}" title="Executar">
                                 <i class="bi bi-lightning"></i>
                             </button>
-                            <button class="btn btn-sm btn-outline-danger" onclick="deleteEngineRule(${rule.id})" title="Excluir">
+                            <button class="btn btn-sm btn-outline-danger" data-pricing-cmd="deleteEngineRule" data-pricing-args-raw="${rule.id}" title="Excluir">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </div>
@@ -7530,7 +7749,7 @@ $accountId = SessionHelper::getActiveAccountId();
                             <span class="badge bg-primary">${getRuleTypeName(template.type)}</span>
                         </div>
                         <div class="card-footer">
-                            <button class="btn btn-sm btn-outline-primary" onclick="useRuleTemplate('${template.id}')">
+                            <button class="btn btn-sm btn-outline-primary" data-pricing-cmd="useRuleTemplate" data-pricing-args='["${template.id}"]'>
                                 <i class="bi bi-plus me-1"></i>Usar Template
                             </button>
                         </div>
@@ -7831,7 +8050,7 @@ $accountId = SessionHelper::getActiveAccountId();
                 <td>${date.toLocaleString('pt-BR')}</td>
                 <td>${statusBadge}</td>
                 <td>
-                    ${s.status === 'pending' ? `<button class="btn btn-xs btn-outline-danger" onclick="cancelSchedule(${s.id})"><i class="bi bi-x"></i></button>` : ''}
+                    ${s.status === 'pending' ? `<button class="btn btn-xs btn-outline-danger" data-pricing-cmd="cancelSchedule" data-pricing-args-raw="${s.id}"><i class="bi bi-x"></i></button>` : ''}
                 </td>
             </tr>`;
             });
@@ -8361,7 +8580,7 @@ $accountId = SessionHelper::getActiveAccountId();
                             <br><small>${b.items_count} itens</small>
                         </div>
                         ${canRollback ? `
-                            <button class="btn btn-xs btn-outline-warning" onclick="rollbackBulkBatch(${b.id})">
+                            <button class="btn btn-xs btn-outline-warning" data-pricing-cmd="rollbackBulkBatch" data-pricing-args-raw="${b.id}">
                                 <i class="bi bi-arrow-counterclockwise"></i> Reverter
                             </button>
                         ` : ''}
@@ -8434,10 +8653,10 @@ $accountId = SessionHelper::getActiveAccountId();
                             <br><small class="text-muted">${ch.config?.email || ch.config?.url || ''}</small>
                         </div>
                         <div class="btn-group">
-                            <button class="btn btn-xs btn-outline-primary" onclick="testNotificationChannel(${ch.id})" title="Testar">
+                            <button class="btn btn-xs btn-outline-primary" data-pricing-cmd="testNotificationChannel" data-pricing-args-raw="${ch.id}" title="Testar">
                                 <i class="bi bi-send"></i>
                             </button>
-                            <button class="btn btn-xs btn-outline-danger" onclick="deleteNotificationChannel(${ch.id})" title="Excluir">
+                            <button class="btn btn-xs btn-outline-danger" data-pricing-cmd="deleteNotificationChannel" data-pricing-args-raw="${ch.id}" title="Excluir">
                                 <i class="bi bi-trash"></i>
                             </button>
                         </div>
@@ -8616,5 +8835,5 @@ $accountId = SessionHelper::getActiveAccountId();
 
 <?php
 $content = ob_get_clean();
-include __DIR__ . '/../layouts/app.php';
+include __DIR__ . '/../layouts/modern/app.php';
 ?>

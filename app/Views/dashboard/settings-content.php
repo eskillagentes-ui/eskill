@@ -61,6 +61,34 @@
             </div>
         </div>
 
+        <!-- Fiscal / precificação -->
+        <div class="card mb-4">
+            <div class="card-header">
+                <h6 class="mb-0"><i class="bi bi-percent me-2"></i>Fiscal e margem</h6>
+            </div>
+            <div class="card-body">
+                <p class="text-muted small mb-3">
+                    Usado em Vendas e Pricing quando o pedido não traz imposto da API do ML.
+                    Simples Nacional costuma usar ~9%.
+                </p>
+                <div class="row g-3 align-items-end">
+                    <div class="col-md-4">
+                        <label class="form-label small" for="default-tax-rate">Alíquota padrão de imposto (%)</label>
+                        <input type="number" class="form-control form-control-sm" id="default-tax-rate" min="0" max="100" step="0.01" value="0">
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small" for="min-margin-percent">Margem mínima (%)</label>
+                        <input type="number" class="form-control form-control-sm" id="min-margin-percent" min="0" max="100" step="0.01" value="0">
+                    </div>
+                    <div class="col-md-4">
+                        <button type="button" class="btn btn-primary btn-sm w-100" id="btn-save-global-settings">
+                            <i class="bi bi-save me-1"></i>Salvar
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
         <!-- Notificações em Tempo Real com Áudio -->
         <div class="card mb-4">
             <div class="card-header d-flex justify-content-between align-items-center">
@@ -548,7 +576,45 @@
 
         // Carregar contas do Mercado Livre
         loadMLAccounts();
+
+        loadGlobalSettings();
+        document.getElementById('btn-save-global-settings')?.addEventListener('click', saveGlobalSettings);
     });
+
+    async function loadGlobalSettings() {
+        try {
+            const data = await requestJson('/api/settings/global');
+            const settings = data.settings || {};
+            const taxEl = document.getElementById('default-tax-rate');
+            const marginEl = document.getElementById('min-margin-percent');
+            if (taxEl) taxEl.value = settings.default_tax_rate ?? 0;
+            if (marginEl) marginEl.value = settings.min_margin_percent ?? 0;
+        } catch (e) {
+            console.error('Erro ao carregar settings globais', e);
+        }
+    }
+
+    async function saveGlobalSettings() {
+        const btn = document.getElementById('btn-save-global-settings');
+        if (btn) btn.disabled = true;
+        try {
+            const payload = {
+                default_tax_rate: parseFloat(document.getElementById('default-tax-rate')?.value || '0'),
+                min_margin_percent: parseFloat(document.getElementById('min-margin-percent')?.value || '0'),
+            };
+            const data = await requestJson('/api/settings/global', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+            });
+            alert(data.success ? 'Configurações fiscais salvas!' : (data.error || 'Erro ao salvar'));
+        } catch (e) {
+            console.error(e);
+            alert('Erro ao salvar configurações fiscais');
+        } finally {
+            if (btn) btn.disabled = false;
+        }
+    }
 
     // =====================================
     // Gerenciamento de Contas ML
