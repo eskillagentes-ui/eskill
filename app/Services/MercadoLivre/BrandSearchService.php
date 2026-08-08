@@ -220,8 +220,14 @@ class BrandSearchService
             );
         } catch (\Throwable $e) {
             $this->log->warning('BrandSearch: falha ao buscar categorias', ['error' => $e->getMessage()]);
-            return [['id' => 'ALL', 'name' => 'Todas']];
+            throw new \RuntimeException(
+                'Falha ao consultar /sites/' . $siteId . '/search: ' . $e->getMessage(),
+                0,
+                $e
+            );
         }
+
+        $this->assertMlSearchOk($resp, "/sites/{$siteId}/search");
 
         foreach ($resp['available_filters'] ?? [] as $filter) {
             if (($filter['id'] ?? '') === 'category') {
@@ -263,8 +269,14 @@ class BrandSearchService
                     'offset' => $offset,
                     'error'  => $e->getMessage(),
                 ]);
-                break;
+                throw new \RuntimeException(
+                    'Falha ao paginar /sites/' . $siteId . '/search (offset=' . $offset . '): ' . $e->getMessage(),
+                    0,
+                    $e
+                );
             }
+
+            $this->assertMlSearchOk($resp, "/sites/{$siteId}/search");
 
             $page  = $resp['results'] ?? [];
             $total = (int) ($resp['paging']['total'] ?? 0);
@@ -368,5 +380,34 @@ class BrandSearchService
     private function normalizeCondition(string $c): string
     {
         return in_array($c, ['new', 'used', 'not_specified'], true) ? $c : 'not_specified';
+    }
+
+    /**
+     * Garante que a resposta de /sites/{site}/search é utilizável.
+     * PolicyAgent 403 não deve virar “busca concluída com 0 itens”.
+     *
+     * @param array<string,mixed> $resp
+     */
+    private function assertMlSearchOk(array $resp, string $endpoint): void
+    {
+        $status = isset($resp['status']) ? (int) $resp['status'] : null;
+        $error = isset($resp['error']) ? (string) $resp['error'] : '';
+        $message = isset($resp['message']) ? (string) $resp['message'] : '';
+
+        $blocked = $status === 403
+            || strcasecmp($error, 'forbidden') === 0
+            || strcasecmp($message, 'forbidden') === 0
+            || (isset($resp['success']) && $resp['success'] === false && $status !== null && $status >= 400);
+
+        if (!$blocked) {
+            return;
+        }
+
+        throw new \RuntimeException(
+            'A API do Mercado Livre bloqueou a busca pública de anúncios (HTTP 403 / PolicyAgent). '
+            . 'Isso ocorre com IP de datacenter — inclusive via proxy Cloudflare. '
+            . 'Configure um proxy residencial em ML_PROXY_* (tabela ml_proxies está vazia) '
+            . 'para liberar /sites/{site}/search.'
+        );
     }
 }

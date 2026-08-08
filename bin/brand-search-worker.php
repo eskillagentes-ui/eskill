@@ -53,7 +53,8 @@ if (!is_dir($lockDir)) {
     @mkdir($lockDir, 0755, true);
 }
 $lockHandle = fopen(LOCK_FILE, 'c');
-if ($lockHandle === false || !flock($lockHandle, LOCK_EX | LOCK_NB)) {
+$lockAcquired = $lockHandle !== false && flock($lockHandle, LOCK_EX | LOCK_NB);
+if (!$lockAcquired) {
     echo '[' . WORKER_NAME . "] Outra instância já está em execução — saindo\n";
     if ($lockHandle !== false) {
         fclose($lockHandle);

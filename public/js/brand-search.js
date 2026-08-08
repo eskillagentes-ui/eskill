@@ -8,22 +8,30 @@
 
 // ── Estado ────────────────────────────────────────────────────────────────────
 const _bsState = {
-    searchId:     null,
+    searchId: null,
     pollInterval: null,
-    currentPage:  1,
-    perPage:      20,
+    pollGeneration: 0,
+    currentPage: 1,
+    perPage: 20,
     totalSellers: 0,
-    filters:      { reputation: null, minItems: null },
-    sort:         'total_items_brand',
-    order:        'desc',
+    filters: { reputation: null, minItems: null },
+    sort: 'total_items_brand',
+    order: 'desc',
 };
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', () => {
+function bsBindUi() {
     const app = document.getElementById('brand-search-app');
-    if (!app) return;
+    if (!app || app.dataset.bsBound === '1') return;
+    app.dataset.bsBound = '1';
 
-    document.getElementById('btn-search').addEventListener('click', bsStartSearch);
+    const searchBtn = document.getElementById('btn-search');
+    if (searchBtn) {
+        searchBtn.addEventListener('click', function (ev) {
+            ev.preventDefault();
+            bsStartSearch();
+        });
+    }
 
     const exportBtn = document.getElementById('btn-export');
     if (exportBtn) {
@@ -41,19 +49,26 @@ document.addEventListener('DOMContentLoaded', () => {
     document.querySelectorAll('.filter-chip[data-min-items]').forEach(c => {
         c.addEventListener('click', () => bsSetMinItemsFilter(parseInt(c.dataset.minItems, 10)));
     });
-});
+}
+
+if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', bsBindUi);
+} else {
+    bsBindUi();
+}
 
 // ── Busca ─────────────────────────────────────────────────────────────────────
 async function bsStartSearch() {
-    const brandId   = document.getElementById('inp-brand-id').value.trim();
+    const brandId = document.getElementById('inp-brand-id').value.trim();
     const brandName = document.getElementById('inp-brand').value.trim();
-    const siteId    = 'MLB';
-    const catEl     = document.getElementById('sel-cat');
+    const siteId = 'MLB';
+    const catEl = document.getElementById('sel-cat');
     const categoryId = catEl && catEl.value ? catEl.value : null;
 
     if (!brandId) { bsShowError('Preencha o ID da marca.'); return; }
     if (!brandName) { bsShowError('Preencha o nome da marca.'); return; }
 
+    bsClearError();
     bsShowProgress();
     bsUpdateProgress(0, 'Iniciando busca ' + brandName + '...');
 
@@ -73,9 +88,19 @@ async function bsStartSearch() {
 }
 
 function bsStartPolling(searchId) {
-    _bsState.pollInterval = setInterval(async () => {
+    bsStopPolling();
+    _bsState.pollGeneration = (_bsState.pollGeneration || 0) + 1;
+    const generation = _bsState.pollGeneration;
+
+    const tick = async () => {
+        if (generation !== _bsState.pollGeneration) {
+            return;
+        }
         try {
             const data = await bsApiGet('/api/brand-search/' + searchId + '/progress');
+            if (generation !== _bsState.pollGeneration) {
+                return;
+            }
             bsUpdateProgressFromApi(data);
 
             if (data.status === 'completed') {
@@ -83,20 +108,32 @@ function bsStartPolling(searchId) {
                 bsHideProgress();
                 bsUpdateStats(data);
                 bsLoadSellers(searchId, 1);
-            } else if (data.status === 'failed') {
+                return;
+            }
+            if (data.status === 'failed') {
                 bsStopPolling();
                 bsHideProgress();
                 bsShowError('Busca falhou: ' + (data.error_message || 'erro desconhecido'));
+                return;
             }
+
+            _bsState.pollInterval = setTimeout(tick, 2000);
         } catch (err) {
+            if (generation !== _bsState.pollGeneration) {
+                return;
+            }
             bsStopPolling();
             bsShowError('Erro no polling: ' + err.message);
         }
-    }, 2000);
+    };
+
+    // Primeiro tick imediato (não espera 2s); próximos via setTimeout encadeado.
+    _bsState.pollInterval = setTimeout(tick, 0);
 }
 
 function bsStopPolling() {
     if (_bsState.pollInterval) {
+        clearTimeout(_bsState.pollInterval);
         clearInterval(_bsState.pollInterval);
         _bsState.pollInterval = null;
     }
@@ -107,14 +144,14 @@ async function bsLoadSellers(searchId, page) {
     _bsState.currentPage = page;
 
     const params = new URLSearchParams({
-        page:     page,
+        page: page,
         per_page: _bsState.perPage,
-        sort:     _bsState.sort,
-        order:    _bsState.order,
+        sort: _bsState.sort,
+        order: _bsState.order,
     });
 
     if (_bsState.filters.reputation) params.set('reputation', _bsState.filters.reputation);
-    if (_bsState.filters.minItems)   params.set('min_items',  _bsState.filters.minItems);
+    if (_bsState.filters.minItems) params.set('min_items', _bsState.filters.minItems);
 
     const data = await bsApiGet('/api/brand-search/' + searchId + '/sellers?' + params);
     _bsState.totalSellers = data.total;
@@ -142,7 +179,7 @@ function bsRenderTable(sellers) {
     }
 
     tbody.innerHTML = sellers.map((s, i) => {
-        const rank  = (_bsState.currentPage - 1) * _bsState.perPage + i + 1;
+        const rank = (_bsState.currentPage - 1) * _bsState.perPage + i + 1;
         const score = parseInt(s.reputation_score || 0, 10);
         const repColor = score >= 90 ? '#1D9E75' : score >= 75 ? '#EF9F27' : '#E24B4A';
         const initials = bsGetInitials(s.nickname);
@@ -190,30 +227,30 @@ function bsRenderTable(sellers) {
 
 function bsRenderBadge(level) {
     const map = {
-        platinum:       ['#EEEDFE', '#3C3489', 'Platinum'],
-        gold:           ['#FAEEDA', '#633806', 'Gold'],
-        '5_green':      ['#FAEEDA', '#633806', 'Gold'],
-        '4_light_green':['#E1F5EE', '#085041', 'Verde'],
-        silver:         ['#F1EFE8', '#444441', 'Silver'],
-        new:            ['#E6F1FB', '#0C447C', 'Novo'],
+        platinum: ['#EEEDFE', '#3C3489', 'Platinum'],
+        gold: ['#FAEEDA', '#633806', 'Gold'],
+        '5_green': ['#FAEEDA', '#633806', 'Gold'],
+        '4_light_green': ['#E1F5EE', '#085041', 'Verde'],
+        silver: ['#F1EFE8', '#444441', 'Silver'],
+        new: ['#E6F1FB', '#0C447C', 'Novo'],
     };
     const style = map[level] || map['new'];
     return `<span class="badge-rep" style="background:${style[0]};color:${style[1]}">${style[2]}</span>`;
 }
 
 function bsRenderTrend(trend) {
-    if (trend === 'up')   return '<span style="color:#1D9E75">▲ subindo</span>';
+    if (trend === 'up') return '<span style="color:#1D9E75">▲ subindo</span>';
     if (trend === 'down') return '<span style="color:#E24B4A">▼ caindo</span>';
     return '<span style="color:#888780">— estável</span>';
 }
 
 function bsRenderPagination(total, current, lastPage) {
-    const info  = document.getElementById('pagination-info');
-    const list  = document.getElementById('pagination-list');
+    const info = document.getElementById('pagination-info');
+    const list = document.getElementById('pagination-list');
     if (!info || !list) return;
 
     const from = (current - 1) * _bsState.perPage + 1;
-    const to   = Math.min(current * _bsState.perPage, total);
+    const to = Math.min(current * _bsState.perPage, total);
     info.textContent = 'Mostrando ' + from + '–' + to + ' de ' + bsFormatNumber(total);
 
     list.innerHTML = '';
@@ -279,12 +316,12 @@ function bsSetMinItemsFilter(value) {
 }
 
 // ── Progress ──────────────────────────────────────────────────────────────────
-function bsShowProgress()  { document.getElementById('progress-wrap').style.display = 'block'; }
-function bsHideProgress()  { document.getElementById('progress-wrap').style.display = 'none';  }
+function bsShowProgress() { document.getElementById('progress-wrap').style.display = 'block'; }
+function bsHideProgress() { document.getElementById('progress-wrap').style.display = 'none'; }
 
 function bsUpdateProgress(pct, text) {
     document.getElementById('progress-fill').style.width = pct + '%';
-    document.getElementById('progress-pct').textContent  = pct + '%';
+    document.getElementById('progress-pct').textContent = pct + '%';
     document.getElementById('progress-text').textContent = text;
 }
 
@@ -292,11 +329,11 @@ function bsUpdateProgressFromApi(data) {
     const pct = parseInt(data.progress || 0, 10);
     let text;
     if (data.status === 'running') {
-        if (pct < 20)       text = 'Iniciando busca...';
-        else if (pct < 45)  text = 'Paginando categorias...';
-        else if (pct < 70)  text = 'Coletando seller_ids únicos...';
-        else if (pct < 90)  text = 'Consultando perfis dos vendedores...';
-        else                text = 'Calculando métricas e reputação...';
+        if (pct < 20) text = 'Iniciando busca...';
+        else if (pct < 45) text = 'Paginando categorias...';
+        else if (pct < 70) text = 'Coletando seller_ids únicos...';
+        else if (pct < 90) text = 'Consultando perfis dos vendedores...';
+        else text = 'Calculando métricas e reputação...';
     } else if (data.status === 'completed') {
         text = 'Busca concluída!';
     } else if (data.status === 'failed') {
@@ -309,7 +346,7 @@ function bsUpdateProgressFromApi(data) {
 
 function bsUpdateStats(data) {
     document.getElementById('stat-sellers').textContent = bsFormatNumber(data.total_sellers);
-    document.getElementById('stat-items').textContent   = bsFormatNumber(data.total_items);
+    document.getElementById('stat-items').textContent = bsFormatNumber(data.total_items);
 }
 
 // Update price + leaders from seller rows (called after first page loads)
@@ -334,12 +371,12 @@ function bsViewItems(sellerId) {
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function bsApiPost(url, body) {
     const csrf = document.querySelector('meta[name="csrf-token"]');
-    const res  = await fetch(url, {
-        method:  'POST',
+    const res = await fetch(url, {
+        method: 'POST',
         headers: {
-            'Content-Type':    'application/json',
-            'X-Requested-With':'XMLHttpRequest',
-            'X-CSRF-Token':    csrf ? csrf.content : '',
+            'Content-Type': 'application/json',
+            'X-Requested-With': 'XMLHttpRequest',
+            'X-CSRF-Token': csrf ? csrf.content : '',
         },
         body: JSON.stringify(body),
     });
@@ -369,21 +406,34 @@ function bsGetInitials(nickname) {
 }
 
 function bsGetAvatarBg(level) {
-    const m = { platinum:'#EEEDFE', gold:'#FAEEDA', silver:'#F1EFE8', new:'#E6F1FB' };
+    const m = { platinum: '#EEEDFE', gold: '#FAEEDA', silver: '#F1EFE8', new: '#E6F1FB' };
     return m[level] || '#F1EFE8';
 }
 
 function bsGetAvatarColor(level) {
-    const m = { platinum:'#3C3489', gold:'#633806', silver:'#444441', new:'#0C447C' };
+    const m = { platinum: '#3C3489', gold: '#633806', silver: '#444441', new: '#0C447C' };
     return m[level] || '#444441';
 }
 
 function bsEsc(str) {
-    return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+    return String(str).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function bsClearError() {
+    const banner = document.getElementById('bs-error-banner');
+    if (banner) {
+        banner.style.display = 'none';
+        banner.textContent = '';
+    }
 }
 
 function bsShowError(msg) {
     console.error('[BrandSearch]', msg);
+    const banner = document.getElementById('bs-error-banner');
+    if (banner) {
+        banner.textContent = msg;
+        banner.style.display = 'block';
+    }
     const toast = document.getElementById('toast-error') || document.getElementById('general-toast');
     if (toast && typeof bootstrap !== 'undefined') {
         const body = toast.querySelector('.toast-body');

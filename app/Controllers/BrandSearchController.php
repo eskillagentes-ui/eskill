@@ -120,8 +120,77 @@ class BrandSearchController extends BaseController
             return;
         }
 
+        $this->dispatchBrandSearchWorker($searchId);
+
         http_response_code(202);
         $this->jsonSuccess(['search_id' => $searchId, 'status' => 'pending']);
+    }
+
+    /**
+     * Dispara o worker em background para a busca recém-criada.
+     * Fallback: cron a cada minuto processa a fila se o spawn falhar.
+     */
+    private function dispatchBrandSearchWorker(int $searchId): bool
+    {
+        if ($searchId <= 0) {
+            return false;
+        }
+
+        $root = dirname(__DIR__, 2);
+        $php = $this->resolvePhpCliBinary();
+        $worker = $root . '/bin/brand-search-worker.php';
+        $log = $root . '/storage/logs/brand-search-worker.log';
+
+        if (!is_file($worker)) {
+            return false;
+        }
+
+        $cmd = sprintf(
+            'cd %s && nohup %s %s --search-id=%d >> %s 2>&1 & echo $!',
+            escapeshellarg($root),
+            escapeshellarg($php),
+            escapeshellarg($worker),
+            $searchId,
+            escapeshellarg($log)
+        );
+
+        try {
+            $output = [];
+            $exitCode = 0;
+            exec($cmd, $output, $exitCode);
+            $spawnPid = isset($output[0]) ? (int) trim((string) $output[0]) : 0;
+
+            return $spawnPid > 0 || $exitCode === 0;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    /**
+     * PHP_BINARY sob php-fpm aponta para php-fpm (não executa scripts CLI).
+     */
+    private function resolvePhpCliBinary(): string
+    {
+        $candidates = [
+            '/usr/bin/php8.4',
+            '/usr/bin/php8.3',
+            '/usr/bin/php8.2',
+            '/usr/bin/php8.1',
+            '/usr/bin/php8.0',
+            '/usr/bin/php',
+        ];
+
+        if (PHP_BINARY !== '' && stripos(PHP_BINARY, 'fpm') === false && is_executable(PHP_BINARY)) {
+            return PHP_BINARY;
+        }
+
+        foreach ($candidates as $bin) {
+            if (is_executable($bin)) {
+                return $bin;
+            }
+        }
+
+        return 'php';
     }
 
     /**

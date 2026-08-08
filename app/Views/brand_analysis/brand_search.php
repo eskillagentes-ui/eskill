@@ -22,7 +22,8 @@ $cspNonce = defined('CSP_NONCE') ? CSP_NONCE : ($_SESSION['csp_nonce'] ?? '');
         <button class="btn btn-outline-secondary" id="btn-export" disabled>
             <i class="bi bi-download me-1"></i>CSV
         </button>
-        <button class="btn" id="btn-search"
+        <button type="button" class="btn" id="btn-search"
+                onclick="bsStartSearch(); return false;"
                 style="background:#1D9E75;color:#fff;border-color:#1D9E75">
             <i class="bi bi-search me-1"></i>Buscar
         </button>
@@ -77,6 +78,8 @@ $cspNonce = defined('CSP_NONCE') ? CSP_NONCE : ($_SESSION['csp_nonce'] ?? '');
             </div>
         </div>
     </div>
+
+    <div id="bs-error-banner" class="alert alert-danger mb-3" style="display:none" role="alert"></div>
 
     <!-- Metrics Cards -->
     <div id="stats-row" class="row g-2 mb-3">
@@ -180,4 +183,4 @@ $cspNonce = defined('CSP_NONCE') ? CSP_NONCE : ($_SESSION['csp_nonce'] ?? '');
 .action-cell{display:flex;gap:2px}
 </style>
 
-<script src="/js/brand-search.js" nonce="<?= htmlspecialchars($cspNonce, ENT_QUOTES) ?>"></script>
+<script src="/js/brand-search.js?v=<?= @filemtime(__DIR__ . '/../../../public/js/brand-search.js') ?: time() ?>" nonce="<?= htmlspecialchars($cspNonce, ENT_QUOTES) ?>"></script>
