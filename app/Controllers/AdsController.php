@@ -81,9 +81,31 @@ class AdsController extends BaseController
                 $this->jsonError('Nenhuma conta do Mercado Livre configurada.', 400);
                 return;
             }
-            $data = (new \App\Services\Ads\AdsObservationService())->dashboard((int) $accountId);
+
+            $service = new \App\Services\Ads\AdsObservationService();
+            $data = $service->dashboard((int) $accountId);
+
+            // start/end são opcionais e retrocompatíveis: sem eles, comportamento é idêntico ao anterior.
+            $start = $this->request->get('start', '');
+            $end = $this->request->get('end', '');
+            if ($start !== '' && $end !== '' && $this->isValidDate($start) && $this->isValidDate($end)) {
+                $data['period_metrics'] = $service->periodMetrics((int) $accountId, $start, $end);
+            }
+
             $this->jsonSuccess($data);
         }, 'AdsController::getObservationData');
+    }
+
+    /**
+     * Valida formato de data (YYYY-MM-DD) sem lançar exceção.
+     */
+    private function isValidDate(string $date): bool
+    {
+        if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
+            return false;
+        }
+        $dt = \DateTime::createFromFormat('Y-m-d', $date);
+        return $dt !== false && $dt->format('Y-m-d') === $date;
     }
 
     /**

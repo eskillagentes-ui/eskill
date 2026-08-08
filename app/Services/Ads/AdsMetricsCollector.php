@@ -643,8 +643,19 @@ final class AdsMetricsCollector
         if ($status === 429 || $status >= 500) {
             throw new \RuntimeException('pads_http_' . $status);
         }
-        if (!empty($payload['incomplete']) || (($payload['error'] ?? null) === 'pagination_incomplete')) {
+
+        $error = $payload['error'] ?? null;
+        // Somente o erro canônico de paginação — não confundir com incomplete=true
+        // de falha HTTP/rede no meio do loop (ex.: CURLOPT_PROXY / timeout).
+        if ($error === 'pagination_incomplete') {
             throw new \RuntimeException('pads_pagination_incomplete:' . $context);
+        }
+        if (!empty($payload['incomplete'])) {
+            throw new \RuntimeException(
+                'pads_api_error:' . (is_scalar($error) && (string) $error !== ''
+                    ? (string) $error
+                    : 'incomplete_fetch')
+            );
         }
         if (array_key_exists('ok', $payload) && $payload['ok'] === false) {
             $err = (string) ($payload['error'] ?? $payload['_meta']['api_error'] ?? $payload['_meta']['error'] ?? 'unknown');

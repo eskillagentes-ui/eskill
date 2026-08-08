@@ -138,14 +138,15 @@ class AdsService extends MercadoLivreClient
             if (!$page['ok']) {
                 $campaigns = $this->getCachedCampaigns($status);
                 $meta['data_source'] = 'local_cache';
-                $meta['reason'] = ($page['incomplete'] ?? false) ? 'pagination_incomplete' : 'api_error';
+                $isPaginationIncomplete = (($page['error'] ?? null) === 'pagination_incomplete');
+                $meta['reason'] = $isPaginationIncomplete ? 'pagination_incomplete' : 'api_error';
                 $meta['api_error'] = $page['error'] ?? 'unknown';
                 $meta['api_status'] = $page['api_status'] ?? null;
-                $meta['incomplete'] = (bool) ($page['incomplete'] ?? false);
+                $meta['incomplete'] = $isPaginationIncomplete;
                 return [
                     'ok' => false,
                     'campaigns' => $campaigns,
-                    'incomplete' => (bool) ($page['incomplete'] ?? false),
+                    'incomplete' => $isPaginationIncomplete,
                     'api_status' => $page['api_status'] ?? null,
                     'error' => $page['error'] ?? 'api_error',
                     '_meta' => $meta,
@@ -457,7 +458,8 @@ class AdsService extends MercadoLivreClient
                 return [
                     'ok' => false,
                     'results' => [],
-                    'incomplete' => $all !== [],
+                    // Não marcar incomplete: falha HTTP/rede mid-page não é pagination_incomplete.
+                    'incomplete' => false,
                     'api_status' => isset($response['status']) ? (int) $response['status'] : null,
                     'error' => (string) ($response['message'] ?? $response['error'] ?? 'api_error'),
                     'paging' => is_array($response['paging'] ?? null) ? $response['paging'] : $lastPaging,
@@ -546,9 +548,6 @@ class AdsService extends MercadoLivreClient
         ];
     }
 
-    /**
-     * @param array<string, mixed> $response
-     */
     private function isPadsHttpError(array $response): bool
     {
         if (isset($response['error']) && $response['error'] !== '' && $response['error'] !== null) {

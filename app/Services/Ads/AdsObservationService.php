@@ -69,6 +69,60 @@ final class AdsObservationService
     }
 
     /**
+     * Agrega gasto/receita de Ads em um intervalo de datas, a partir dos snapshots
+     * diários já coletados pelo AdsMetricsCollector (tabela ads_account_metrics_daily).
+     * TACOS/ACOS do período são recalculados sobre os totais somados (não é a média
+     * simples dos TACOS diários), para não distorcer dias sem campanha ativa.
+     *
+     * @return array<string, mixed>
+     */
+    public function periodMetrics(int $accountId, string $startDate, string $endDate): array
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT
+                    COALESCE(SUM(gasto), 0) as total_gasto,
+                    COALESCE(SUM(receita_atribuida), 0) as total_receita_atribuida,
+                    COALESCE(SUM(receita_total), 0) as total_receita_total,
+                    COUNT(*) as days_with_data
+                 FROM ads_account_metrics_daily
+                 WHERE account_id = ? AND `date` BETWEEN ? AND ?'
+            );
+            $stmt->execute([$accountId, $startDate, $endDate]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            return [
+                'available' => false,
+                'error' => 'ads_metrics_unavailable',
+                'period' => ['start' => $startDate, 'end' => $endDate],
+            ];
+        }
+
+        if (!$row || (int) $row['days_with_data'] === 0) {
+            return [
+                'available' => false,
+                'error' => 'no_ads_data_in_period',
+                'period' => ['start' => $startDate, 'end' => $endDate],
+            ];
+        }
+
+        $gasto = (float) $row['total_gasto'];
+        $receitaAtribuida = (float) $row['total_receita_atribuida'];
+        $receitaTotal = (float) $row['total_receita_total'];
+
+        return [
+            'available' => true,
+            'period' => ['start' => $startDate, 'end' => $endDate],
+            'days_with_data' => (int) $row['days_with_data'],
+            'gasto' => round($gasto, 2),
+            'receita_atribuida' => round($receitaAtribuida, 2),
+            'receita_total' => round($receitaTotal, 2),
+            'acos' => $receitaAtribuida > 0 ? round(($gasto / $receitaAtribuida) * 100, 2) : null,
+            'tacos' => $receitaTotal > 0 ? round(($gasto / $receitaTotal) * 100, 2) : null,
+        ];
+    }
+
+    /**
      * @return list<array<string, mixed>>
      */
     private function campaignsTable(int $accountId): array
