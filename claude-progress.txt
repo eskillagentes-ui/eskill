@@ -1,3 +1,131 @@
+## 2026-08-08 — Inspeção geral + commits do backlog + fixes de infra
+
+- **Backlog commitado**: 18 commits (7a3fb346..678bdb0c), 223 arquivos, ~37,7k inserções. Grupos: auth/TOTP+QR, token refresh, financial ledger, central de Vendas, Hidden SEO/MODEL/GTIN, Pregão QA, pricing-v2, webhook hardening, ads/claims/brand-search/items/seo-killer, dashboard, TestSprite. Lint `php -l` OK em 171 PHPs. Lixo excluído (.cursor, .codacy/generated, __pycache__).
+- **Crontab root limpo**: 10 entradas mortas comentadas (9 scripts inexistentes + `run_repricer.php` com fatal 100% — classe `App\Services\RepricingService` nunca existiu no git). Backup em `/root/crontab-root-backup-20260808.txt`. Funções vivas seguem no crontab do user `eskill`. **Repricing automático está OFF** (SniperAgent só roda manual via AgentController; nada o agenda) — decisão de substituto pendente do dono.
+- **pregao-qa-worker**: flap infinito corrigido — `Restart=always` → `on-failure` + novo `pregao-qa-worker.timer` (60s). Worker é one-shot por design (sai 0 com fila vazia). Verificado: NRestarts=0, 2 ciclos limpos. Units em `config/systemd/` sync com /etc/systemd/system.
+- **Vazamento Gemini→API real corrigido**: `tests/bootstrap.php` injeta keys fake; `AIIntegrationTest::skipIfNoEnvVars()` só checava isset → rodava integração com key fake contra Google real (400s em llm_error.log). Guard agora rejeita `phpunit-fake-key-not-real`. Verificado: 3 skips, zero rede. Demais testes suspeitos não vazam.
+- **Falsos alarmes confirmados**: "fatais" do `MlAdvancedFeaturesService` no app.log = poluição do próprio unit test (mocks com msgs "fatal"/"ML API down"); ledger tick `created=0` = idempotência (scanned=14, billing=29, R$900,11 pending release — saudável); falhas de `ml_webhook` (23k) = históricas (RetryService inexistente + 401 no proxy CF), últimas 24h: 215 completed / 0 failed.
+- **Dívida anotada**: logging de testes escreve nos logs de produção (app.log/llm_error.log); `project-status.json` segue inexistente (init.sh avisa).
+
+## 2026-08-07 — MCP ML/MP: performance API + boolean value_id
+
+- MCP ML autenticado: docs `atributos` + `qualidade-das-publicacoes` (/health → /performance).
+- MCP MP: 0 applications na conta OAuth — sem criar app (exige confirmação explícita).
+- `ItemPerformanceService` + CLI `php bin/tech-sheet performance` (live MLB6526496096 score=72).
+- Hidden SEO / apply: meta `value_id`+`value_type`; boolean sem value_id é skip (doc oficial).
+- PHPUnit ItemPerformance 3/3. Sem apply ML 1335.
+
+## 2026-08-07 — Hidden SEO schema + env + staging persist
+
+- `.env` prod+staging: `SAFE_MODE=true`, `FORBIDDEN_ACCOUNTS=1335`, `MAX_ITEMS_PER_RUN=500`.
+- `php scripts/apply_hidden_seo_schema.php`: índice + view `v_pending_hidden_seo_changes` (meli + eskill_staging).
+- Staging 1336: `--persist` → 10 pending na view (title + same_item). Sem apply ML 1335.
+
+## 2026-08-07 — Hidden SEO Gap Fixer (SafetyGuard + VOs + dry-run default)
+
+- Assunção: NÃO greenfield `src/` (colide monorepo `App\`); integrou no stack Ficha Técnica.
+- `SafetyGuard` + `UnsafeOperationException`; SAFE_MODE/FORBIDDEN_ACCOUNTS/MAX_ITEMS_PER_RUN no `.env.example`.
+- VOs: Mpn/Line/Evidence/SuggestionSource; Entities Gap/Suggestion/PendingChange; TechSheetMapper + HiddenSeoSuggester.
+- CLI `suggest-hidden`: dry-run padrão; `--persist` grava pending; `--apply` ML bloqueado em 1335.
+- `apply` CLI: blacklist 1335 via SafetyGuard; override só com `--i-understand-prod`.
+- Schema: view `v_pending_hidden_seo_changes` sobre `tech_sheet_suggestions`.
+- PHPUnit Hidden SEO + SafetyGuard/Mapper/VOs: 56 assertions suite filter OK. Sem apply 1335.
+
+## 2026-08-07 — Hidden SEO Ficha Técnica (prompt aprovado + implementado)
+
+- `TechSheetHiddenSuggestionService`: evidência title → same_item → local_catalog; nunca inventa.
+- Prioridade LINE/MPN/HANDLE_RISER; skip MODEL/GTIN/ops; variation_attribute+variações = skip.
+- Hook em `generateSuggestions` + CLI `php bin/tech-sheet suggest-hidden`.
+- UI: label origem “Hidden SEO” + banner se ≥10 hidden gaps (seo-killer + tech-sheet).
+- Staging 1336: MPN pending com source=hidden_seo; idempotente OK. PHPUnit 14/14.
+- Sem apply ML 1335. Sem commit.
+
+## 2026-08-07 — EMPTY GTIN batch 1335 + UI labels + prompt Hidden
+
+- Geradas **18** sugestões `EMPTY_GTIN_REASON` pending (DB local; sem apply ML). Saldo EAN=0.
+- UI: labels “Estratégia de busca” / “Guarda-chuva multi” / “Motivo sem GTIN”.
+- Novo prompt aguardando OK: `.github/prompts/ficha-tecnica-hidden-seo.prompt.md`.
+- HAS_COMPATIBILITIES é read_only no ML → não sugerido.
+- Sem apply. Sem commit.
+
+## 2026-08-07 — MODEL umbrella multi-compatível + CLI suggest-model
+
+- Títulos CG/Titan/Fan/Start + cilindrada → MODEL guarda-chuva (`CG 160`), `meta.policy=umbrella_multi_compatible`.
+- CLI: `php bin/tech-sheet suggest-model --account=X [--dry-run]` (1335 exige `--i-understand-prod`).
+- Staging: MLBSTG00000004 → CG 160. PHPUnit 12/12. Sem apply ML. Sem commit.
+
+## 2026-08-07 — MODEL policy v2 (ano/Fan160/multi-modelo)
+
+- Rejeita ano isolado (`2025`); `Fan160`→`Fan 160` (sem quebrar `F800`).
+- Skip generate se título ambíguo (≥3 linhas: Titan/Fan/Start/CG…).
+- Sanitize local 1335: 1 rejected, Fan 160 + CB 300 normalizados; F800 revertido.
+- Staging: multi skip + Fan 125 ok. PHPUnit 10/10. Instrumentação debug removida após verify.
+- Sem apply ML. Sem commit.
+
+## 2026-08-07 — MODEL mapeamento semântico (prompt aprovado + implementado)
+
+- `TechSheetModelSuggestionPolicy`: limpa identificador, rejeita stuffing, mining só sobe score.
+- Hook em `generateModelSuggestions` + generate título para attrs MODEL.
+- Staging 1336: Fan 125 / Titan 150 / Biz 125 com `meta.policy=semantic_field_mapping`.
+- PHPUnit `TechSheetModelSuggestionPolicyTest` 7/7. Instrumentação debug removida após verify.
+- Sem apply ML 1335. Sem commit.
+
+## 2026-08-07 — GTIN Ficha Técnica fechado; próximo prompt MODEL
+
+- Prompt GTIN → status `implemented`. Dry-run 1335: 4/5 EMPTY “não tem código cadastrado” (saldo EAN=0); 1 skip GTIN já presente.
+- Restam 28 MODEL `pending` / 6 `applied` na 1335.
+- Novo prompt (aguardando OK): `.github/prompts/ficha-tecnica-modelo-mapeamento-semantico.prompt.md` (notas de `documentacao/arm/ficha.tecnica.md`).
+- Sem apply GTIN/MODEL extra em 1335. Sem commit.
+
+## 2026-08-07 — GTIN Ficha Técnica ↔ EanService (prompt aprovado + implementado)
+
+- Prompt aprovado pelo dono; status `approved_implementing`.
+- Novo `TechSheetGtinSuggestionService`: pool EAN soft-reserve OU `EMPTY_GTIN_REASON` (nunca inventa EAN).
+- Hooks: generate → GTIN; reject → libera reserva; apply OK → `confirmEanReservationAfterApply`.
+- CLI `php bin/tech-sheet suggest-gtin` (prod/1335 exige `--i-understand-prod`).
+- UI: banner saldo EAN + labels “EAN do pool” / “Motivo sem GTIN”.
+- Fixture staging: categoria `MLB438146` (tem EMPTY); smoke conta **1336**: EMPTY “não tem código cadastrado”, idempotente OK.
+- PHPUnit `TechSheetGtinSuggestionServiceTest` 9/9. Instrumentação debug removida após verify.
+- Sem apply GTIN em 1335. Sem commit.
+
+## 2026-08-07 — Prompt GTIN Ficha Técnica ↔ EanService (aguardando aprovação)
+
+- Escrito `.github/prompts/ficha-tecnica-gtin-ean-pool.prompt.md` (sem implementação).
+- Abordagem: pool GS1 via `EanService` → senão `EMPTY_GTIN_REASON`; proibido inventar EAN.
+- 1335: saldo EAN=0 → só EMPTY até comprar/importar códigos.
+- Sem commit.
+
+## 2026-08-07 — Apply MODEL approved → ML (conta 1335)
+
+- OK explícito do dono. `php bin/tech-sheet apply --account=1335`: **6/6 OK**.
+- Confirmado via GET autenticado: Factor 150, Biz 125, Fazer 250×2, Pop 100, Fan 125.
+- DB: 6 `applied`, 28 `pending` MODEL restantes.
+- Fix CLI SQL DISTINCT+ORDER BY; `applyApproved` trata `success:false`; default `$userId=null`.
+- Sem commit.
+
+## 2026-08-07 — Ficha Técnica abas verificadas; debug removido
+
+- Pós-verify logs: pending=123, critical=0, hidden=123, review=15 (conta 1335).
+- Instrumentação `listItems` removida (prod + staging).
+- Sem commit. Apply ML 1335 ainda exige OK explícito.
+
+## 2026-08-07 — Ficha Técnica abas + login account hydrate
+
+- Abas UI: Lacunas / Críticas / Hidden SEO / Sugestões / Concluídos / Todos (`applyListingTabFilter`; `critical` ≠ hidden-only).
+- Runtime 1335: pending=123, critical=0, hidden=123, review=15.
+- Login hidrata `active_ml_account_id` via `SessionHelper` (Auth + 2FA).
+- Script `scripts/seed_staging_tech_sheet_fixture.php` (só staging, ≠1335).
+- Sync staging. Instrumentação `listItems` ainda ativa p/ verificação UI.
+- Sem commit. Apply ML 1335 ainda pendente de OK.
+
+## 2026-08-07 — Ficha Técnica TC038 desbloqueado (staging)
+
+- Root cause: `TechnicalSheetController` usava só `BaseController::getActiveAccountId()` (sessão); pós-login sem chave → `Nenhuma conta conectada`. Fix: `SessionHelper::getActiveAccountId() ?? getActiveAccountId()` (prod + staging).
+- Seed staging: conta fixture `1336` (`STAGING_UI_999001`, ≠1335) + 25 items → paginação 2 páginas.
+- TestSprite TC037–TC039 ✅; relatório `testsprite_tests/testsprite-mcp-test-report.md`.
+- Instrumentação debug removida após TC038 PASSED. Apply ML em 1335 **não** executado.
+- Sem commit.
+
 ## 2026-08-06 — Pregão/Ads Onda 1 + E2E readonly
 
 - PHPUnit `--filter Pregao` 98 OK; `--filter Ads` 43 OK; JS unit 31 OK.
