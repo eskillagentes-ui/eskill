@@ -322,12 +322,245 @@ class EanService
             "SELECT ea.id AS assignment_id, ea.ean_id, ei.ean
              FROM ean_assignments ea
              JOIN ean_inventory ei ON ei.id = ea.ean_id
-             WHERE ea.account_id = :account_id AND ea.ml_item_id IS NULL
+             WHERE ea.account_id = :account_id
+               AND ea.ml_item_id IS NULL
+               AND COALESCE(ei.status, 'available') = 'available'
              ORDER BY ea.id ASC
              LIMIT 1"
         );
         $stmt->execute(['account_id' => $accountId]);
         return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+    }
+
+    /**
+     * Reserva soft: vincula assignment ao item e marca inventário reserved (não debita saldo).
+     *
+     * @return array{assignment_id:int,ean_id:int,ean:string}|null
+     */
+    public function reserveEanForItem(int $accountId, string $mlItemId, ?string $title = null): ?array
+    {
+        $mlItemId = trim($mlItemId);
+        if ($mlItemId === '' || $accountId <= 0) {
+            return null;
+        }
+
+        // Já reservado para este item?
+        $existing = $this->db->prepare(
+            "SELECT ea.id AS assignment_id, ea.ean_id, ei.ean
+             FROM ean_assignments ea
+             JOIN ean_inventory ei ON ei.id = ea.ean_id
+             WHERE ea.account_id = :account_id AND ea.ml_item_id = :ml_item_id
+               AND COALESCE(ei.status, '') = 'reserved'
+             LIMIT 1"
+        );
+        $existing->execute(['account_id' => $accountId, 'ml_item_id' => $mlItemId]);
+        $row = $existing->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            return [
+                'assignment_id' => (int)$row['assignment_id'],
+                'ean_id' => (int)$row['ean_id'],
+                'ean' => (string)$row['ean'],
+            ];
+        }
+
+        $this->db->beginTransaction();
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT ea.id AS assignment_id, ea.ean_id, ei.ean
+                 FROM ean_assignments ea
+                 JOIN ean_inventory ei ON ei.id = ea.ean_id
+                 WHERE ea.account_id = :account_id
+                   AND ea.ml_item_id IS NULL
+                   AND COALESCE(ei.status, 'available') = 'available'
+                 ORDER BY ea.id ASC
+                 LIMIT 1
+                 FOR UPDATE"
+            );
+            $stmt->execute(['account_id' => $accountId]);
+            $next = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$next) {
+                $this->db->rollBack();
+                return null;
+            }
+
+            $updA = $this->db->prepare(
+                "UPDATE ean_assignments
+                 SET ml_item_id = :ml_item_id, product_title = :title
+                 WHERE id = :id AND account_id = :account_id AND ml_item_id IS NULL"
+            );
+            $updA->execute([
+                'ml_item_id' => $mlItemId,
+                'title' => $title,
+                'id' => $next['assignment_id'],
+                'account_id' => $accountId,
+            ]);
+            if ($updA->rowCount() === 0) {
+                $this->db->rollBack();
+                return null;
+            }
+
+            $updI = $this->db->prepare(
+                "UPDATE ean_inventory
+                 SET status = 'reserved', reserved_at = NOW()
+                 WHERE id = :id AND COALESCE(status, 'available') = 'available'"
+            );
+            $updI->execute(['id' => $next['ean_id']]);
+            if ($updI->rowCount() === 0) {
+                $this->db->rollBack();
+                return null;
+            }
+
+            $this->db->commit();
+            return [
+                'assignment_id' => (int)$next['assignment_id'],
+                'ean_id' => (int)$next['ean_id'],
+                'ean' => (string)$next['ean'],
+            ];
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            log_error('EanService::reserveEanForItem failed', [
+                'account_id' => $accountId,
+                'ml_item_id' => $mlItemId,
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Libera reserva soft (reject / falha ao gravar sugestão).
+     */
+    public function releaseEanReservation(int $accountId, string $mlItemId, int $assignmentId): bool
+    {
+        if ($accountId <= 0 || $assignmentId <= 0) {
+            return false;
+        }
+
+        $this->db->beginTransaction();
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT ea.id, ea.ean_id, ea.ml_item_id, ei.status
+                 FROM ean_assignments ea
+                 JOIN ean_inventory ei ON ei.id = ea.ean_id
+                 WHERE ea.id = :id AND ea.account_id = :account_id
+                 FOR UPDATE"
+            );
+            $stmt->execute(['id' => $assignmentId, 'account_id' => $accountId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                $this->db->rollBack();
+                return false;
+            }
+            if (($row['status'] ?? '') === 'sold') {
+                $this->db->rollBack();
+                return false;
+            }
+            if ((string)($row['ml_item_id'] ?? '') !== $mlItemId && $mlItemId !== '') {
+                // Ainda libera se assignment_id bate e status reserved
+                if (($row['status'] ?? '') !== 'reserved') {
+                    $this->db->rollBack();
+                    return false;
+                }
+            }
+
+            $this->db->prepare(
+                "UPDATE ean_assignments SET ml_item_id = NULL, product_title = NULL
+                 WHERE id = :id AND account_id = :account_id"
+            )->execute(['id' => $assignmentId, 'account_id' => $accountId]);
+
+            $this->db->prepare(
+                "UPDATE ean_inventory
+                 SET status = 'available', reserved_at = NULL
+                 WHERE id = :id AND status = 'reserved'"
+            )->execute(['id' => $row['ean_id']]);
+
+            $this->db->commit();
+            return true;
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            log_error('EanService::releaseEanReservation failed', [
+                'account_id' => $accountId,
+                'assignment_id' => $assignmentId,
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
+    }
+
+    /**
+     * Após apply OK no ML: marca sold e debita saldo (reserva já tinha ml_item_id).
+     */
+    public function confirmEanReservationAfterApply(int $accountId, string $mlItemId, int $assignmentId): bool
+    {
+        if ($accountId <= 0 || $assignmentId <= 0 || trim($mlItemId) === '') {
+            return false;
+        }
+
+        $this->db->beginTransaction();
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT ea.id, ea.ean_id, ea.ml_item_id, ei.status, ei.ean
+                 FROM ean_assignments ea
+                 JOIN ean_inventory ei ON ei.id = ea.ean_id
+                 WHERE ea.id = :id AND ea.account_id = :account_id
+                 FOR UPDATE"
+            );
+            $stmt->execute(['id' => $assignmentId, 'account_id' => $accountId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                $this->db->rollBack();
+                return false;
+            }
+            if (($row['status'] ?? '') === 'sold') {
+                $this->db->commit();
+                return true; // idempotente
+            }
+            if ((string)($row['ml_item_id'] ?? '') !== $mlItemId) {
+                $this->db->prepare(
+                    "UPDATE ean_assignments SET ml_item_id = :ml_item_id
+                     WHERE id = :id AND account_id = :account_id"
+                )->execute([
+                    'ml_item_id' => $mlItemId,
+                    'id' => $assignmentId,
+                    'account_id' => $accountId,
+                ]);
+            }
+
+            $upd = $this->db->prepare(
+                "UPDATE ean_inventory
+                 SET status = 'sold', sold_at = NOW()
+                 WHERE id = :id AND status IN ('reserved', 'available')"
+            );
+            $upd->execute(['id' => $row['ean_id']]);
+            if ($upd->rowCount() === 0) {
+                $this->db->rollBack();
+                return false;
+            }
+
+            $this->db->prepare(
+                "UPDATE ean_balances
+                 SET total_used = total_used + 1,
+                     available = GREATEST(available - 1, 0)
+                 WHERE account_id = :account_id"
+            )->execute(['account_id' => $accountId]);
+
+            $this->db->commit();
+            return true;
+        } catch (\Throwable $e) {
+            if ($this->db->inTransaction()) {
+                $this->db->rollBack();
+            }
+            log_error('EanService::confirmEanReservationAfterApply failed', [
+                'account_id' => $accountId,
+                'assignment_id' => $assignmentId,
+                'error' => $e->getMessage(),
+            ]);
+            throw $e;
+        }
     }
 
     /**

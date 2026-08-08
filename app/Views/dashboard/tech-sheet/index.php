@@ -11,6 +11,34 @@ $pageTitle = 'Ficha Técnica - SEO';
 $currentPage = 'tech-sheet';
 $activePage = 'tech-sheet';
 
+// SSR KPIs so first paint (and Cursor DOM picker) match live stats without waiting for JS
+$tsSsrStats = [
+    'total_items' => '-',
+    'critical_gap_items' => '-',
+    'hidden_gap_items' => '-',
+    'model_label' => '-',
+    'pending_suggestions_total' => '-',
+    'avg_completeness_label' => '-',
+];
+$tsSsrAccountId = (int)($_SESSION['active_ml_account_id'] ?? $_SESSION['account_id'] ?? 0);
+if ($tsSsrAccountId > 0) {
+    try {
+        $tsSsrRaw = (new \App\Services\TechSheetService($tsSsrAccountId))->stats([]);
+        $tsModel = $tsSsrRaw['model_suggestions'] ?? [];
+        $tsAvg = $tsSsrRaw['avg_completeness_analyzed'] ?? null;
+        $tsSsrStats = [
+            'total_items' => (string)(int)($tsSsrRaw['total_items'] ?? 0),
+            'critical_gap_items' => (string)(int)($tsSsrRaw['critical_gap_items'] ?? 0),
+            'hidden_gap_items' => (string)(int)($tsSsrRaw['hidden_gap_items'] ?? 0),
+            'model_label' => ((int)($tsModel['items_with_suggestions'] ?? 0)) . '/' . ((int)($tsModel['items_needing_model'] ?? 0)),
+            'pending_suggestions_total' => (string)(int)($tsSsrRaw['pending_suggestions_total'] ?? 0),
+            'avg_completeness_label' => $tsAvg !== null ? number_format((float)$tsAvg, 1, '.', '') . '%' : '-',
+        ];
+    } catch (\Throwable $e) {
+        // keep placeholders; JS loadStats will fill
+    }
+}
+
 // Account Selector
 $requireAccountSelection = true;
 $showAccountBanner = true;
@@ -1769,30 +1797,32 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
     <!-- KPIs -->
     <div class="kpi-grid" id="kpi-grid">
         <div class="kpi-card">
-            <div class="value" id="kpi-total">-</div>
+            <div class="value" id="kpi-total"><?= htmlspecialchars($tsSsrStats['total_items'], ENT_QUOTES, 'UTF-8') ?></div>
             <div class="label">Total de Anúncios</div>
         </div>
         <div class="kpi-card danger">
-            <div class="value" id="kpi-critical">-</div>
+            <div class="value" id="kpi-critical"><?= htmlspecialchars($tsSsrStats['critical_gap_items'], ENT_QUOTES, 'UTF-8') ?></div>
             <div class="label">Lacunas Críticas</div>
         </div>
         <div class="kpi-card hidden" title="Atributos ocultos melhoram o ranking de busca">
-            <div class="value" id="kpi-hidden">-</div>
+            <div class="value" id="kpi-hidden"><?= htmlspecialchars($tsSsrStats['hidden_gap_items'], ENT_QUOTES, 'UTF-8') ?></div>
             <div class="label">🔮 Hidden SEO</div>
         </div>
         <div class="kpi-card purple" title="Cobertura de sugestões de MODELO para motor de busca">
-            <div class="value" id="kpi-model">-</div>
+            <div class="value" id="kpi-model"><?= htmlspecialchars($tsSsrStats['model_label'], ENT_QUOTES, 'UTF-8') ?></div>
             <div class="label">🔍 Modelos</div>
         </div>
         <div class="kpi-card warning">
-            <div class="value" id="kpi-pending">-</div>
+            <div class="value" id="kpi-pending"><?= htmlspecialchars($tsSsrStats['pending_suggestions_total'], ENT_QUOTES, 'UTF-8') ?></div>
             <div class="label">Sugestões Pendentes</div>
         </div>
         <div class="kpi-card success">
-            <div class="value" id="kpi-completeness">-</div>
+            <div class="value" id="kpi-completeness"><?= htmlspecialchars($tsSsrStats['avg_completeness_label'], ENT_QUOTES, 'UTF-8') ?></div>
             <div class="label">Completude Média</div>
         </div>
     </div>
+
+    <div id="tech-sheet-hidden-banner" class="alert alert-info border mt-3 mb-0 py-2 px-3 small d-none" role="status"></div>
 
     <!-- 🎯 Smart Fill Widget -->
     <div class="smart-fill-widget mb-3" id="smart-fill-widget" style="display: none;">
@@ -3244,7 +3274,10 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
                 if (data.success) {
                     document.getElementById('kpi-total').textContent = data.total_items || 0;
                     document.getElementById('kpi-critical').textContent = data.critical_gap_items || 0;
-                    document.getElementById('kpi-hidden').textContent = data.hidden_gap_items || data.total_missing_hidden || 0;
+                    document.getElementById('kpi-hidden').textContent = data.hidden_gap_items || 0;
+                    if (typeof TechSheet.renderHiddenBanner === 'function') {
+                        TechSheet.renderHiddenBanner(data);
+                    }
                     document.getElementById('kpi-pending').textContent = data.pending_suggestions_total || 0;
 
                     const avgCompl = data.avg_completeness_analyzed;
@@ -3262,11 +3295,10 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
                     }
 
                     // Update tab badges
-                    document.getElementById('tab-pending-count').textContent = data.critical_gap_items || 0;
+                    document.getElementById('tab-pending-count').textContent = data.pending_gap_items || data.critical_gap_items || 0;
                     document.getElementById('tab-hidden-count').textContent = data.hidden_gap_items || 0;
                     document.getElementById('tab-review-count').textContent = data.items_with_pending_suggestions || 0;
                 }
-
                 // Load Smart Fill Widget
                 this.loadSmartFillWidget();
             } catch (e) {
@@ -3950,6 +3982,7 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
                                     <div class="mt-2 p-2 bg-light rounded">
                                         <small class="text-muted">Sugestão:</small>
                                         <div class="fw-semibold">${this.escapeHtml(suggestion.suggested_value)}</div>
+                                        <small class="text-muted">Fonte: ${this.escapeHtml(this.sourceLabel(suggestion.source))} · Status: ${suggestion.status}</small>
                                         ${suggestion.status === 'pending' ? `
                                             <div class="mt-2 d-flex gap-2">
                                                 <button class="btn btn-sm btn-success" onclick="TechSheet.decideSuggestion('${item.item_id}', '${gap.id}', 'approved')">
@@ -4010,7 +4043,7 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
                                     ${this.renderConfidenceBadge(suggestion.confidence)}
                                 </div>
                                 <div class="suggestion-meta">
-                                    Fonte: ${suggestion.source} · Status: ${suggestion.status}
+                                    Fonte: ${this.escapeHtml(this.sourceLabel(suggestion.source))} · Status: ${suggestion.status}
                                 </div>
                                 ${suggestion.status === 'pending' ? `
                                     <div class="mt-2 d-flex gap-2">
@@ -4097,6 +4130,36 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
             if (!confidence) return '';
             const cls = confidence >= 85 ? 'high' : confidence >= 70 ? 'medium' : 'low';
             return `<span class="confidence-badge ${cls}">${confidence}%</span>`;
+        },
+
+        sourceLabel(source) {
+            const map = {
+                ean_pool: 'EAN do pool',
+                empty_gtin_policy: 'Motivo sem GTIN',
+                hidden_seo: 'Hidden SEO',
+                title: 'Título',
+                title_extraction: 'Título',
+                benchmark: 'Benchmark',
+                ai: 'IA',
+                inference: 'Inferência',
+                default: 'Padrão',
+                manual: 'Manual',
+                search_strategy: 'Estratégia de busca',
+            };
+            return map[source] || source || 'inference';
+        },
+
+        renderHiddenBanner(stats) {
+            const el = document.getElementById('tech-sheet-hidden-banner');
+            if (!el) return;
+            const hidden = Number(stats?.hidden_gap_items ?? 0);
+            if (!Number.isFinite(hidden) || hidden < 10) {
+                el.classList.add('d-none');
+                el.innerHTML = '';
+                return;
+            }
+            el.classList.remove('d-none');
+            el.innerHTML = `🔮 <strong>${hidden}</strong> itens com lacunas Hidden SEO — priorize LINE/MPN/HANDLE_RISER com evidência (origem: Hidden SEO).`;
         },
 
         closeDrawer() {

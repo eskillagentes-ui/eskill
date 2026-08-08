@@ -135,6 +135,13 @@
             <file>tests/Unit/Services/EncryptionServiceTest.php</file>
             <file>tests/Unit/Services/SecurityServiceTest.php</file>
             <file>tests/Unit/Services/TechSheetServiceTest.php</file>
+            <file>tests/Unit/Services/TechSheetGtinSuggestionServiceTest.php</file>
+            <file>tests/Unit/Services/TechSheetModelSuggestionPolicyTest.php</file>
+            <file>tests/Unit/Services/TechSheetHiddenSuggestionServiceTest.php</file>
+            <file>tests/Unit/Services/HiddenSeo/SafetyGuardTest.php</file>
+            <file>tests/Unit/Services/HiddenSeo/TechSheetMapperTest.php</file>
+            <file>tests/Unit/Services/HiddenSeo/HiddenSeoSuggesterTest.php</file>
+            <file>tests/Unit/Services/HiddenSeo/ItemPerformanceServiceTest.php</file>
             <file>tests/Unit/Services/CacheServiceTest.php</file>
             <file>tests/Unit/Services/SeoAnalyzerServiceTest.php</file>
             <file>tests/Unit/Services/PricingStrategyServiceTest.php</file>
@@ -233,6 +240,8 @@
             <directory>tests/Integration</directory>
             <!-- Mantém compatibilidade com os testes existentes em tests/Unit que acessam DB -->
             <directory>tests/Unit/Services</directory>
+            <!-- Arquivo histórico: contratos substituídos pelo runtime atual. -->
+            <exclude>tests/Unit/Services/Agents/_archive-preexisting-model</exclude>
             <directory>tests/Unit/Controllers</directory>
             <directory>tests/Unit/Integrations</directory>
             <file>tests/Unit/QueueServiceTest.php</file>

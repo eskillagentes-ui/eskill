@@ -12,25 +12,65 @@ use PDO;
 
 /**
  * 🔧 ATTRIBUTE KILLER - Preenchimento Total de Lacunas
- * 
+ *
  * Preenche 100% dos atributos (visíveis + ocultos):
  * - Atributos obrigatórios
  * - Atributos de filtro
  * - Atributos ocultos (SEO hidden)
  * - Atributos de catálogo
- * 
+ *
  * @author AI Development Team
  * @version 1.0.0
  */
 class AttributeKiller
 {
+    /** Versão da lógica de gaps — invalida summaries antigos no TechSheetService */
+    public const ANALYZER_VERSION = 3;
+
+    /**
+     * Atributos de modelo usados para indexação / KPI Modelos
+     * @var list<string>
+     */
+    public const MODEL_ATTRIBUTE_IDS = [
+        'MODEL',
+        'COMPATIBLE_VEHICLE_MODELS',
+        'VEHICLE_MODEL',
+        'MOTO_MODEL',
+        'ALPHANUMERIC_MODEL',
+    ];
+
+    /**
+     * Tags ML que impedem o vendedor de preencher o atributo via API
+     * @see https://developers.mercadolivre.com.br/pt_br/atributos
+     * @var list<string>
+     */
+    private const NON_FILLABLE_TAGS = ['read_only', 'fixed', 'inferred', 'others'];
+
+    /**
+     * Atributos hidden operacionais/internos — não contam como Hidden SEO.
+     * Continuam em "recommended" quando faltam, para não sumir do radar.
+     * @var list<string>
+     */
+    private const HIDDEN_OPS_ATTRIBUTE_IDS = [
+        'PRODUCT_DATA_SOURCE',
+        'IS_KIT',
+        'AGID',
+        'EMPTY_GTIN_REASON',
+        'SELLER_SKU',
+        'SELLER_PACKAGE_WIDTH',
+        'SELLER_PACKAGE_LENGTH',
+        'SELLER_PACKAGE_HEIGHT',
+        'SELLER_PACKAGE_WEIGHT',
+        'SELLER_PACKAGE_DATA_SOURCE',
+    ];
+
     private PDO $db;
     private ?int $accountId;
     private ?MercadoLivreClient $mlClient = null;
     private ?CategoryService $categoryService = null;
     private ?AIProviderManager $aiProvider = null;
     private bool $aiAvailable = true; // Flag to track AI availability
-    
+
     public function __construct(int $accountId)
     {
         $this->db = Database::getInstance();
@@ -71,7 +111,7 @@ class AttributeKiller
     /**
      * �📦 Obtém atributos da categoria
      * Exposição pública para uso em outros serviços
-     * 
+     *
      * @param string $categoryId ID da categoria ML
      * @return array Lista de atributos da categoria
      */
@@ -81,7 +121,7 @@ class AttributeKiller
         // A API retorna array direto, não ['attributes' => [...]]
         return isset($categoryAttrs['attributes']) ? $categoryAttrs['attributes'] : (is_array($categoryAttrs) ? $categoryAttrs : []);
     }
-    
+
     /**
      * 🔍 Analisar lacunas de atributos
      */
@@ -94,6 +134,8 @@ class AttributeKiller
             'filled' => 0,
             'missing' => 0,
             'completeness' => 0,
+            'missing_model' => false,
+            'analyzer_version' => self::ANALYZER_VERSION,
             'gaps' => [
                 'required' => [],
                 'filter' => [],
@@ -102,38 +144,56 @@ class AttributeKiller
             ],
             'priority_actions' => [],
         ];
-        
+
         try {
             // Get category attributes
             $categoryAttrs = $this->categoryService->getCategoryAttributes($categoryId);
             // A API retorna array direto, não ['attributes' => [...]]
             $allAttrs = isset($categoryAttrs['attributes']) ? $categoryAttrs['attributes'] : (is_array($categoryAttrs) ? $categoryAttrs : []);
-            
+
             // Get item current attributes
             $item = $itemData;
             if (!$item) {
                 $item = $this->mlClient->get("/items/{$itemId}");
             }
             $currentAttrs = $item['attributes'] ?? [];
-            $currentAttrIds = array_column($currentAttrs, 'id');
-            
-            $result['total_available'] = count($allAttrs);
-            $result['filled'] = count($currentAttrs);
-            
+            $currentAttrsById = [];
+            foreach ($currentAttrs as $currentAttr) {
+                if (is_array($currentAttr) && isset($currentAttr['id'])) {
+                    $currentAttrsById[(string)$currentAttr['id']] = $currentAttr;
+                }
+            }
+
+            $fillableTotal = 0;
+            $fillableFilled = 0;
+            $missingModel = false;
+
             foreach ($allAttrs as $attr) {
                 // Garantir que attr é um array válido
                 if (!is_array($attr) || !isset($attr['id'])) {
                     continue;
                 }
-                
-                $attrId = $attr['id'];
-                $isFilled = in_array($attrId, $currentAttrIds);
-                
-                if ($isFilled) continue;
-                
-                // Garantir que tags é array
+
                 $tags = is_array($attr['tags'] ?? null) ? $attr['tags'] : [];
-                
+
+                // Ignorar atributos que o vendedor não pode preencher (doc ML: read_only/fixed/inferred/others)
+                if (!$this->isSellerFillable($tags)) {
+                    continue;
+                }
+
+                $fillableTotal++;
+                $attrId = (string)$attr['id'];
+                $isFilled = $this->isAttributeFilled($currentAttrsById, $attrId);
+
+                if ($isFilled) {
+                    $fillableFilled++;
+                    continue;
+                }
+
+                if (in_array($attrId, self::MODEL_ATTRIBUTE_IDS, true)) {
+                    $missingModel = true;
+                }
+
                 $gap = [
                     'id' => $attrId,
                     'name' => $attr['name'] ?? $attrId,
@@ -141,52 +201,130 @@ class AttributeKiller
                     'allowed_values' => $this->getAllowedValues($attr),
                     'can_infer' => $this->canInferValue($attr, $item),
                 ];
-                
-                // Classify gap - verificar se tags contém as chaves necessárias
-                $isRequired = isset($tags['required']) && $tags['required'];
-                $isCatalogRequired = isset($tags['catalog_required']) && $tags['catalog_required'];
-                $isHidden = isset($tags['hidden']) && $tags['hidden'];
-                $allowsFiltering = isset($tags['allow_filtering']) || in_array('allow_filtering', array_keys($tags));
-                
-                if ($isRequired) {
-                    $gap['priority'] = 'critical';
-                    $result['gaps']['required'][] = $gap;
-                } elseif ($isCatalogRequired) {
-                    $gap['priority'] = 'high';
+
+                // Classify gap — tags podem vir como objeto {"required":true} ou lista ["required"]
+                $isRequired = $this->hasTag($tags, 'required')
+                    || $this->hasTag($tags, 'new_required')
+                    || $this->hasTag($tags, 'catalog_listing_required');
+                $isCatalogRequired = $this->hasTag($tags, 'catalog_required');
+                $isHidden = $this->hasTag($tags, 'hidden');
+                $allowsFiltering = $this->hasTag($tags, 'allow_filtering');
+
+                if ($isRequired || $isCatalogRequired) {
+                    $gap['priority'] = $isRequired ? 'critical' : 'high';
                     $result['gaps']['required'][] = $gap;
                 } elseif ($allowsFiltering) {
                     $gap['priority'] = 'high';
                     $result['gaps']['filter'][] = $gap;
-                } elseif ($isHidden) {
+                } elseif ($isHidden && $this->isHiddenSeoAttribute($attrId)) {
                     $gap['priority'] = 'medium';
                     $result['gaps']['hidden'][] = $gap;
                 } else {
+                    // Inclui hidden operacionais (SKU, IS_KIT, etc.) e atributos visíveis opcionais
                     $gap['priority'] = 'low';
                     $result['gaps']['recommended'][] = $gap;
                 }
             }
-            
-            $result['missing'] = count($result['gaps']['required']) + 
-                                 count($result['gaps']['filter']) + 
+
+            $result['total_available'] = $fillableTotal;
+            $result['filled'] = $fillableFilled;
+            $result['missing_model'] = $missingModel;
+
+            $result['missing'] = count($result['gaps']['required']) +
+                                 count($result['gaps']['filter']) +
                                  count($result['gaps']['recommended']) +
                                  count($result['gaps']['hidden']);
-            
-            $result['completeness'] = $result['total_available'] > 0 
-                ? round(($result['filled'] / $result['total_available']) * 100, 1) 
+
+            $result['completeness'] = $fillableTotal > 0
+                ? round(($fillableFilled / $fillableTotal) * 100, 1)
                 : 0;
-            
+
             $result['priority_actions'] = $this->generatePriorityActions($result['gaps']);
-            
+
         } catch (\Exception $e) {
             $result['error'] = $e->getMessage();
         }
-        
+
         return $result;
     }
 
     /**
+     * Tag presente no formato objeto {"hidden": true} ou lista ["hidden"] da API ML.
+     */
+    public function hasTag(array $tags, string $tag): bool
+    {
+        if ($tags === []) {
+            return false;
+        }
+
+        if (array_key_exists($tag, $tags)) {
+            return (bool)$tags[$tag];
+        }
+
+        return in_array($tag, $tags, true);
+    }
+
+    /**
+     * Atributo editável pelo vendedor via API (exclui read_only/fixed/inferred/others).
+     */
+    public function isSellerFillable(array $tags): bool
+    {
+        foreach (self::NON_FILLABLE_TAGS as $skipTag) {
+            if ($this->hasTag($tags, $skipTag)) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /**
+     * Hidden relevante para SEO/indexação (exclui attrs operacionais internos).
+     */
+    public function isHiddenSeoAttribute(string $attrId): bool
+    {
+        return !in_array($attrId, self::HIDDEN_OPS_ATTRIBUTE_IDS, true);
+    }
+
+    /**
+     * Considera preenchido só se houver value_id, value_name ou values com conteúdo.
+     *
+     * @param array<string, array<string, mixed>> $currentAttrsById
+     */
+    public function isAttributeFilled(array $currentAttrsById, string $attrId): bool
+    {
+        if (!isset($currentAttrsById[$attrId]) || !is_array($currentAttrsById[$attrId])) {
+            return false;
+        }
+
+        $attr = $currentAttrsById[$attrId];
+        $valueId = $attr['value_id'] ?? null;
+        if ($valueId !== null && $valueId !== '') {
+            return true;
+        }
+
+        $valueName = trim((string)($attr['value_name'] ?? ''));
+        if ($valueName !== '' && strcasecmp($valueName, 'N/A') !== 0) {
+            return true;
+        }
+
+        if (!empty($attr['values']) && is_array($attr['values'])) {
+            foreach ($attr['values'] as $value) {
+                if (!is_array($value)) {
+                    continue;
+                }
+                if (!empty($value['id']) || trim((string)($value['name'] ?? '')) !== '') {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /**
      * 🔍 Extrair atributos do título do anúncio
-     * 
+     *
      * Analisa o título e extrai possíveis valores de atributos usando
      * padrões e IA.
      */
@@ -197,7 +335,7 @@ class AttributeKiller
             $extracted = [];
             $suggestions = [];
             $totalConfidence = 0;
-            
+
             // Padrões mais abrangentes para extração de atributos do título
             $patterns = [
                 // Marca - primeira palavra capitalizada ou palavras conhecidas
@@ -222,19 +360,19 @@ class AttributeKiller
                 // Gênero
                 'GENDER' => '/\b(masculino|feminino|unissex|infantil|adulto|beb[eê]|crian[çc]a|men|women|unisex|kids?)\b/iu',
             ];
-            
+
             $usedPatterns = [];
-            
+
             foreach ($categoryAttrs['attributes'] ?? [] as $attr) {
                 $attrId = $attr['id'] ?? '';
                 $attrName = $attr['name'] ?? '';
                 $allowedValues = $this->getAllowedValues($attr);
-                
+
                 // Verificar se já extraímos este atributo
                 if (in_array($attrId, $usedPatterns)) {
                     continue;
                 }
-                
+
                 // Tentar match por padrão específico
                 if (isset($patterns[$attrId])) {
                     if (preg_match($patterns[$attrId], $title, $matches)) {
@@ -253,7 +391,7 @@ class AttributeKiller
                         }
                     }
                 }
-                
+
                 // Tentar match por valores permitidos (mais preciso)
                 if (!empty($allowedValues)) {
                     foreach ($allowedValues as $allowed) {
@@ -274,7 +412,7 @@ class AttributeKiller
                     }
                 }
             }
-            
+
             // Se temos poucos resultados e IA disponível, usar IA para extração avançada
             if (count($extracted) < 3 && $this->isAIEnabled() && $this->aiAvailable) {
                 $aiExtracted = $this->extractWithAI($title, $categoryId, $categoryAttrs);
@@ -293,7 +431,7 @@ class AttributeKiller
                     }
                 }
             }
-            
+
             // Gerar sugestões para aplicação
             foreach ($extracted as $attr) {
                 $suggestions[] = [
@@ -304,11 +442,11 @@ class AttributeKiller
                     'source' => 'title',  // Normalizado: era 'title_extraction'
                 ];
             }
-            
-            $avgConfidence = count($extracted) > 0 
-                ? round($totalConfidence / count($extracted)) 
+
+            $avgConfidence = count($extracted) > 0
+                ? round($totalConfidence / count($extracted))
                 : 0;
-            
+
             return [
                 'success' => true,
                 'attributes' => $extracted,
@@ -316,7 +454,7 @@ class AttributeKiller
                 'confidence' => $avgConfidence,
                 'total_extracted' => count($extracted),
             ];
-            
+
         } catch (\Exception $e) {
             return [
                 'success' => false,
@@ -337,19 +475,19 @@ class AttributeKiller
         if (!$this->aiAvailable) {
             return [];
         }
-        
+
         try {
             $config = require __DIR__ . '/../../../../config/app.php';
             $aiEnabled = $config['ai']['enabled'] ?? false;
-            
+
             if (!$aiEnabled) {
                 return [];
             }
-            
+
             $prompt = "Extraia atributos do seguinte título de produto do Mercado Livre:\n\n";
             $prompt .= "Título: {$title}\n\n";
             $prompt .= "Atributos disponíveis na categoria:\n";
-            
+
             $attrList = [];
             foreach (array_slice($categoryAttrs['attributes'] ?? [], 0, 20) as $attr) {
                 $attrList[] = "- {$attr['id']}: {$attr['name']}";
@@ -357,18 +495,18 @@ class AttributeKiller
             $prompt .= implode("\n", $attrList);
             $prompt .= "\n\nRetorne um JSON com os atributos encontrados no formato:\n";
             $prompt .= '[{"attribute_id": "ID", "name": "Nome", "value": "Valor", "confidence": 0-100}]';
-            
+
             // Usar AIProviderManager
             $aiManager = new \App\Services\AI\Core\AIProviderManager();
             $response = $aiManager->complete($prompt, [
                 'max_tokens' => 500,
                 'temperature' => 0.3,
             ]);
-            
+
             if (isset($response['error'])) {
                 // Check if it's a quota/rate limit error
                 $errorMsg = $response['message'] ?? '';
-                if (stripos($errorMsg, 'quota') !== false || 
+                if (stripos($errorMsg, 'quota') !== false ||
                     stripos($errorMsg, '429') !== false ||
                     stripos($errorMsg, 'Too Many') !== false) {
                     $this->aiAvailable = false;
@@ -378,9 +516,9 @@ class AttributeKiller
                 }
                 return [];
             }
-            
+
             $content = $response['content'] ?? $response['text'] ?? '';
-            
+
             // Extrair JSON da resposta
             if (preg_match('/\[.*\]/s', $content, $matches)) {
                 $parsed = json_decode($matches[0], true);
@@ -396,13 +534,13 @@ class AttributeKiller
                     }, $parsed);
                 }
             }
-            
+
             return [];
-            
+
         } catch (\Exception $e) {
             // Check if it's a quota/rate limit error
             $errorMsg = $e->getMessage();
-            if (stripos($errorMsg, 'quota') !== false || 
+            if (stripos($errorMsg, 'quota') !== false ||
                 stripos($errorMsg, '429') !== false ||
                 stripos($errorMsg, 'Too Many') !== false) {
                 $this->aiAvailable = false;
@@ -452,7 +590,7 @@ class AttributeKiller
             ];
         }
     }
-    
+
     /**
      * 🤖 Preencher atributos faltantes usando IA
      */
@@ -465,7 +603,7 @@ class AttributeKiller
             'skipped' => [],
             'errors' => [],
         ];
-        
+
         try {
             $plan = $this->buildFillPlan($itemId, $categoryId, $itemData);
             $attributesToFill = $plan['attributes_to_fill'];
@@ -475,14 +613,14 @@ class AttributeKiller
             $result['errors'][] = $e->getMessage();
             return $result;
         }
-        
+
         // Apply attributes to ML
         if (!empty($attributesToFill)) {
             try {
                 $updateResult = $this->mlClient->put("/items/{$itemId}", [
                     'attributes' => $attributesToFill
                 ]);
-                
+
                 if (isset($updateResult['id'])) {
                     $result['success'] = true;
                     $result['ml_response'] = $updateResult;
@@ -493,7 +631,7 @@ class AttributeKiller
                 $result['errors'][] = $e->getMessage();
             }
         }
-        
+
         return $result;
     }
 
@@ -577,7 +715,7 @@ class AttributeKiller
             'item' => $itemData,
         ];
     }
-    
+
     /**
      * 🎯 Obter atributos ocultos (hidden) da categoria
      */
@@ -585,33 +723,45 @@ class AttributeKiller
     {
         try {
             $categoryAttrs = $this->categoryService->getCategoryAttributes($categoryId);
+            $allAttrs = isset($categoryAttrs['attributes']) ? $categoryAttrs['attributes'] : (is_array($categoryAttrs) ? $categoryAttrs : []);
             $hidden = [];
-            
-            foreach ($categoryAttrs['attributes'] ?? [] as $attr) {
-                if ($attr['tags']['hidden'] ?? false) {
-                    $hidden[] = [
-                        'id' => $attr['id'],
-                        'name' => $attr['name'],
-                        'value_type' => $attr['value_type'] ?? 'string',
-                        'allowed_values' => $this->getAllowedValues($attr),
-                        'hint' => $attr['hint'] ?? null,
-                        'importance' => 'seo_boost', // Hidden attrs improve search ranking
-                    ];
+
+            foreach ($allAttrs as $attr) {
+                if (!is_array($attr) || !isset($attr['id'])) {
+                    continue;
                 }
+                $tags = is_array($attr['tags'] ?? null) ? $attr['tags'] : [];
+                if (!$this->hasTag($tags, 'hidden')) {
+                    continue;
+                }
+                if (!$this->isSellerFillable($tags)) {
+                    continue;
+                }
+                if (!$this->isHiddenSeoAttribute((string)$attr['id'])) {
+                    continue;
+                }
+                $hidden[] = [
+                    'id' => $attr['id'],
+                    'name' => $attr['name'] ?? $attr['id'],
+                    'value_type' => $attr['value_type'] ?? 'string',
+                    'allowed_values' => $this->getAllowedValues($attr),
+                    'hint' => $attr['hint'] ?? null,
+                    'importance' => 'seo_boost', // Hidden attrs improve search ranking
+                ];
             }
-            
+
             return [
                 'category_id' => $categoryId,
                 'hidden_attributes' => $hidden,
                 'count' => count($hidden),
                 'tip' => 'Atributos ocultos melhoram ranking mesmo sem aparecer na ficha',
             ];
-            
+
         } catch (\Exception $e) {
             return ['error' => $e->getMessage()];
         }
     }
-    
+
     /**
      * 📊 Gerar relatório de completude da conta
      */
@@ -624,18 +774,18 @@ class AttributeKiller
             'critical_gaps' => 0,
             'items' => [],
         ];
-        
+
         $totalCompleteness = 0;
-        
+
         foreach ($itemIds as $itemId) {
             try {
                 $item = $this->mlClient->get("/items/{$itemId}");
                 $categoryId = $item['category_id'] ?? '';
-                
+
                 if (!$categoryId) continue;
-                
+
                 $gaps = $this->analyzeGaps($itemId, $categoryId);
-                
+
                 $report['items'][] = [
                     'item_id' => $itemId,
                     'title' => $item['title'] ?? '',
@@ -644,54 +794,54 @@ class AttributeKiller
                     'missing_filter' => count($gaps['gaps']['filter'] ?? []),
                     'missing_hidden' => count($gaps['gaps']['hidden'] ?? []),
                 ];
-                
+
                 $totalCompleteness += $gaps['completeness'];
                 $report['critical_gaps'] += count($gaps['gaps']['required'] ?? []);
                 $report['analyzed']++;
-                
+
             } catch (\Exception $e) {
                 continue;
             }
         }
-        
-        $report['avg_completeness'] = $report['analyzed'] > 0 
-            ? round($totalCompleteness / $report['analyzed'], 1) 
+
+        $report['avg_completeness'] = $report['analyzed'] > 0
+            ? round($totalCompleteness / $report['analyzed'], 1)
             : 0;
-        
+
         // Sort by completeness (worst first)
         usort($report['items'], fn($a, $b) => $a['completeness'] <=> $b['completeness']);
-        
+
         return $report;
     }
-    
+
     // Helper methods
-    
+
     private function getAllowedValues(array $attr): array
     {
         $values = [];
-        
+
         foreach ($attr['values'] ?? [] as $val) {
             $values[] = [
                 'id' => $val['id'] ?? null,
                 'name' => $val['name'] ?? '',
             ];
         }
-        
+
         return $values;
     }
-    
+
     private function canInferValue(array $attr, array $item): bool
     {
         // Check if value can be inferred from existing data
         $attrId = $attr['id'];
-        
+
         // Common inferrable attributes
         $inferrable = ['BRAND', 'MODEL', 'COLOR', 'SIZE', 'MATERIAL', 'GTIN', 'MPN'];
-        
+
         if (in_array($attrId, $inferrable)) {
             return true;
         }
-        
+
         // Check if title contains potential values
         $title = mb_strtolower($item['title'] ?? '');
         foreach ($attr['values'] ?? [] as $val) {
@@ -699,16 +849,16 @@ class AttributeKiller
                 return true;
             }
         }
-        
+
         return false;
     }
-    
+
     private function inferValueFromItem(array $gap, array $itemData): ?string
     {
         $attrId = $gap['id'];
         $title = $itemData['title'] ?? '';
         $allowedValues = $gap['allowed_values'] ?? [];
-        
+
         // Direct mapping for common attributes
         $mappings = [
             'BRAND' => 'brand',
@@ -716,11 +866,11 @@ class AttributeKiller
             'GTIN' => 'gtin',
             'MPN' => 'seller_custom_field',
         ];
-        
+
         if (isset($mappings[$attrId]) && !empty($itemData[$mappings[$attrId]])) {
             return $itemData[$mappings[$attrId]];
         }
-        
+
         // Try to find value in title
         foreach ($allowedValues as $val) {
             $name = $val['name'] ?? '';
@@ -728,7 +878,7 @@ class AttributeKiller
                 return $name;
             }
         }
-        
+
         // Condition detection
         if ($attrId === 'ITEM_CONDITION') {
             if (mb_stripos($title, 'novo') !== false || mb_stripos($title, 'lacrado') !== false) {
@@ -739,24 +889,24 @@ class AttributeKiller
             }
             return 'Novo'; // Default
         }
-        
+
         return null;
     }
-    
+
     private function inferWithAI(array $gap, array $itemData): ?string
     {
         // Guardrail 1: Só usar IA se houver valores permitidos
         if (empty($gap['allowed_values'])) {
             return null;
         }
-        
+
         // Guardrail 2: Verificar se IA está habilitada via config
         $config = require __DIR__ . '/../../../../config/app.php';
         $aiEnabled = ($config['tech_sheet']['ai_enabled'] ?? true) === true;
         if (!$aiEnabled) {
             return null;
         }
-        
+
         // Guardrail 3: Limitar atributos críticos que podem usar IA
         $aiAllowedAttributes = [
             'COLOR', 'MAIN_COLOR', 'SECONDARY_COLOR',
@@ -767,7 +917,7 @@ class AttributeKiller
             'ITEM_CONDITION', 'PRODUCT_TYPE',
             'GENDER', 'AGE_GROUP',
         ];
-        
+
         $attrId = $gap['id'] ?? '';
         $isAllowedForAI = false;
         foreach ($aiAllowedAttributes as $allowed) {
@@ -776,7 +926,7 @@ class AttributeKiller
                 break;
             }
         }
-        
+
         // Atributos críticos de identificação nunca devem ser inferidos por IA
         $neverUseAI = ['BRAND', 'MODEL', 'GTIN', 'MPN', 'EAN', 'UPC', 'ISBN', 'SELLER_SKU'];
         foreach ($neverUseAI as $forbidden) {
@@ -784,31 +934,31 @@ class AttributeKiller
                 return null;
             }
         }
-        
+
         if (!$isAllowedForAI) {
             // Permitir outros atributos se tiverem poucos valores possíveis
             if (count($gap['allowed_values']) > 30) {
                 return null; // Muitas opções = maior chance de erro
             }
         }
-        
+
         // Guardrail 4.5: Se IA já falhou nesta sessão, não tentar de novo
         if (!$this->aiAvailable) {
             return null;
         }
-        
+
         try {
             $provider = $this->aiProvider->getPrimaryProvider();
             if (!$provider) {
                 $this->aiAvailable = false;
                 return null;
             }
-            
+
             $allowedNames = array_column($gap['allowed_values'], 'name');
-            
+
             // Guardrail 4: Limitar valores no prompt para evitar confusão
             $valuesToShow = array_slice($allowedNames, 0, 20);
-            
+
             $prompt = "Baseado no produto abaixo, qual é o valor mais apropriado para o atributo '{$gap['name']}'?
 
 Produto: {$itemData['title']}
@@ -826,32 +976,32 @@ REGRAS:
                 ['role' => 'system', 'content' => 'Você seleciona atributos de produtos de forma precisa. Responda apenas com o valor exato da lista fornecida. Se não souber, responda NAO_IDENTIFICADO.'],
                 ['role' => 'user', 'content' => $prompt]
             ], ['temperature' => 0.1, 'max_tokens' => 50]); // Temperatura ainda mais baixa
-            
+
             $answer = trim($response['content'] ?? '');
-            
+
             // Guardrail 5: Rejeitar respostas inválidas
             if (empty($answer) || $answer === 'NAO_IDENTIFICADO' || mb_strlen($answer) > 100) {
                 return null;
             }
-            
+
             // Guardrail 6: Validar resposta está exatamente nos valores permitidos
             foreach ($allowedNames as $name) {
                 if (mb_strtolower($answer) === mb_strtolower($name)) {
                     return $name;
                 }
             }
-            
+
             // Guardrail 7: Log de resposta inválida para monitoramento
             log_warning('AttributeKiller AI: resposta inválida', [
                 'service' => 'AttributeKiller',
                 'attribute_id' => $attrId,
                 'answer' => $answer,
             ]);
-            
+
         } catch (\Exception $e) {
             // Se erro for de quota ou rate limit, desabilitar IA para esta sessão
             $errorMsg = $e->getMessage();
-            if (stripos($errorMsg, 'quota') !== false || 
+            if (stripos($errorMsg, 'quota') !== false ||
                 stripos($errorMsg, '429') !== false ||
                 stripos($errorMsg, 'Too Many') !== false ||
                 stripos($errorMsg, 'rate limit') !== false) {
@@ -866,18 +1016,18 @@ REGRAS:
                 'error' => $errorMsg,
             ]);
         }
-        
+
         return null;
     }
-    
+
     private function generatePriorityActions(array $gaps): array
     {
         $actions = [];
-        
+
         $requiredCount = count($gaps['required'] ?? []);
         $filterCount = count($gaps['filter'] ?? []);
         $hiddenCount = count($gaps['hidden'] ?? []);
-        
+
         if ($requiredCount > 0) {
             $actions[] = [
                 'priority' => 1,
@@ -886,7 +1036,7 @@ REGRAS:
                 'type' => 'required',
             ];
         }
-        
+
         if ($filterCount > 0) {
             $actions[] = [
                 'priority' => 2,
@@ -895,7 +1045,7 @@ REGRAS:
                 'type' => 'filter',
             ];
         }
-        
+
         if ($hiddenCount > 0) {
             $actions[] = [
                 'priority' => 3,
@@ -904,7 +1054,7 @@ REGRAS:
                 'type' => 'hidden',
             ];
         }
-        
+
         return $actions;
     }
 }

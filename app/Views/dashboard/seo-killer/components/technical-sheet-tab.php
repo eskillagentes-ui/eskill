@@ -15,13 +15,16 @@ declare(strict_types=1);
         </div>
 
         <div class="d-flex gap-2">
-            <button class="btn btn-outline-dark" type="button" onclick="SEOKiller.techSheet.toggleLargeText()" title="Aumentar/reduzir tamanho do texto">
+            <a class="btn btn-outline-secondary" href="/dashboard/tech-sheet" title="Abrir painel completo (smart-fill, bulk, export)">
+                <i class="bi bi-box-arrow-up-right"></i> Completo
+            </a>
+            <button class="btn btn-outline-dark" type="button" data-tech-action="toggleLargeText" title="Aumentar/reduzir tamanho do texto">
                 <i class="bi bi-type"></i> Texto
             </button>
-            <button class="btn btn-outline-dark" type="button" onclick="SEOKiller.techSheet.toggleHighContrast()" title="Ativar/desativar alto contraste">
+            <button class="btn btn-outline-dark" type="button" data-tech-action="toggleHighContrast" title="Ativar/desativar alto contraste">
                 <i class="bi bi-circle-half"></i> Contraste
             </button>
-            <button class="btn btn-outline-primary" type="button" onclick="SEOKiller.techSheet.loadList()">
+            <button class="btn btn-outline-primary" type="button" data-tech-action="loadList">
                 <i class="bi bi-arrow-clockwise"></i> Atualizar
             </button>
         </div>
@@ -32,16 +35,22 @@ declare(strict_types=1);
     <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
         <ul class="nav nav-pills" id="tech-sheet-tab-pills">
             <li class="nav-item">
-                <button class="nav-link active" type="button" data-tab="pending" onclick="SEOKiller.techSheet.setTab('pending', this)">Pendentes</button>
+                <button class="nav-link active" type="button" data-tab="pending" data-tech-action="setTab" data-tech-args='["pending"]' title="Qualquer lacuna: obrigatórios, filtro ou hidden SEO">Lacunas</button>
             </li>
             <li class="nav-item">
-                <button class="nav-link" type="button" data-tab="review" onclick="SEOKiller.techSheet.setTab('review', this)">Em revisão</button>
+                <button class="nav-link" type="button" data-tab="critical" data-tech-action="setTab" data-tech-args='["critical"]' title="Só obrigatórios/filtro (não inclui hidden-only)">Críticas</button>
             </li>
             <li class="nav-item">
-                <button class="nav-link" type="button" data-tab="done" onclick="SEOKiller.techSheet.setTab('done', this)">Concluídos</button>
+                <button class="nav-link" type="button" data-tab="hidden" data-tech-action="setTab" data-tech-args='["hidden"]' title="Atributos ocultos (SEO) faltando">Hidden SEO</button>
             </li>
             <li class="nav-item">
-                <button class="nav-link" type="button" data-tab="all" onclick="SEOKiller.techSheet.setTab('all', this)">Todos</button>
+                <button class="nav-link" type="button" data-tab="review" data-tech-action="setTab" data-tech-args='["review"]' title="Itens com sugestões pendentes de aprovação">Sugestões</button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" type="button" data-tab="done" data-tech-action="setTab" data-tech-args='["done"]'>Concluídos</button>
+            </li>
+            <li class="nav-item">
+                <button class="nav-link" type="button" data-tab="all" data-tech-action="setTab" data-tech-args='["all"]'>Todos</button>
             </li>
         </ul>
 
@@ -72,34 +81,49 @@ declare(strict_types=1);
             </select>
         </div>
         <div class="col-md-3">
-            <button class="btn btn-primary w-100" type="button" onclick="SEOKiller.techSheet.loadList()">
+            <button class="btn btn-primary w-100" type="button" data-tech-action="loadList">
                 <i class="bi bi-search"></i> Buscar
             </button>
         </div>
     </div>
 
+    <div id="tech-sheet-ean-banner" class="alert alert-light border mt-3 mb-0 py-2 px-3 small d-none" role="status"></div>
+    <div id="tech-sheet-hidden-banner" class="alert alert-info border mt-2 mb-0 py-2 px-3 small d-none" role="status"></div>
+
     <div class="row g-2 mt-3" id="tech-sheet-kpis">
-        <div class="col-md-3">
+        <div class="col-md-2 col-6">
             <div class="border rounded p-2">
-                <div class="text-muted small">Total</div>
+                <div class="text-muted small">Total (active)</div>
                 <div class="fw-semibold" id="tech-sheet-kpi-total">—</div>
             </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2 col-6">
             <div class="border rounded p-2">
                 <div class="text-muted small">Lacunas críticas</div>
                 <div class="fw-semibold" id="tech-sheet-kpi-critical">—</div>
             </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2 col-6">
+            <div class="border rounded p-2" title="Itens com atributos ocultos faltando">
+                <div class="text-muted small">Hidden SEO</div>
+                <div class="fw-semibold" id="tech-sheet-kpi-hidden">—</div>
+            </div>
+        </div>
+        <div class="col-md-2 col-6">
+            <div class="border rounded p-2" title="Sugestões de MODEL / itens que precisam">
+                <div class="text-muted small">Modelos</div>
+                <div class="fw-semibold" id="tech-sheet-kpi-model">—</div>
+            </div>
+        </div>
+        <div class="col-md-2 col-6">
             <div class="border rounded p-2">
                 <div class="text-muted small">Sugestões pendentes</div>
                 <div class="fw-semibold" id="tech-sheet-kpi-pending">—</div>
             </div>
         </div>
-        <div class="col-md-3">
+        <div class="col-md-2 col-6">
             <div class="border rounded p-2">
-                <div class="text-muted small">Completude média (analisados)</div>
+                <div class="text-muted small">Completude média</div>
                 <div class="fw-semibold" id="tech-sheet-kpi-avg">—</div>
             </div>
         </div>
@@ -141,10 +165,10 @@ declare(strict_types=1);
             </div>
             <div class="modal-footer">
                 <div class="me-auto small text-muted" id="tech-sheet-job-result-meta"></div>
-                <button class="btn btn-outline-secondary" type="button" onclick="SEOKiller.techSheet.copyJobFailures()">
+                <button class="btn btn-outline-secondary" type="button" data-tech-action="copyJobFailures">
                     <i class="bi bi-clipboard"></i> Copiar falhas
                 </button>
-                <button id="tech-sheet-job-retry-btn" class="btn btn-warning" type="button" onclick="SEOKiller.techSheet.retryFailuresFromModal()">
+                <button id="tech-sheet-job-retry-btn" class="btn btn-warning" type="button" data-tech-action="retryFailuresFromModal">
                     <i class="bi bi-arrow-repeat"></i> Reprocessar falhas
                 </button>
                 <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>

@@ -44,6 +44,9 @@ class TechSheetService
     public const SOURCE_INFERENCE = 'inference';
     public const SOURCE_DEFAULT = 'default';
     public const SOURCE_MANUAL = 'manual';
+    public const SOURCE_EAN_POOL = 'ean_pool';
+    public const SOURCE_EMPTY_GTIN = 'empty_gtin_policy';
+    public const SOURCE_HIDDEN_SEO = 'hidden_seo';
 
     /**
      * Fontes consideradas seguras para auto-approve
@@ -60,6 +63,9 @@ class TechSheetService
         self::SOURCE_INFERENCE,
         self::SOURCE_DEFAULT,
         self::SOURCE_MANUAL,
+        self::SOURCE_EAN_POOL,
+        self::SOURCE_EMPTY_GTIN,
+        self::SOURCE_HIDDEN_SEO,
     ];
 
     /**
@@ -127,27 +133,8 @@ class TechSheetService
             $params[':category_id'] = $filters['category_id'];
         }
 
-        if (!empty($filters['status'])) {
-            $where[] = 'i.status = :status';
-            $params[':status'] = $filters['status'];
-        }
-
-        $tab = strtolower((string)($filters['tab'] ?? ''));
-        if ($tab === 'review') {
-            $where[] = 'COALESCE(sc.pending_count, 0) > 0';
-        } elseif ($tab === 'done') {
-            $where[] = 's.item_id IS NOT NULL';
-            $where[] = 'COALESCE(sc.pending_count, 0) = 0';
-            $where[] = 'COALESCE(s.missing_required, 0) = 0';
-            $where[] = 'COALESCE(s.missing_filter, 0) = 0';
-            $where[] = 'COALESCE(s.missing_hidden, 0) = 0';
-        } elseif ($tab === 'pending') {
-            // Inclui itens ainda não analisados (sem resumo) ou com lacunas "críticas"
-            $where[] = '(s.item_id IS NULL OR COALESCE(s.missing_required, 0) > 0 OR COALESCE(s.missing_filter, 0) > 0 OR COALESCE(s.missing_hidden, 0) > 0)';
-        } elseif ($tab === 'hidden') {
-            // Apenas itens com atributos ocultos (hidden) faltando
-            $where[] = 'COALESCE(s.missing_hidden, 0) > 0';
-        }
+        $this->applyListingStatusFilter($where, $params, $filters);
+        $this->applyListingTabFilter($where, $filters);
 
         if (array_key_exists('has_pending_suggestions', $filters) && $filters['has_pending_suggestions'] !== null && $filters['has_pending_suggestions'] !== '') {
             $has = (int)$filters['has_pending_suggestions'];
@@ -271,7 +258,7 @@ class TechSheetService
             ];
         }
 
-        return [
+        $payload = [
             'success' => true,
             'items' => $items,
             'pagination' => [
@@ -281,6 +268,8 @@ class TechSheetService
                 'pages' => $perPage > 0 ? (int)ceil($total / $perPage) : 1,
             ],
         ];
+
+        return $payload;
     }
 
     /**
@@ -302,26 +291,8 @@ class TechSheetService
             $params[':category_id'] = $filters['category_id'];
         }
 
-        if (!empty($filters['status'])) {
-            $where[] = 'i.status = :status';
-            $params[':status'] = $filters['status'];
-        }
-
-        $tab = strtolower((string)($filters['tab'] ?? ''));
-        if ($tab === 'review') {
-            $where[] = 'COALESCE(sc.pending_count, 0) > 0';
-        } elseif ($tab === 'done') {
-            $where[] = 's.item_id IS NOT NULL';
-            $where[] = 'COALESCE(sc.pending_count, 0) = 0';
-            $where[] = 'COALESCE(s.missing_required, 0) = 0';
-            $where[] = 'COALESCE(s.missing_filter, 0) = 0';
-            $where[] = 'COALESCE(s.missing_hidden, 0) = 0';
-        } elseif ($tab === 'pending') {
-            $where[] = '(s.item_id IS NULL OR COALESCE(s.missing_required, 0) > 0 OR COALESCE(s.missing_filter, 0) > 0 OR COALESCE(s.missing_hidden, 0) > 0)';
-        } elseif ($tab === 'hidden') {
-            // Apenas itens com atributos ocultos (hidden) faltando
-            $where[] = 'COALESCE(s.missing_hidden, 0) > 0';
-        }
+        $this->applyListingStatusFilter($where, $params, $filters);
+        $this->applyListingTabFilter($where, $filters);
 
         if (array_key_exists('has_pending_suggestions', $filters) && $filters['has_pending_suggestions'] !== null && $filters['has_pending_suggestions'] !== '') {
             $has = (int)$filters['has_pending_suggestions'];
@@ -358,8 +329,10 @@ class TechSheetService
         $sql = "SELECT\n"
             . "  COUNT(*) AS total_items,\n"
             . "  SUM(CASE WHEN s.item_id IS NULL THEN 1 ELSE 0 END) AS unanalyzed_items,\n"
-            . "  SUM(CASE WHEN (s.item_id IS NULL OR COALESCE(s.missing_required,0) > 0 OR COALESCE(s.missing_filter,0) > 0 OR COALESCE(s.missing_hidden,0) > 0) THEN 1 ELSE 0 END) AS critical_gap_items,\n"
+            . "  SUM(CASE WHEN COALESCE(s.missing_required,0) > 0 THEN 1 ELSE 0 END) AS critical_gap_items,\n"
+            . "  SUM(CASE WHEN COALESCE(s.missing_filter,0) > 0 THEN 1 ELSE 0 END) AS filter_gap_items,\n"
             . "  SUM(CASE WHEN COALESCE(s.missing_hidden,0) > 0 THEN 1 ELSE 0 END) AS hidden_gap_items,\n"
+            . "  SUM(CASE WHEN (s.item_id IS NULL OR COALESCE(s.missing_required,0) > 0 OR COALESCE(s.missing_filter,0) > 0 OR COALESCE(s.missing_hidden,0) > 0) THEN 1 ELSE 0 END) AS pending_gap_items,\n"
             . "  SUM(COALESCE(s.missing_hidden, 0)) AS total_missing_hidden,\n"
             . "  SUM(COALESCE(sc.pending_count, 0)) AS pending_suggestions_total,\n"
             . "  SUM(CASE WHEN COALESCE(sc.pending_count, 0) > 0 THEN 1 ELSE 0 END) AS items_with_pending_suggestions,\n"
@@ -373,63 +346,146 @@ class TechSheetService
         // Buscar estatísticas de MODEL separadamente
         $modelStats = $this->getModelSuggestionStats();
 
-        return [
+        $payload = [
             'success' => true,
             'total_items' => (int)($r['total_items'] ?? 0),
             'unanalyzed_items' => (int)($r['unanalyzed_items'] ?? 0),
             'critical_gap_items' => (int)($r['critical_gap_items'] ?? 0),
+            'filter_gap_items' => (int)($r['filter_gap_items'] ?? 0),
             'hidden_gap_items' => (int)($r['hidden_gap_items'] ?? 0),
+            'pending_gap_items' => (int)($r['pending_gap_items'] ?? 0),
             'total_missing_hidden' => (int)($r['total_missing_hidden'] ?? 0),
             'pending_suggestions_total' => (int)($r['pending_suggestions_total'] ?? 0),
             'items_with_pending_suggestions' => (int)($r['items_with_pending_suggestions'] ?? 0),
             'avg_completeness_analyzed' => $r['avg_completeness_analyzed'] !== null ? (float)$r['avg_completeness_analyzed'] : null,
             // MODEL suggestion stats
             'model_suggestions' => $modelStats,
+            'ean_balance' => (new EanService())->getBalance($this->accountId),
         ];
+
+        return $payload;
     }
 
     /**
-     * Retorna estatísticas de sugestões de MODEL
+     * Filtro de status da listagem/stats.
+     * Default: apenas anúncios active (alinhado ao Analytics).
+     * Para incluir todos: status=all
+     *
+     * @param list<string> $where
+     * @param array<string, mixed> $params
+     * @param array<string, mixed> $filters
+     */
+    private function applyListingStatusFilter(array &$where, array &$params, array $filters): void
+    {
+        $status = $filters['status'] ?? null;
+        if ($status === null || $status === '') {
+            $status = 'active';
+        }
+        $status = strtolower(trim((string)$status));
+        if ($status === 'all' || $status === '*') {
+            return;
+        }
+        $where[] = 'i.status = :status';
+        $params[':status'] = $status;
+    }
+
+    /**
+     * Filtros de aba da listagem/KPIs.
+     * - pending (Lacunas): qualquer lacuna (required/filter/hidden) ou sem análise
+     * - critical (Críticas): só required/filter ou sem análise — NÃO inclui hidden-only
+     * - hidden: missing_hidden > 0
+     * - review (Sugestões): tem sugestões pending
+     * - done: analisado, sem lacunas e sem sugestões pending
+     */
+    private function applyListingTabFilter(array &$where, array $filters): void
+    {
+        $tab = strtolower(trim((string)($filters['tab'] ?? '')));
+        if ($tab === '' || $tab === 'all') {
+            return;
+        }
+
+        if ($tab === 'review') {
+            $where[] = 'COALESCE(sc.pending_count, 0) > 0';
+            return;
+        }
+
+        if ($tab === 'done') {
+            $where[] = 's.item_id IS NOT NULL';
+            $where[] = 'COALESCE(sc.pending_count, 0) = 0';
+            $where[] = 'COALESCE(s.missing_required, 0) = 0';
+            $where[] = 'COALESCE(s.missing_filter, 0) = 0';
+            $where[] = 'COALESCE(s.missing_hidden, 0) = 0';
+            return;
+        }
+
+        if ($tab === 'critical') {
+            $where[] = '(s.item_id IS NULL OR COALESCE(s.missing_required, 0) > 0 OR COALESCE(s.missing_filter, 0) > 0)';
+            return;
+        }
+
+        if ($tab === 'hidden') {
+            $where[] = 'COALESCE(s.missing_hidden, 0) > 0';
+            return;
+        }
+
+        if ($tab === 'pending') {
+            $where[] = '(s.item_id IS NULL OR COALESCE(s.missing_required, 0) > 0 OR COALESCE(s.missing_filter, 0) > 0 OR COALESCE(s.missing_hidden, 0) > 0)';
+        }
+    }
+
+    /**
+     * Retorna estatísticas de sugestões de MODEL (somente anúncios active)
      */
     private function getModelSuggestionStats(): array
     {
-        // Itens que precisam de MODEL: têm missing_filter > 0 (MODEL é um atributo de filtro)
-        // Nota: Na prática, MODEL pode estar como FILTER ou como ITEM_ATTRIBUTE
+        // Itens active que realmente precisam de MODEL (flag gravada no meta pelo analyzer v2+)
         $needsModel = $this->db->prepare("
             SELECT COUNT(DISTINCT s.item_id) as count
             FROM tech_sheet_item_summary s
+            INNER JOIN items i
+              ON i.account_id = s.account_id AND i.ml_item_id = s.item_id
             WHERE s.account_id = :account_id
-            AND (s.missing_filter > 0 OR s.missing_hidden > 0 OR s.missing_required > 0)
+              AND i.status = 'active'
+              AND (
+                JSON_EXTRACT(s.meta, '$.missing_model') = true
+                OR JSON_UNQUOTE(JSON_EXTRACT(s.meta, '$.missing_model')) = 'true'
+                OR JSON_EXTRACT(s.meta, '$.missing_model') = 1
+              )
         ");
         $needsModel->execute([':account_id' => $this->accountId]);
         $itemsNeedingModel = (int)($needsModel->fetchColumn() ?: 0);
 
-        // Itens com sugestões de MODEL pendentes
+        // Itens active com sugestões de MODEL pendentes
         $hasModelSuggestion = $this->db->prepare("
-            SELECT COUNT(DISTINCT item_id) as count
-            FROM tech_sheet_suggestions
-            WHERE account_id = :account_id
-            AND attribute_id = 'MODEL'
-            AND status = 'pending'
+            SELECT COUNT(DISTINCT t.item_id) as count
+            FROM tech_sheet_suggestions t
+            INNER JOIN items i
+              ON i.account_id = t.account_id AND i.ml_item_id = t.item_id
+            WHERE t.account_id = :account_id
+              AND i.status = 'active'
+              AND t.attribute_id IN ('MODEL','COMPATIBLE_VEHICLE_MODELS','VEHICLE_MODEL','MOTO_MODEL','ALPHANUMERIC_MODEL')
+              AND t.status = 'pending'
         ");
         $hasModelSuggestion->execute([':account_id' => $this->accountId]);
         $itemsWithModelSuggestions = (int)($hasModelSuggestion->fetchColumn() ?: 0);
 
-        // Total de sugestões de MODEL pendentes
+        // Total de sugestões de MODEL pendentes em anúncios active
         $totalModelSuggestions = $this->db->prepare("
             SELECT COUNT(*) as count
-            FROM tech_sheet_suggestions
-            WHERE account_id = :account_id
-            AND attribute_id = 'MODEL'
-            AND status = 'pending'
+            FROM tech_sheet_suggestions t
+            INNER JOIN items i
+              ON i.account_id = t.account_id AND i.ml_item_id = t.item_id
+            WHERE t.account_id = :account_id
+              AND i.status = 'active'
+              AND t.attribute_id IN ('MODEL','COMPATIBLE_VEHICLE_MODELS','VEHICLE_MODEL','MOTO_MODEL','ALPHANUMERIC_MODEL')
+              AND t.status = 'pending'
         ");
         $totalModelSuggestions->execute([':account_id' => $this->accountId]);
         $totalSuggestions = (int)($totalModelSuggestions->fetchColumn() ?: 0);
 
-        // Calcular cobertura
         $coverage = $itemsNeedingModel > 0
             ? round(($itemsWithModelSuggestions / $itemsNeedingModel) * 100, 1)
-            : 100;
+            : ($itemsWithModelSuggestions > 0 ? 100.0 : 0.0);
 
         return [
             'items_needing_model' => $itemsNeedingModel,
@@ -609,6 +665,15 @@ class TechSheetService
                 continue;
             }
 
+            $modelPolicy = new TechSheetModelSuggestionPolicy();
+            if ($modelPolicy->isModelAttribute($attributeId)) {
+                $cleanModel = $modelPolicy->cleanCandidate($value, (string)$title);
+                if ($cleanModel === null) {
+                    continue;
+                }
+                $value = $cleanModel;
+            }
+
             // Respeitar min_confidence
             if ($extractedConfidence < $minConfidence) {
                 continue;
@@ -755,12 +820,37 @@ class TechSheetService
             $this->getOrComputeSummary($row, $gaps);
         }
 
+        $titleForGtin = (string)($row['title'] ?? ($itemData['title'] ?? ''));
+        $gtinResult = $this->appendGtinSuggestion(
+            $itemId,
+            (string)$categoryId,
+            $categoryAttributes,
+            $itemData,
+            $titleForGtin
+        );
+        $gtinCreated = !empty($gtinResult['created']) ? 1 : 0;
+        if ($gtinCreated > 0 && !empty($gtinResult['result']['suggestion']['attribute_id'])) {
+            $processedAttributes[(string)$gtinResult['result']['suggestion']['attribute_id']] = true;
+        }
+
+        $hiddenResult = $this->appendHiddenSuggestions(
+            $itemId,
+            (string)$categoryId,
+            $categoryAttributes,
+            $itemData,
+            $titleForGtin,
+            array_keys($processedAttributes)
+        );
+        $hiddenCreated = (int)($hiddenResult['created'] ?? 0);
+
         return [
             'success' => true,
             'item_id' => $itemId,
-            'created' => $created + $benchmarkCreated,
+            'created' => $created + $benchmarkCreated + $gtinCreated + $hiddenCreated,
             'title_extracted' => count($titleExtracted),
             'benchmark_created' => $benchmarkCreated,
+            'gtin' => $gtinResult,
+            'hidden' => $hiddenResult,
             'plan' => $plan,
         ];
     }
@@ -934,7 +1024,7 @@ class TechSheetService
      * @param string $itemId ID do item
      * @return array Resultado com sugestões ranqueadas por relevância
      */
-    public function generateModelSuggestions(string $itemId): array
+    public function generateModelSuggestions(string $itemId, bool $dryRun = false): array
     {
         $row = $this->getLocalItemRow($itemId);
         if (!$row) {
@@ -949,6 +1039,18 @@ class TechSheetService
             return ['success' => false, 'error' => 'Categoria não identificada'];
         }
 
+        $policy = new TechSheetModelSuggestionPolicy();
+        if ($policy->isAmbiguousMultiModel((string)$title)) {
+            return $this->suggestUmbrellaModelForAmbiguousTitle(
+                $itemId,
+                (string)$categoryId,
+                (string)$title,
+                $itemData,
+                $policy,
+                $dryRun
+            );
+        }
+
         // Verificar se MODEL é um gap
         $gapsResult = $this->attributeKiller->analyzeGaps($itemId, (string)$categoryId, $itemData);
         $allGaps = array_merge(
@@ -959,9 +1061,9 @@ class TechSheetService
         );
 
         $modelGap = null;
-        $modelAliases = ['MODEL', 'COMPATIBLE_VEHICLE_MODELS', 'VEHICLE_MODEL', 'MOTO_MODEL'];
+        $modelAliases = TechSheetModelSuggestionPolicy::MODEL_ATTRIBUTE_IDS;
         foreach ($allGaps as $gap) {
-            if (in_array($gap['id'], $modelAliases)) {
+            if (in_array($gap['id'], $modelAliases, true)) {
                 $modelGap = $gap;
                 break;
             }
@@ -1143,6 +1245,14 @@ class TechSheetService
             }
         }
 
+        // ===== Política: MODEL = identificador limpo (não keyword stuffing) =====
+        $cleanedList = $policy->selectBest(array_values($suggestions), $title);
+        $suggestions = [];
+        foreach ($cleanedList as $cleanRow) {
+            $key = mb_strtolower($cleanRow['value']);
+            $suggestions[$key] = $cleanRow;
+        }
+
         // Ordenar por score
         uasort($suggestions, fn($a, $b) => $b['score'] <=> $a['score']);
 
@@ -1157,6 +1267,7 @@ class TechSheetService
                 'sources' => array_unique($suggestion['sources']),
                 'search_volume' => $suggestion['search_volume'],
                 'recommendation' => $this->getRecommendationLevel($suggestion['score']),
+                'policy' => $suggestion['policy'] ?? 'semantic_clean',
             ];
         }
 
@@ -1183,6 +1294,11 @@ class TechSheetService
                 continue;
             }
 
+            $cleanValue = $policy->cleanCandidate((string)$suggestion['value'], $title);
+            if ($cleanValue === null) {
+                continue;
+            }
+
             // Ajustar confidence baseado na relevância
             $confidence = $suggestion['score'];
             if ($isFromTitle) {
@@ -1191,24 +1307,30 @@ class TechSheetService
                 $confidence = min(90, $confidence + 10); // Boost se está no título
             }
 
-            $ok = $this->upsertSuggestion([
-                'account_id' => $this->accountId,
-                'item_id' => $itemId,
-                'category_id' => $categoryId,
-                'attribute_id' => $modelGap['id'],
-                'attribute_name' => $modelGap['name'] ?? 'Modelo',
-                'suggested_value' => $suggestion['value'],
-                'source' => 'search_strategy',
-                'confidence' => $confidence,
-                'status' => 'pending',
-                'meta' => [
-                    'strategy_sources' => $suggestion['sources'],
-                    'search_volume' => $suggestion['search_volume'],
-                    'rank' => $suggestion['rank'],
-                    'validation' => $isFromTitle ? 'from_title' : ($isInTitle ? 'in_title' : 'in_title_normalized'),
-                ],
-            ]);
-            if ($ok) $created++;
+            $ok = true;
+            if (!$dryRun) {
+                $ok = $this->upsertSuggestion([
+                    'account_id' => $this->accountId,
+                    'item_id' => $itemId,
+                    'category_id' => $categoryId,
+                    'attribute_id' => $modelGap['id'],
+                    'attribute_name' => $modelGap['name'] ?? 'Modelo',
+                    'suggested_value' => $cleanValue,
+                    'source' => 'search_strategy',
+                    'confidence' => $confidence,
+                    'status' => 'pending',
+                    'meta' => [
+                        'strategy_sources' => $suggestion['sources'],
+                        'search_volume' => $suggestion['search_volume'],
+                        'rank' => $suggestion['rank'],
+                        'validation' => $isFromTitle ? 'from_title' : ($isInTitle ? 'in_title' : 'in_title_normalized'),
+                        'policy' => 'semantic_field_mapping',
+                    ],
+                ]);
+            }
+            if ($ok) {
+                $created++;
+            }
         }
 
         return [
@@ -1220,10 +1342,114 @@ class TechSheetService
             'strategies_used' => $strategies,
             'suggestions_found' => count($suggestions),
             'suggestions_created' => $created,
+            'dry_run' => $dryRun,
             'ranked_suggestions' => array_slice($rankedSuggestions, 0, 10),
             'message' => count($rankedSuggestions) > 0
                 ? "Encontradas " . count($rankedSuggestions) . " sugestões de modelo via estratégias de busca"
                 : "Nenhum modelo encontrado via estratégias de busca",
+        ];
+    }
+
+    /**
+     * Título multi-compatível: tenta MODEL guarda-chuva (ex. CG 160) em vez de skip cego.
+     *
+     * @return array<string,mixed>
+     */
+    private function suggestUmbrellaModelForAmbiguousTitle(
+        string $itemId,
+        string $categoryId,
+        string $title,
+        array $itemData,
+        TechSheetModelSuggestionPolicy $policy,
+        bool $dryRun = false
+    ): array {
+        $signals = $policy->listModelLineSignals($title);
+        $umbrella = $policy->resolveUmbrellaModel($title);
+
+        if ($umbrella === null) {
+            return [
+                'success' => true,
+                'item_id' => $itemId,
+                'skipped' => true,
+                'reason' => 'ambiguous_multi_model_title',
+                'signals' => $signals,
+                'message' => 'Título lista múltiplos modelos sem família/cilindrada clara — MODEL único não sugerido',
+                'suggestions' => [],
+                'dry_run' => $dryRun,
+            ];
+        }
+
+        $gapsResult = $this->attributeKiller->analyzeGaps($itemId, $categoryId, $itemData);
+        $allGaps = array_merge(
+            $gapsResult['gaps']['required'] ?? [],
+            $gapsResult['gaps']['filter'] ?? [],
+            $gapsResult['gaps']['hidden'] ?? [],
+            $gapsResult['gaps']['recommended'] ?? []
+        );
+
+        $modelGap = null;
+        foreach ($allGaps as $gap) {
+            if (($gap['id'] ?? '') === 'MODEL') {
+                $modelGap = $gap;
+                break;
+            }
+        }
+
+        if ($modelGap === null) {
+            return [
+                'success' => true,
+                'item_id' => $itemId,
+                'skipped' => true,
+                'reason' => 'model_not_a_gap',
+                'signals' => $signals,
+                'umbrella' => $umbrella,
+                'message' => 'MODEL não é gap — guarda-chuva não gravado',
+                'suggestions' => [],
+                'dry_run' => $dryRun,
+            ];
+        }
+
+        $ok = true;
+        if (!$dryRun) {
+            $ok = $this->upsertSuggestion([
+                'account_id' => $this->accountId,
+                'item_id' => $itemId,
+                'category_id' => $categoryId,
+                'attribute_id' => 'MODEL',
+                'attribute_name' => $modelGap['name'] ?? 'Modelo',
+                'suggested_value' => $umbrella['value'],
+                'source' => 'search_strategy',
+                'confidence' => 88,
+                'status' => 'pending',
+                'meta' => [
+                    'policy' => 'umbrella_multi_compatible',
+                    'family' => $umbrella['family'],
+                    'signals' => $umbrella['signals'],
+                    'displacement' => $umbrella['displacement'],
+                    'validation' => 'umbrella_from_title',
+                ],
+            ]);
+        }
+
+        return [
+            'success' => true,
+            'item_id' => $itemId,
+            'title' => $title,
+            'category_id' => $categoryId,
+            'gap_attribute' => 'MODEL',
+            'suggestions_created' => ($ok && !$dryRun) ? 1 : ($dryRun ? 1 : 0),
+            'umbrella' => $umbrella,
+            'signals' => $signals,
+            'dry_run' => $dryRun,
+            'ranked_suggestions' => [[
+                'rank' => 1,
+                'value' => $umbrella['value'],
+                'score' => 88,
+                'sources' => ['title', 'umbrella_family'],
+                'policy' => 'umbrella_multi_compatible',
+            ]],
+            'message' => 'MULTI-compatível → MODEL guarda-chuva ' . $umbrella['value']
+                . ($dryRun ? ' (dry-run)' : ''),
         ];
     }
 
@@ -2168,6 +2394,31 @@ class TechSheetService
                 ':attribute_id' => $attributeId,
             ]);
 
+            if ($stmt->rowCount() > 0 && $status === 'rejected') {
+                $metaStmt = $this->db->prepare(
+                    "SELECT meta FROM tech_sheet_suggestions
+                     WHERE account_id = :account_id AND item_id = :item_id AND attribute_id = :attribute_id
+                     ORDER BY id DESC LIMIT 1"
+                );
+                $metaStmt->execute([
+                    ':account_id' => $this->accountId,
+                    ':item_id' => $itemId,
+                    ':attribute_id' => $attributeId,
+                ]);
+                $metaRaw = $metaStmt->fetchColumn();
+                $meta = is_string($metaRaw) ? (json_decode($metaRaw, true) ?: []) : [];
+                try {
+                    (new TechSheetGtinSuggestionService($this->accountId, $this))
+                        ->releaseReservationForRejectedSuggestion($itemId, $attributeId, $meta);
+                } catch (\Throwable $e) {
+                    log_warning('TechSheet: falha ao liberar reserva EAN no reject', [
+                        'item_id' => $itemId,
+                        'attribute_id' => $attributeId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
             $updated += $stmt->rowCount();
         }
 
@@ -2251,15 +2502,110 @@ class TechSheetService
             ':min_confidence' => $minConfidence,
         ]);
 
+        $approved = (int)$stmt->rowCount();
+
         return [
             'success' => true,
             'item_id' => $itemId,
-            'approved' => $stmt->rowCount(),
+            'approved' => $approved,
             'min_confidence' => $minConfidence,
         ];
     }
 
-    public function applyApproved(string $itemId, ?int $userId): array
+    /**
+     * IDs de anúncios active com pelo menos uma sugestão pending ≥ minConfidence.
+     *
+     * @return array{item_ids: list<string>, count: int, suggestions: int}
+     */
+    public function listActiveItemIdsWithPendingMinConfidence(int $minConfidence = 85, int $limit = 200): array
+    {
+        if ($minConfidence < 0) {
+            $minConfidence = 0;
+        }
+        if ($minConfidence > 100) {
+            $minConfidence = 100;
+        }
+        $limit = max(1, min(200, $limit));
+
+        $sql = "SELECT t.item_id, COUNT(*) AS pending_eligible
+                FROM tech_sheet_suggestions t
+                INNER JOIN items i
+                  ON i.account_id = t.account_id AND i.ml_item_id = t.item_id
+                WHERE t.account_id = :account_id
+                  AND i.status = 'active'
+                  AND t.status = 'pending'
+                  AND t.confidence IS NOT NULL
+                  AND t.confidence >= :min_confidence
+                GROUP BY t.item_id
+                ORDER BY pending_eligible DESC, t.item_id ASC
+                LIMIT {$limit}";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([
+            ':account_id' => $this->accountId,
+            ':min_confidence' => $minConfidence,
+        ]);
+
+        $itemIds = [];
+        $suggestions = 0;
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $id = (string)($row['item_id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+            $itemIds[] = $id;
+            $suggestions += (int)($row['pending_eligible'] ?? 0);
+        }
+
+        return [
+            'item_ids' => $itemIds,
+            'count' => count($itemIds),
+            'suggestions' => $suggestions,
+        ];
+    }
+
+    /**
+     * IDs de anúncios active com pelo menos uma sugestão approved (pronta para aplicar no ML).
+     *
+     * @return array{item_ids: list<string>, count: int, suggestions: int}
+     */
+    public function listActiveItemIdsWithApprovedSuggestions(int $limit = 200): array
+    {
+        $limit = max(1, min(200, $limit));
+
+        $sql = "SELECT t.item_id, COUNT(*) AS approved_count
+                FROM tech_sheet_suggestions t
+                INNER JOIN items i
+                  ON i.account_id = t.account_id AND i.ml_item_id = t.item_id
+                WHERE t.account_id = :account_id
+                  AND i.status = 'active'
+                  AND t.status = 'approved'
+                GROUP BY t.item_id
+                ORDER BY approved_count DESC, t.item_id ASC
+                LIMIT {$limit}";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute([':account_id' => $this->accountId]);
+
+        $itemIds = [];
+        $suggestions = 0;
+        while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+            $id = (string)($row['item_id'] ?? '');
+            if ($id === '') {
+                continue;
+            }
+            $itemIds[] = $id;
+            $suggestions += (int)($row['approved_count'] ?? 0);
+        }
+
+        return [
+            'item_ids' => $itemIds,
+            'count' => count($itemIds),
+            'suggestions' => $suggestions,
+        ];
+    }
+
+    public function applyApproved(string $itemId, ?int $userId = null): array
     {
         $stmt = $this->db->prepare(
             "SELECT * FROM tech_sheet_suggestions
@@ -2318,13 +2664,42 @@ class TechSheetService
                 'value_name' => $value,
             ];
 
+            $meta = [];
+            if (!empty($r['meta'])) {
+                $decoded = is_string($r['meta']) ? json_decode($r['meta'], true) : $r['meta'];
+                $meta = is_array($decoded) ? $decoded : [];
+            }
+            if (!empty($meta['reason_value_id']) && is_scalar($meta['reason_value_id'])) {
+                $payloadAttr['value_id'] = (string)$meta['reason_value_id'];
+            }
+            if (empty($payloadAttr['value_id']) && !empty($meta['value_id']) && is_scalar($meta['value_id'])) {
+                $payloadAttr['value_id'] = (string)$meta['value_id'];
+            }
+
             // Tenta resolver value_id
-            if (!empty($categoryAttributes)) {
+            if (empty($payloadAttr['value_id']) && !empty($categoryAttributes)) {
                 $resolvedId = $this->resolveValueId($attrId, $value, $categoryAttributes);
                 if ($resolvedId) {
                     $payloadAttr['value_id'] = $resolvedId;
-                    // Se temos value_id, podemos omitir value_name ou mantê-lo para consistência
                 }
+            }
+
+            // Doc ML: boolean exige value_id — não enviar só value_name
+            $valueType = (string)($meta['value_type'] ?? '');
+            if ($valueType === '' && !empty($categoryAttributes)) {
+                foreach ($categoryAttributes as $ca) {
+                    if (($ca['id'] ?? '') === $attrId) {
+                        $valueType = (string)($ca['value_type'] ?? '');
+                        break;
+                    }
+                }
+            }
+            if ($valueType === 'boolean' && empty($payloadAttr['value_id'])) {
+                log_warning('TechSheet apply: boolean sem value_id — skip', [
+                    'item_id' => $itemId,
+                    'attribute_id' => $attrId,
+                ]);
+                continue;
             }
 
             $currentMap[$attrId] = $payloadAttr;
@@ -2338,8 +2713,12 @@ class TechSheetService
         $payloadAttributes = array_values($currentMap ?: $appliedAttributes);
 
         $mlResponse = $this->mlClient->put("/items/{$itemId}", ['attributes' => $payloadAttributes]);
-        if (isset($mlResponse['error'])) {
-            return ['success' => false, 'error' => $mlResponse['message'] ?? 'Falha ao aplicar no Mercado Livre', 'ml' => $mlResponse];
+        if (isset($mlResponse['error']) || ($mlResponse['success'] ?? true) === false) {
+            return [
+                'success' => false,
+                'error' => $mlResponse['message'] ?? 'Falha ao aplicar no Mercado Livre',
+                'ml' => $mlResponse,
+            ];
         }
 
         // Marca como applied
@@ -2352,6 +2731,16 @@ class TechSheetService
             ':account_id' => $this->accountId,
             ':item_id' => $itemId,
         ]);
+
+        try {
+            (new TechSheetGtinSuggestionService($this->accountId, $this))
+                ->confirmPoolAfterApply($itemId, $appliedAttributes);
+        } catch (\Throwable $e) {
+            log_warning('TechSheet: falha ao confirmar consumo EAN pós-apply', [
+                'item_id' => $itemId,
+                'error' => $e->getMessage(),
+            ]);
+        }
 
         // Auditoria básica
         $this->writeAuditLog($userId, $itemId, [
@@ -2379,6 +2768,7 @@ class TechSheetService
             'success' => true,
             'item_id' => $itemId,
             'applied' => count($appliedAttributes),
+            'applied_count' => count($appliedAttributes),
             'ml' => $mlResponse,
         ];
     }
@@ -2530,6 +2920,12 @@ class TechSheetService
             'meta' => [
                 'priority_actions' => $gaps['priority_actions'] ?? null,
                 'computed_from' => 'local',
+                'analyzer_version' => (int)($gaps['analyzer_version'] ?? AttributeKiller::ANALYZER_VERSION),
+                'missing_model' => (bool)($gaps['missing_model'] ?? false),
+                'missing_hidden_ids' => array_values(array_map(
+                    static fn(array $g): string => (string)($g['id'] ?? ''),
+                    is_array($hidden) ? $hidden : []
+                )),
             ],
         ];
 
@@ -2567,6 +2963,20 @@ class TechSheetService
 
     private function isSummaryFresh(array $summaryRow): bool
     {
+        $meta = $summaryRow['meta'] ?? [];
+        if (is_string($meta)) {
+            $decoded = json_decode($meta, true);
+            $meta = is_array($decoded) ? $decoded : [];
+        }
+        if (!is_array($meta)) {
+            $meta = [];
+        }
+
+        // Invalida cache após mudança na classificação de gaps (ex.: ignorar read_only)
+        if ((int)($meta['analyzer_version'] ?? 0) < AttributeKiller::ANALYZER_VERSION) {
+            return false;
+        }
+
         $updatedAt = $summaryRow['updated_at'] ?? null;
         if (!$updatedAt) {
             return false;
@@ -2630,6 +3040,11 @@ class TechSheetService
         'ai',
         'default',
         'manual',
+        'ean_pool',
+        'empty_gtin_policy',
+        'hidden_seo',
+        'title',
+        'benchmark',
     ];
 
     private function normalizeSuggestionSource(string $source): string
@@ -2659,6 +3074,161 @@ class TechSheetService
         }
 
         return 'inference';
+    }
+
+    /**
+     * Persiste sugestão (API pública para TechSheetGtinSuggestionService).
+     */
+    /**
+     * Sugere GTIN (pool) ou EMPTY_GTIN_REASON para um item.
+     *
+     * @return array{success:bool,created?:bool,result?:array,error?:string}
+     */
+    public function suggestGtinForItem(string $itemId, bool $dryRun = false): array
+    {
+        $row = $this->getLocalItemRow($itemId);
+        if (!$row) {
+            return ['success' => false, 'error' => 'Item não encontrado no cache local.'];
+        }
+
+        $itemData = $this->decodeItemData($row);
+        $categoryId = $row['category_id'] ?: ($itemData['category_id'] ?? null);
+        if (!$categoryId) {
+            return ['success' => false, 'error' => 'category_id ausente.'];
+        }
+
+        $categoryAttributes = $this->attributeKiller->getCategoryAttributes((string)$categoryId);
+        $gtinService = new TechSheetGtinSuggestionService($this->accountId, $this);
+        $result = $gtinService->suggestForItem(
+            $itemId,
+            $categoryAttributes,
+            $itemData,
+            (string)$categoryId,
+            (string)($row['title'] ?? ($itemData['title'] ?? '')),
+            $dryRun
+        );
+
+        $created = ($result['success'] ?? false)
+            && empty($result['skipped'])
+            && !empty($result['suggestion']);
+
+        return [
+            'success' => (bool)($result['success'] ?? false),
+            'created' => $created,
+            'result' => $result,
+            'error' => $result['error'] ?? null,
+        ];
+    }
+
+    public function persistSuggestion(array $s): bool
+    {
+        return $this->upsertSuggestion($s);
+    }
+
+    /**
+     * Sugere atributos Hidden SEO (LINE/MPN/…) com evidência — sem inventar.
+     *
+     * @return array{success:bool,created?:int,result?:array,error?:string}
+     */
+    public function suggestHiddenForItem(string $itemId, bool $dryRun = false): array
+    {
+        $row = $this->getLocalItemRow($itemId);
+        if (!$row) {
+            return ['success' => false, 'error' => 'Item não encontrado no cache local.'];
+        }
+
+        $itemData = $this->decodeItemData($row);
+        $categoryId = $row['category_id'] ?: ($itemData['category_id'] ?? null);
+        if (!$categoryId) {
+            return ['success' => false, 'error' => 'category_id ausente.'];
+        }
+
+        $categoryAttributes = $this->attributeKiller->getCategoryAttributes((string)$categoryId);
+        $service = new TechSheetHiddenSuggestionService($this->accountId, $this, $this->attributeKiller);
+        $result = $service->suggestForItem(
+            $itemId,
+            $categoryAttributes,
+            $itemData,
+            (string)$categoryId,
+            (string)($row['title'] ?? ($itemData['title'] ?? '')),
+            [],
+            $dryRun
+        );
+
+        return [
+            'success' => (bool)($result['success'] ?? false),
+            'created' => (int)($result['created'] ?? 0),
+            'result' => $result,
+            'error' => $result['error'] ?? null,
+        ];
+    }
+
+    /**
+     * @return array{created:bool,result:array}
+     */
+    private function appendGtinSuggestion(
+        string $itemId,
+        string $categoryId,
+        array $categoryAttributes,
+        array $itemData,
+        string $title
+    ): array {
+        try {
+            $gtinService = new TechSheetGtinSuggestionService($this->accountId, $this);
+            $result = $gtinService->suggestForItem($itemId, $categoryAttributes, $itemData, $categoryId, $title);
+            $created = ($result['success'] ?? false)
+                && empty($result['skipped'])
+                && !empty($result['suggestion']);
+            return ['created' => $created, 'result' => $result];
+        } catch (\Throwable $e) {
+            log_warning('TechSheet: falha ao sugerir GTIN', [
+                'item_id' => $itemId,
+                'error' => $e->getMessage(),
+            ]);
+            return [
+                'created' => false,
+                'result' => ['success' => false, 'error' => $e->getMessage()],
+            ];
+        }
+    }
+
+    /**
+     * @param list<string> $skipAttributeIds
+     * @return array{created:int,result:array}
+     */
+    private function appendHiddenSuggestions(
+        string $itemId,
+        string $categoryId,
+        array $categoryAttributes,
+        array $itemData,
+        string $title,
+        array $skipAttributeIds
+    ): array {
+        try {
+            $service = new TechSheetHiddenSuggestionService($this->accountId, $this, $this->attributeKiller);
+            $result = $service->suggestForItem(
+                $itemId,
+                $categoryAttributes,
+                $itemData,
+                $categoryId,
+                $title,
+                $skipAttributeIds,
+                false
+            );
+            return [
+                'created' => (int)($result['created'] ?? 0),
+                'result' => $result,
+            ];
+        } catch (\Throwable $e) {
+            log_warning('TechSheet: falha ao sugerir Hidden SEO', [
+                'item_id' => $itemId,
+                'error' => $e->getMessage(),
+            ]);
+            return [
+                'created' => 0,
+                'result' => ['success' => false, 'error' => $e->getMessage()],
+            ];
+        }
     }
 
     private function upsertSuggestion(array $s): bool

@@ -2,7 +2,7 @@
 <?php
 /**
  * 🔧 Tech Sheet CLI - Ferramenta de linha de comando
- * 
+ *
  * Comandos disponíveis:
  *   analyze       Analisa itens pendentes
  *   suggestions   Gera sugestões em lote
@@ -11,9 +11,9 @@
  *   stats         Mostra estatísticas
  *   export        Exporta dados
  *   circuit       Gerencia circuit breaker
- * 
+ *
  * Uso: php bin/tech-sheet <comando> [opções]
- * 
+ *
  * Exemplos:
  *   php bin/tech-sheet analyze --account=1 --limit=100
  *   php bin/tech-sheet suggestions --account=1 --category=MLB1234
@@ -100,6 +100,10 @@ class TechSheetCLI
                 'smart-fill' => $this->smartFill(),
                 'approve' => $this->approveSuggestions(),
                 'apply' => $this->applySuggestions(),
+                'suggest-gtin' => $this->suggestGtin(),
+                'suggest-model' => $this->suggestModel(),
+                'suggest-hidden' => $this->suggestHidden(),
+                'performance' => $this->itemPerformance(),
                 'stats' => $this->showStats(),
                 'export' => $this->export(),
                 'circuit' => $this->circuitBreaker(),
@@ -134,12 +138,12 @@ class TechSheetCLI
         $sql = "
             SELECT i.ml_item_id, i.title, i.category_id
             FROM items i
-            LEFT JOIN tech_sheet_item_summary s 
+            LEFT JOIN tech_sheet_item_summary s
                 ON s.account_id = i.account_id AND s.item_id = i.ml_item_id
             WHERE i.account_id = :account_id
               AND i.status = 'active'
               AND (
-                  s.item_id IS NULL 
+                  s.item_id IS NULL
                   OR s.total_available = 0
                   OR s.last_analyzed_at < DATE_SUB(NOW(), INTERVAL :hours HOUR)
               )
@@ -227,11 +231,11 @@ class TechSheetCLI
               AND i.status = 'active'
               AND (s.missing_required > 0 OR s.missing_filter > 0)
         ";
-        
+
         if ($categoryId) {
             $sql .= " AND i.category_id = :category_id";
         }
-        
+
         $sql .= " ORDER BY s.missing_required DESC, s.missing_filter DESC LIMIT :limit";
 
         $stmt = $db->prepare($sql);
@@ -350,13 +354,13 @@ class TechSheetCLI
                     $saved = $result['saved_count'] ?? 0;
                     $covered = $result['gaps_covered'] ?? 0;
                     $sourcesUsed = implode(',', array_keys($result['sources_used'] ?? []));
-                    
+
                     echo C_GREEN . "✓ {$saved} sugestões ({$covered} gaps)" . C_RESET;
                     if ($sourcesUsed) {
                         echo " via " . C_BLUE . $sourcesUsed . C_RESET;
                     }
                     echo PHP_EOL;
-                    
+
                     $processed++;
                     $totalSuggestions += $saved;
                     $totalGapsCovered += $covered;
@@ -431,13 +435,13 @@ class TechSheetCLI
                 mb_substr($sug['suggested_value'], 0, 30),
                 $sug['confidence']
             );
-            
+
             echo C_CYAN . "→" . C_RESET . " {$info}... ";
 
             if (!$dryRun) {
                 $stmt = $db->prepare("
-                    UPDATE tech_sheet_suggestions 
-                    SET status = 'approved', 
+                    UPDATE tech_sheet_suggestions
+                    SET status = 'approved',
                         decided_at = NOW(),
                         notes = CONCAT(COALESCE(notes, ''), ' [CLI auto-approve]')
                     WHERE id = :id
@@ -462,8 +466,12 @@ class TechSheetCLI
     private function applySuggestions(): int
     {
         $accountId = $this->getAccountId();
-        $limit = (int)($this->options['limit'] ?? 50);
+        $guard = new \App\Services\HiddenSeo\SafetyGuard();
+        $limit = $guard->clampLimit((int)($this->options['limit'] ?? 50));
         $dryRun = isset($this->options['dry-run']);
+        $allowApply = isset($this->options['apply']) || !$dryRun;
+        // Override de emergência (ex.: apply MODEL já aprovado pelo dono)
+        $force = isset($this->options['i-understand-prod']);
 
         $this->header("🚀 Aplicando Sugestões Aprovadas");
         $this->info("Conta: {$accountId} | Limite: {$limit}");
@@ -472,16 +480,28 @@ class TechSheetCLI
         }
         $this->line();
 
+        try {
+            if ($force && $guard->isForbidden($accountId) && !$dryRun) {
+                $this->warn("Override --i-understand-prod: apply em conta blacklist {$accountId}");
+            } else {
+                $guard->assertCanApply($accountId, $dryRun, $allowApply);
+            }
+        } catch (\App\Exception\UnsafeOperationException $e) {
+            $this->error('UnsafeOperationException: ' . $e->getMessage());
+            $this->info('Dry-run: --dry-run | Override dono: --i-understand-prod (auditoria)');
+            return 1;
+        }
+
         $service = new TechSheetService($accountId);
         $db = Database::getInstance();
 
-        // Buscar itens com sugestões aprovadas
         $stmt = $db->prepare("
-            SELECT DISTINCT item_id
+            SELECT item_id
             FROM tech_sheet_suggestions
             WHERE account_id = :account_id
               AND status = 'approved'
-            ORDER BY updated_at ASC
+            GROUP BY item_id
+            ORDER BY MIN(updated_at) ASC
             LIMIT :limit
         ");
         $stmt->bindValue(':account_id', $accountId, \PDO::PARAM_INT);
@@ -524,13 +544,374 @@ class TechSheetCLI
                 $errors++;
             }
 
-            usleep(500000); // 500ms entre requisições
+            usleep(500000);
         }
 
         $this->line();
         $this->success("Aplicados: {$applied} | Erros: {$errors}");
 
         return $errors > 0 ? 1 : 0;
+    }
+
+    /**
+     * Comando: suggest-gtin
+     * Sugere GTIN do pool EAN ou EMPTY_GTIN_REASON (sem inventar EAN).
+     * Em produção exige --i-understand-prod. Preferir staging / dry-run.
+     */
+    private function suggestGtin(): int
+    {
+        $accountId = $this->getAccountId();
+        $limit = (int)($this->options['limit'] ?? 20);
+        $dryRun = isset($this->options['dry-run']);
+        $understandProd = isset($this->options['i-understand-prod']);
+
+        $appEnv = strtolower((string)(getenv('APP_ENV') ?: ($_ENV['APP_ENV'] ?? 'production')));
+        $isProdRisk = ($appEnv === 'production') || ($accountId === 1335);
+
+        if ($isProdRisk && !$understandProd) {
+            $this->error('Bloqueado: suggest-gtin em produção/conta 1335 exige --i-understand-prod');
+            $this->info('Use staging (ex. conta fixture) ou: php bin/tech-sheet suggest-gtin --account=X --dry-run --i-understand-prod');
+            return 1;
+        }
+
+        $this->header('🏷 Sugestão GTIN / EMPTY_GTIN_REASON');
+        $this->info("Conta: {$accountId} | Limite: {$limit}" . ($dryRun ? ' | DRY-RUN' : ''));
+        $this->line();
+
+        $service = new TechSheetService($accountId);
+        $ean = new \App\Services\EanService();
+        $balance = $ean->getBalance($accountId);
+        $this->info('Saldo EAN available: ' . (int)($balance['available'] ?? 0));
+        $this->line();
+
+        $db = Database::getInstance();
+        $sql = "
+            SELECT i.ml_item_id AS item_id, i.title, i.category_id
+            FROM items i
+            WHERE i.account_id = :account_id
+              AND i.status = 'active'
+            ORDER BY i.updated_at DESC
+            LIMIT :limit
+        ";
+        $stmt = $db->prepare($sql);
+        $stmt->bindValue(':account_id', $accountId, \PDO::PARAM_INT);
+        $stmt->bindValue(':limit', $limit, \PDO::PARAM_INT);
+        $stmt->execute();
+        $items = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        if ($items === []) {
+            $this->warn('Nenhum item active encontrado.');
+            return 0;
+        }
+
+        $created = 0;
+        $skipped = 0;
+        $errors = 0;
+        $bySource = ['ean_pool' => 0, 'empty_gtin_policy' => 0];
+
+        foreach ($items as $index => $item) {
+            $itemId = (string)$item['item_id'];
+            $progress = sprintf('[%d/%d]', $index + 1, count($items));
+            echo C_CYAN . $progress . C_RESET . " {$itemId}... ";
+
+            try {
+                $result = $service->suggestGtinForItem($itemId, $dryRun);
+                $inner = $result['result'] ?? [];
+                if (!empty($result['created'])) {
+                    $src = (string)($inner['suggestion']['source'] ?? '');
+                    $val = (string)($inner['suggestion']['suggested_value'] ?? '');
+                    if (isset($bySource[$src])) {
+                        $bySource[$src]++;
+                    }
+                    echo C_GREEN . "✓ {$src}={$val}" . ($dryRun ? ' (dry-run)' : '') . C_RESET . PHP_EOL;
+                    $created++;
+                } elseif (!empty($inner['skipped'])) {
+                    echo C_YELLOW . '⏭ ' . ($inner['reason'] ?? 'skipped') . C_RESET . PHP_EOL;
+                    $skipped++;
+                } else {
+                    echo C_RED . '✗ ' . ($result['error'] ?? 'erro') . C_RESET . PHP_EOL;
+                    $errors++;
+                }
+            } catch (\Throwable $e) {
+                echo C_RED . '✗ ' . $e->getMessage() . C_RESET . PHP_EOL;
+                $errors++;
+            }
+        }
+
+        $this->line();
+        $this->success(
+            "Criadas: {$created} (pool={$bySource['ean_pool']}, empty={$bySource['empty_gtin_policy']}) | "
+            . "Skipped: {$skipped} | Erros: {$errors}"
+            . ($dryRun ? ' [dry-run]' : '')
+        );
+
+        return $errors > 0 ? 1 : 0;
+    }
+
+    /**
+     * Comando: suggest-model
+     * Gera sugestões MODEL (identificador limpo / guarda-chuva multi-compatível).
+     * Em produção exige --i-understand-prod. Preferir staging / dry-run.
+     */
+    private function suggestModel(): int
+    {
+        $accountId = $this->getAccountId();
+        $limit = (int)($this->options['limit'] ?? 20);
+        $dryRun = isset($this->options['dry-run']);
+        $understandProd = isset($this->options['i-understand-prod']);
+
+        $appEnv = strtolower((string)(getenv('APP_ENV') ?: ($_ENV['APP_ENV'] ?? 'production')));
+        $isProdRisk = ($appEnv === 'production') || ($accountId === 1335);
+
+        if ($isProdRisk && !$understandProd) {
+            $this->error('Bloqueado: suggest-model em produção/conta 1335 exige --i-understand-prod');
+            $this->info('Use staging ou: php bin/tech-sheet suggest-model --account=X --dry-run --i-understand-prod');
+            return 1;
+        }
+
+        $this->header('🏍 Sugestão MODEL (identificador limpo)');
+        $this->info("Conta: {$accountId} | Limite: {$limit}" . ($dryRun ? ' | DRY-RUN' : ''));
+        $this->line();
+
+        $service = new TechSheetService($accountId);
+        $db = Database::getInstance();
+        $sql = "
+            SELECT i.ml_item_id AS item_id, i.title
+            FROM items i
+            WHERE i.account_id = :account_id
+              AND i.status = 'active'
+            ORDER BY i.updated_at DESC
+            LIMIT :limit
+        ";
+        $stmt = $db->prepare($sql);
+        $stmt->bindValue(':account_id', $accountId, \PDO::PARAM_INT);
+        $stmt->bindValue(':limit', $limit, \PDO::PARAM_INT);
+        $stmt->execute();
+        $items = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        if ($items === []) {
+            $this->warn('Nenhum item active encontrado.');
+            return 0;
+        }
+
+        $created = 0;
+        $skipped = 0;
+        $errors = 0;
+        $umbrella = 0;
+
+        foreach ($items as $index => $item) {
+            $itemId = (string)$item['item_id'];
+            $progress = sprintf('[%d/%d]', $index + 1, count($items));
+            echo C_CYAN . $progress . C_RESET . " {$itemId}... ";
+
+            try {
+                $result = $service->generateModelSuggestions($itemId, $dryRun);
+                if (!empty($result['umbrella'])) {
+                    $val = (string)($result['umbrella']['value'] ?? '');
+                    echo C_GREEN . "✓ umbrella={$val}" . ($dryRun ? ' (dry-run)' : '') . C_RESET . PHP_EOL;
+                    $created += (int)($result['suggestions_created'] ?? 0);
+                    $umbrella++;
+                } elseif (!empty($result['skipped'])) {
+                    echo C_YELLOW . '⏭ ' . ($result['reason'] ?? 'skipped') . C_RESET . PHP_EOL;
+                    $skipped++;
+                } elseif (($result['suggestions_created'] ?? 0) > 0 || !empty($result['ranked_suggestions'])) {
+                    $top = (string)(($result['ranked_suggestions'][0]['value'] ?? ''));
+                    $n = (int)($result['suggestions_created'] ?? 0);
+                    echo C_GREEN . "✓ created={$n} top={$top}" . ($dryRun ? ' (dry-run)' : '') . C_RESET . PHP_EOL;
+                    $created += max($n, $top !== '' ? 1 : 0);
+                } else {
+                    echo C_YELLOW . '⏭ ' . ($result['message'] ?? 'sem sugestão') . C_RESET . PHP_EOL;
+                    $skipped++;
+                }
+            } catch (\Throwable $e) {
+                echo C_RED . '✗ ' . $e->getMessage() . C_RESET . PHP_EOL;
+                $errors++;
+            }
+        }
+
+        $this->line();
+        $this->success(
+            "Criadas/ok: {$created} | Umbrella: {$umbrella} | Skipped: {$skipped} | Erros: {$errors}"
+            . ($dryRun ? ' [dry-run]' : '')
+        );
+
+        return $errors > 0 ? 1 : 0;
+    }
+
+    /**
+     * Comando: suggest-hidden
+     * Sugere Hidden SEO (LINE/MPN/…) com evidência.
+     * DRY-RUN é o padrão (não grava pending). Use --persist para gravar.
+     * --apply tenta aplicar no ML (bloqueado na blacklist 1335 via SafetyGuard).
+     */
+    private function suggestHidden(): int
+    {
+        $accountId = $this->getAccountId();
+        $guard = new \App\Services\HiddenSeo\SafetyGuard();
+        $limit = $guard->clampLimit((int)($this->options['limit'] ?? 100));
+        $wantApply = isset($this->options['apply']);
+        // dry-run padrão: só preview. --persist grava pending. --apply = ML (guard).
+        $persist = isset($this->options['persist']);
+        $dryRun = !$persist && !$wantApply;
+        if (isset($this->options['dry-run'])) {
+            $dryRun = true;
+            $persist = false;
+            $wantApply = false;
+        }
+
+        if ($guard->isForbidden($accountId) && ($persist || $wantApply)) {
+            $this->warn("Conta {$accountId} na blacklist — forçando dry-run (sem persist/apply ML).");
+            $dryRun = true;
+            $persist = false;
+            $wantApply = false;
+        }
+
+        $this->header('🔮 Sugestão Hidden SEO (evidência)');
+        $mode = $wantApply ? 'APPLY-ML' : ($persist ? 'PERSIST' : 'DRY-RUN');
+        $this->info("Conta: {$accountId} | Limite: {$limit} | Modo: {$mode}");
+        $this->info('SAFE_MODE=' . ($guard->isSafeMode() ? 'true' : 'false')
+            . ' | FORBIDDEN=' . implode(',', $guard->forbiddenAccounts()));
+        $this->line();
+
+        $db = Database::getInstance();
+        $sql = "
+            SELECT i.ml_item_id AS item_id, i.title
+            FROM items i
+            LEFT JOIN tech_sheet_item_summary s
+                ON s.account_id = i.account_id AND s.item_id = i.ml_item_id
+            WHERE i.account_id = :account_id
+              AND i.status = 'active'
+            ORDER BY COALESCE(s.missing_hidden, 0) DESC, i.updated_at DESC
+            LIMIT :limit
+        ";
+        $stmt = $db->prepare($sql);
+        $stmt->bindValue(':account_id', $accountId, \PDO::PARAM_INT);
+        $stmt->bindValue(':limit', $limit, \PDO::PARAM_INT);
+        $stmt->execute();
+        $items = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        if ($items === []) {
+            $this->warn('Nenhum item active encontrado.');
+            return 0;
+        }
+
+        $suggester = new \App\Services\HiddenSeo\HiddenSeoSuggester($accountId, $guard);
+        $itemIds = array_column($items, 'item_id');
+        $genDry = !$persist;
+        $result = $suggester->generate($itemIds, $genDry);
+
+        $created = (int)($result['created'] ?? 0);
+        $skipped = (int)($result['skipped'] ?? 0);
+        $byAttr = [];
+
+        echo C_BOLD . str_pad('Item', 18) . str_pad('Attr', 12) . str_pad('Valor', 28)
+            . str_pad('Source', 14) . 'Conf' . C_RESET . PHP_EOL;
+        echo str_repeat('─', 80) . PHP_EOL;
+
+        foreach (($result['suggestions'] ?? []) as $sugg) {
+            $aid = (string)($sugg['attribute_id'] ?? '');
+            $val = mb_substr((string)($sugg['suggested_value'] ?? ''), 0, 26);
+            $ev = (string)(($sugg['meta']['evidence_source'] ?? $sugg['source'] ?? ''));
+            $conf = (int)($sugg['confidence'] ?? 0);
+            $itemId = (string)($sugg['item_id'] ?? '');
+            echo str_pad($itemId, 18) . str_pad($aid, 12) . str_pad($val, 28)
+                . str_pad($ev, 14) . $conf . '%' . PHP_EOL;
+            if ($aid !== '') {
+                $byAttr[$aid] = ($byAttr[$aid] ?? 0) + 1;
+            }
+        }
+
+        if ($wantApply) {
+            $this->line();
+            try {
+                $applyResult = $suggester->applyPending($itemIds, false, true);
+                $this->success('Apply ML: applied=' . ($applyResult['applied'] ?? 0)
+                    . ' errors=' . ($applyResult['errors'] ?? 0));
+            } catch (\App\Exception\UnsafeOperationException $e) {
+                $this->error('UnsafeOperationException: ' . $e->getMessage());
+                return 1;
+            }
+        }
+
+        $attrSummary = $byAttr === [] ? '-' : implode(', ', array_map(
+            static fn(string $k, int $v): string => "{$k}={$v}",
+            array_keys($byAttr),
+            array_values($byAttr)
+        ));
+
+        $this->line();
+        $this->success(
+            "Sugestões: {$created} ({$attrSummary}) | Skipped: {$skipped} | Modo: {$mode}"
+            . ($genDry ? ' [sem gravar pending]' : ' [pending gravado]')
+        );
+        $this->info('Exemplos: php bin/tech-sheet suggest-hidden --account=1336 --limit=50');
+        $this->info('          php bin/tech-sheet suggest-hidden --account=1336 --persist');
+        $this->info('          php bin/tech-sheet suggest-hidden --account=1336 --apply  # bloqueado se 1335');
+
+        return 0;
+    }
+
+    /**
+     * Comando: performance
+     * Consulta GET /items/{id}/performance (API oficial que substitui /health).
+     * Uso: php bin/tech-sheet performance --account=X --item=MLB123
+     *      php bin/tech-sheet performance --account=X --limit=5
+     */
+    private function itemPerformance(): int
+    {
+        $accountId = $this->getAccountId();
+        $guard = new \App\Services\HiddenSeo\SafetyGuard();
+        $limit = $guard->clampLimit((int)($this->options['limit'] ?? 5));
+        $singleItem = isset($this->options['item']) ? (string)$this->options['item'] : '';
+
+        $this->header('📊 Qualidade /performance (API ML)');
+        $this->info("Conta: {$accountId} | Doc: qualidade-das-publicacoes");
+        $this->line();
+
+        $svc = new \App\Services\HiddenSeo\ItemPerformanceService($accountId);
+        $items = [];
+        if ($singleItem !== '') {
+            $items = [['item_id' => $singleItem]];
+        } else {
+            $db = Database::getInstance();
+            $stmt = $db->prepare(
+                "SELECT ml_item_id AS item_id FROM items
+                 WHERE account_id = :account_id AND status = 'active'
+                 ORDER BY updated_at DESC LIMIT :limit"
+            );
+            $stmt->bindValue(':account_id', $accountId, \PDO::PARAM_INT);
+            $stmt->bindValue(':limit', $limit, \PDO::PARAM_INT);
+            $stmt->execute();
+            $items = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        }
+
+        if ($items === []) {
+            $this->warn('Nenhum item para consultar.');
+            return 0;
+        }
+
+        $errors = 0;
+        foreach ($items as $i => $row) {
+            $itemId = (string)$row['item_id'];
+            echo C_CYAN . sprintf('[%d/%d]', $i + 1, count($items)) . C_RESET . " {$itemId}... ";
+            $r = $svc->getItemPerformance($itemId);
+            if (!($r['success'] ?? false)) {
+                echo C_YELLOW . '⏭ ' . ($r['error'] ?? 'erro') . C_RESET . PHP_EOL;
+                $errors++;
+                continue;
+            }
+            $score = $r['score'] ?? '-';
+            $level = $r['level_wording'] ?? $r['level'] ?? '-';
+            $tech = !empty($r['pending_tech_specs']) ? 'tech_specs=PENDING' : 'tech_specs=OK';
+            $gtin = !empty($r['pending_gtin']) ? 'gtin=PENDING' : 'gtin=OK';
+            echo C_GREEN . "score={$score} level={$level} {$tech} {$gtin}" . C_RESET . PHP_EOL;
+            foreach (array_slice($r['pending_rules'] ?? [], 0, 3) as $rule) {
+                echo '    · ' . ($rule['key'] ?? '') . ' — ' . mb_substr((string)($rule['title'] ?? ''), 0, 80) . PHP_EOL;
+            }
+            usleep(150000);
+        }
+
+        return $errors > 0 && $errors === count($items) ? 1 : 0;
     }
 
     /**
@@ -594,7 +975,7 @@ class TechSheetCLI
         $this->line();
 
         $exporter = new TechSheetExportService($accountId);
-        
+
         $options = [
             'include_gaps' => isset($this->options['include-gaps']),
             'include_suggestions' => !isset($this->options['no-suggestions']),
@@ -676,6 +1057,10 @@ class TechSheetCLI
         echo "  " . C_CYAN . "smart-fill" . C_RESET . "    🎯 Preenche lacunas com múltiplas fontes SEO" . PHP_EOL;
         echo "  " . C_CYAN . "approve" . C_RESET . "       Aprova sugestões automaticamente" . PHP_EOL;
         echo "  " . C_CYAN . "apply" . C_RESET . "         Aplica sugestões aprovadas no ML" . PHP_EOL;
+        echo "  " . C_CYAN . "suggest-gtin" . C_RESET . "  Sugere GTIN (pool EAN) ou EMPTY_GTIN_REASON" . PHP_EOL;
+        echo "  " . C_CYAN . "suggest-model" . C_RESET . " Sugere MODEL (limpo / guarda-chuva multi)" . PHP_EOL;
+        echo "  " . C_CYAN . "suggest-hidden" . C_RESET . " Sugere Hidden SEO (LINE/MPN/…) — dry-run padrão; --persist grava" . PHP_EOL;
+        echo "  " . C_CYAN . "performance" . C_RESET . "   Consulta /items/{id}/performance (qualidade ML)" . PHP_EOL;
         echo "  " . C_CYAN . "stats" . C_RESET . "         Mostra estatísticas" . PHP_EOL;
         echo "  " . C_CYAN . "export" . C_RESET . "        Exporta dados (CSV/JSON)" . PHP_EOL;
         echo "  " . C_CYAN . "circuit" . C_RESET . "       Gerencia circuit breaker" . PHP_EOL;
@@ -692,6 +1077,8 @@ class TechSheetCLI
         echo "  php bin/tech-sheet smart-fill --account=1 --sources=title,benchmark,autocomplete" . PHP_EOL;
         echo "  php bin/tech-sheet approve --account=1 --min-confidence=85" . PHP_EOL;
         echo "  php bin/tech-sheet apply --account=1 --dry-run" . PHP_EOL;
+        echo "  php bin/tech-sheet suggest-gtin --account=1 --limit=20 --dry-run" . PHP_EOL;
+        echo "  php bin/tech-sheet suggest-model --account=1 --limit=20 --dry-run" . PHP_EOL;
         echo "  php bin/tech-sheet export --account=1 --format=csv --output=/tmp/export.csv" . PHP_EOL;
 
         return 0;

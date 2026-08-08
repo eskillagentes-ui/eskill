@@ -36,7 +36,9 @@ class TechnicalSheetController extends BaseController
     public function __construct()
     {
         parent::__construct();
-        $this->accountId = $this->getActiveAccountId();
+        // Align with SEOKillerController: SessionHelper resolves DB preference when session key is unset after login.
+        $this->accountId = \App\Helpers\SessionHelper::getActiveAccountId()
+            ?? $this->getActiveAccountId();
         $this->config = \App\Core\Config::getInstance()->all();
     }
 
@@ -109,7 +111,9 @@ class TechnicalSheetController extends BaseController
                 'max_completeness' => $this->request->get('max_completeness'),
             ];
 
-            return $service->stats($filters);
+            $result = $service->stats($filters);
+
+            return $result;
         });
     }
 
@@ -255,7 +259,7 @@ class TechnicalSheetController extends BaseController
     }
 
     /**
-     * Dispara um job para gerar sugestões em lote
+     * Gera sugestões em lote (síncrono).
      * POST /api/seo/technical-sheet/batch/suggestions/generate
      * Body: {"item_ids": ["MLB..."]}
      */
@@ -282,30 +286,60 @@ class TechnicalSheetController extends BaseController
                 return ['success' => false, 'error' => 'Nenhum item selecionado'];
             }
 
-            if (count($itemIds) > 200) {
-                return ['success' => false, 'error' => 'Limite excedido: máximo 200 itens por job'];
+            if (count($itemIds) > 50) {
+                return ['success' => false, 'error' => 'Limite excedido: máximo 50 itens por geração síncrona'];
             }
 
-            $jobService = new JobService();
-            $jobId = $jobService->dispatch('tech_sheet_generate_suggestions', [
-                'account_id' => $this->accountId,
-                'user_id' => $userId,
-                'item_ids' => $itemIds,
-            ]);
+            $service = new TechSheetService($this->accountId);
+            $processed = 0;
+            $successful = 0;
+            $failed = 0;
+            $createdTotal = 0;
+            $failures = [];
+
+            foreach ($itemIds as $itemId) {
+                $processed++;
+                try {
+                    $res = $service->generateSuggestions($itemId);
+                    if (($res['success'] ?? false) === true) {
+                        $successful++;
+                        $createdTotal += (int)($res['created'] ?? 0);
+                    } else {
+                        $failed++;
+                        if (count($failures) < 20) {
+                            $failures[] = [
+                                'item_id' => $itemId,
+                                'error' => $res['error'] ?? 'Falha ao gerar sugestões',
+                            ];
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    $failed++;
+                    if (count($failures) < 20) {
+                        $failures[] = [
+                            'item_id' => $itemId,
+                            'error' => $e->getMessage(),
+                        ];
+                    }
+                }
+            }
 
             return [
                 'success' => true,
-                'job_id' => $jobId,
-                'status' => 'queued',
-                'total_items' => count($itemIds),
+                'mode' => 'sync',
+                'total_items' => $processed,
+                'successful_items' => $successful,
+                'failed_items' => $failed,
+                'suggestions_created_total' => $createdTotal,
+                'failures' => $failures,
             ];
         });
     }
 
     /**
-     * Dispara um job para aplicar sugestões aprovadas em lote
+     * Aplica sugestões aprovadas em lote (síncrono — escreve no ML).
      * POST /api/seo/technical-sheet/batch/apply
-     * Body: {"item_ids": ["MLB..."]}
+     * Body: {"item_ids": ["MLB..."]} ou {"scope":"eligible"}
      */
     public function batchApplyApproved(): void
     {
@@ -326,34 +360,80 @@ class TechnicalSheetController extends BaseController
             }
 
             $itemIds = array_values(array_unique(array_filter(array_map('strval', $itemIds))));
+            $service = new TechSheetService($this->accountId);
+            $scope = strtolower(trim((string)($input['scope'] ?? '')));
+
+            if (!$itemIds && $scope === 'eligible') {
+                $resolved = $service->listActiveItemIdsWithApprovedSuggestions(50);
+                $itemIds = $resolved['item_ids'] ?? [];
+                if (!$itemIds) {
+                    return [
+                        'success' => false,
+                        'error' => 'Nenhuma sugestão aprovada em anúncios active para aplicar',
+                    ];
+                }
+            }
+
             if (!$itemIds) {
                 return ['success' => false, 'error' => 'Nenhum item selecionado'];
             }
 
-            if (count($itemIds) > 200) {
-                return ['success' => false, 'error' => 'Limite excedido: máximo 200 itens por job'];
+            if (count($itemIds) > 50) {
+                return ['success' => false, 'error' => 'Limite excedido: máximo 50 itens por aplicação síncrona'];
             }
 
-            $jobService = new JobService();
-            $jobId = $jobService->dispatch('tech_sheet_apply_approved', [
-                'account_id' => $this->accountId,
-                'user_id' => $userId,
-                'item_ids' => $itemIds,
-            ]);
+            $processed = 0;
+            $successful = 0;
+            $failed = 0;
+            $appliedTotal = 0;
+            $failures = [];
+
+            foreach ($itemIds as $itemId) {
+                $processed++;
+                try {
+                    $res = $service->applyApproved($itemId, $userId);
+                    if (($res['success'] ?? false) === true) {
+                        $successful++;
+                        $appliedTotal += (int)($res['applied'] ?? 0);
+                    } else {
+                        $failed++;
+                        if (count($failures) < 20) {
+                            $failures[] = [
+                                'item_id' => $itemId,
+                                'error' => $res['error'] ?? 'Falha ao aplicar',
+                            ];
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    $failed++;
+                    if (count($failures) < 20) {
+                        $failures[] = [
+                            'item_id' => $itemId,
+                            'error' => $e->getMessage(),
+                        ];
+                    }
+                }
+            }
 
             return [
                 'success' => true,
-                'job_id' => $jobId,
-                'status' => 'queued',
-                'total_items' => count($itemIds),
+                'mode' => 'sync',
+                'scope' => $scope !== '' ? $scope : 'selected',
+                'total_items' => $processed,
+                'successful_items' => $successful,
+                'failed_items' => $failed,
+                'attributes_applied_total' => $appliedTotal,
+                'failures' => $failures,
             ];
         });
     }
 
     /**
-     * Dispara um job para aprovar sugestões pendentes em lote por confiança
+     * Aprova sugestões pendentes em lote por confiança (síncrono).
      * POST /api/seo/technical-sheet/batch/approve
      * Body: {"item_ids": ["MLB..."], "min_confidence": 85}
+     *       ou {"scope": "eligible", "min_confidence": 85} para todos active elegíveis
+     * Não aplica no Mercado Livre — apenas marca status=approved.
      */
     public function batchApprovePending(): void
     {
@@ -374,13 +454,6 @@ class TechnicalSheetController extends BaseController
             }
 
             $itemIds = array_values(array_unique(array_filter(array_map('strval', $itemIds))));
-            if (!$itemIds) {
-                return ['success' => false, 'error' => 'Nenhum item selecionado'];
-            }
-
-            if (count($itemIds) > 200) {
-                return ['success' => false, 'error' => 'Limite excedido: máximo 200 itens por job'];
-            }
 
             $minConfidence = isset($input['min_confidence']) ? (int)$input['min_confidence'] : 85;
             if ($minConfidence < 0) {
@@ -390,20 +463,70 @@ class TechnicalSheetController extends BaseController
                 $minConfidence = 100;
             }
 
-            $jobService = new JobService();
-            $jobId = $jobService->dispatch('tech_sheet_approve_pending', [
-                'account_id' => $this->accountId,
-                'user_id' => $userId,
-                'item_ids' => $itemIds,
-                'min_confidence' => $minConfidence,
-            ]);
+            $service = new TechSheetService($this->accountId);
+            $scope = strtolower(trim((string)($input['scope'] ?? '')));
+            if (!$itemIds && $scope === 'eligible') {
+                $resolved = $service->listActiveItemIdsWithPendingMinConfidence($minConfidence, 200);
+                $itemIds = $resolved['item_ids'] ?? [];
+                if (!$itemIds) {
+                    return [
+                        'success' => false,
+                        'error' => 'Nenhuma sugestão elegível (active + pending ≥ confiança mínima)',
+                    ];
+                }
+            }
+
+            if (!$itemIds) {
+                return ['success' => false, 'error' => 'Nenhum item selecionado'];
+            }
+
+            if (count($itemIds) > 200) {
+                return ['success' => false, 'error' => 'Limite excedido: máximo 200 itens'];
+            }
+
+            $processed = 0;
+            $successful = 0;
+            $failed = 0;
+            $approvedTotal = 0;
+            $failures = [];
+
+            foreach ($itemIds as $itemId) {
+                $processed++;
+                try {
+                    $res = $service->approvePendingByConfidence($itemId, $userId, $minConfidence);
+                    if (($res['success'] ?? false) === true) {
+                        $successful++;
+                        $approvedTotal += (int)($res['approved'] ?? 0);
+                    } else {
+                        $failed++;
+                        if (count($failures) < 20) {
+                            $failures[] = [
+                                'item_id' => $itemId,
+                                'error' => $res['error'] ?? 'Falha ao aprovar pendentes',
+                            ];
+                        }
+                    }
+                } catch (\Throwable $e) {
+                    $failed++;
+                    if (count($failures) < 20) {
+                        $failures[] = [
+                            'item_id' => $itemId,
+                            'error' => $e->getMessage(),
+                        ];
+                    }
+                }
+            }
 
             return [
                 'success' => true,
-                'job_id' => $jobId,
-                'status' => 'queued',
-                'total_items' => count($itemIds),
+                'mode' => 'sync',
+                'scope' => $scope !== '' ? $scope : 'selected',
                 'min_confidence' => $minConfidence,
+                'total_items' => $processed,
+                'successful_items' => $successful,
+                'failed_items' => $failed,
+                'suggestions_approved_total' => $approvedTotal,
+                'failures' => $failures,
             ];
         });
     }
@@ -594,7 +717,7 @@ class TechnicalSheetController extends BaseController
             $input = $this->request->json();
             $format = $input['format'] ?? 'csv';
             $content = $input['content'] ?? '';
-            
+
             $options = [
                 'overwrite' => $input['overwrite'] ?? false,
                 'force_status' => $input['force_status'] ?? 'pending',
@@ -667,13 +790,13 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() {
             $chartsService = new TechSheetChartsService($this->accountId);
-            
+
             $type = $this->request->get('type', 'all');
-            
+
             if ($type === 'all') {
                 return $chartsService->getDashboardCharts();
             }
-            
+
             return match($type) {
                 'completeness' => $chartsService->getCompletenessTrend($this->request->getInt('days', 30)),
                 'categories' => $chartsService->getCategoryDistribution(),
@@ -694,15 +817,15 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() {
             $data = $this->request->json();
-            
+
             if (empty($data['item_ids'])) {
                 throw new \Exception("item_ids é obrigatório");
             }
-            
+
             $batchOptimizer = new TechSheetBatchOptimizerService($this->accountId);
-            
+
             $action = $data['action'] ?? 'generate';
-            
+
             return match($action) {
                 'generate' => $batchOptimizer->generateBatchSuggestions(
                     $data['item_ids'],
@@ -725,7 +848,7 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() {
             $batchOptimizer = new TechSheetBatchOptimizerService($this->accountId);
-            
+
             return [
                 'history' => $batchOptimizer->analyzeBatchPerformance(),
                 'suggestions' => $batchOptimizer->getOptimizationSuggestions(),
@@ -741,7 +864,7 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() {
             $scheduler = new TechSheetSchedulerService($this->accountId);
-            
+
             return $scheduler->listJobs([
                 'status' => $this->request->get('status'),
                 'job_type' => $this->request->get('job_type'),
@@ -757,18 +880,18 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() {
             $data = $this->request->json();
-            
+
             if (empty($data['job_type'])) {
                 throw new \Exception("job_type é obrigatório");
             }
-            
+
             $scheduler = new TechSheetSchedulerService($this->accountId);
-            
+
             $jobId = $scheduler->scheduleJob(
                 $data['job_type'],
                 $data['config'] ?? []
             );
-            
+
             return [
                 'success' => true,
                 'job_id' => $jobId,
@@ -784,7 +907,7 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() use ($jobId) {
             $scheduler = new TechSheetSchedulerService($this->accountId);
-            
+
             return $scheduler->runJob($jobId);
         });
     }
@@ -797,9 +920,9 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() use ($jobId) {
             $scheduler = new TechSheetSchedulerService($this->accountId);
-            
+
             $success = $scheduler->pauseJob($jobId);
-            
+
             return ['success' => $success];
         });
     }
@@ -812,9 +935,9 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() use ($jobId) {
             $scheduler = new TechSheetSchedulerService($this->accountId);
-            
+
             $success = $scheduler->resumeJob($jobId);
-            
+
             return ['success' => $success];
         });
     }
@@ -827,9 +950,9 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() use ($jobId) {
             $scheduler = new TechSheetSchedulerService($this->accountId);
-            
+
             $success = $scheduler->deleteJob($jobId);
-            
+
             return ['success' => $success];
         });
     }
@@ -842,7 +965,7 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() {
             $scheduler = new TechSheetSchedulerService($this->accountId);
-            
+
             return [
                 'stats' => $scheduler->getJobsStats(),
                 'due_jobs' => $scheduler->checkDueJobs(),
@@ -858,7 +981,7 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() {
             $webhookService = new TechSheetWebhookService($this->accountId);
-            
+
             return $webhookService->listWebhooks([
                 'type' => $this->request->get('type'),
                 'status' => $this->request->get('status'),
@@ -874,18 +997,18 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() {
             $data = $this->request->json();
-            
+
             if (empty($data['type'])) {
                 throw new \Exception("type é obrigatório (slack|telegram|http)");
             }
-            
+
             $webhookService = new TechSheetWebhookService($this->accountId);
-            
+
             $webhookId = $webhookService->registerWebhook(
                 $data['type'],
                 $data['config'] ?? []
             );
-            
+
             return [
                 'success' => true,
                 'webhook_id' => $webhookId,
@@ -901,11 +1024,11 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() use ($webhookId) {
             $data = $this->request->json();
-            
+
             $webhookService = new TechSheetWebhookService($this->accountId);
-            
+
             $success = $webhookService->updateWebhook($webhookId, $data);
-            
+
             return ['success' => $success];
         });
     }
@@ -918,9 +1041,9 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() use ($webhookId) {
             $webhookService = new TechSheetWebhookService($this->accountId);
-            
+
             $success = $webhookService->deleteWebhook($webhookId);
-            
+
             return ['success' => $success];
         });
     }
@@ -933,7 +1056,7 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() use ($webhookId) {
             $webhookService = new TechSheetWebhookService($this->accountId);
-            
+
             return $webhookService->testWebhook($webhookId);
         });
     }
@@ -946,7 +1069,7 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() {
             $alertService = new TechSheetAlertService($this->accountId);
-            
+
             return $alertService->listAlertRules([
                 'type' => $this->request->get('type'),
                 'status' => $this->request->get('status'),
@@ -962,15 +1085,15 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() {
             $data = $this->request->json();
-            
+
             if (empty($data['name']) || empty($data['type']) || empty($data['conditions'])) {
                 throw new \Exception("name, type e conditions são obrigatórios");
             }
-            
+
             $alertService = new TechSheetAlertService($this->accountId);
-            
+
             $ruleId = $alertService->createAlertRule($data);
-            
+
             return [
                 'success' => true,
                 'rule_id' => $ruleId,
@@ -986,11 +1109,11 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() use ($ruleId) {
             $data = $this->request->json();
-            
+
             $alertService = new TechSheetAlertService($this->accountId);
-            
+
             $success = $alertService->updateAlertRule($ruleId, $data);
-            
+
             return ['success' => $success];
         });
     }
@@ -1003,9 +1126,9 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() use ($ruleId) {
             $alertService = new TechSheetAlertService($this->accountId);
-            
+
             $success = $alertService->deleteAlertRule($ruleId);
-            
+
             return ['success' => $success];
         });
     }
@@ -1018,15 +1141,15 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() use ($ruleId) {
             $data = $this->request->json();
-            
+
             if (empty($data['email'])) {
                 throw new \Exception("email é obrigatório");
             }
-            
+
             $alertService = new TechSheetAlertService($this->accountId);
-            
+
             $success = $alertService->addRecipient($ruleId, $data['email']);
-            
+
             return ['success' => $success];
         });
     }
@@ -1039,9 +1162,9 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() use ($ruleId, $email) {
             $alertService = new TechSheetAlertService($this->accountId);
-            
+
             $success = $alertService->removeRecipient($ruleId, urldecode($email));
-            
+
             return ['success' => $success];
         });
     }
@@ -1054,7 +1177,7 @@ class TechnicalSheetController extends BaseController
     {
         $this->handleJson(function() {
             $alertService = new TechSheetAlertService($this->accountId);
-            
+
             return $alertService->getAlertHistory([
                 'rule_id' => $this->request->get('rule_id'),
                 'days' => $this->request->getInt('days', 7),
@@ -1076,14 +1199,14 @@ class TechnicalSheetController extends BaseController
 
             $service = new TechSheetService($this->accountId);
             $item = $service->getItem($itemId);
-            
+
             if (!$item['success']) {
                 return $item;
             }
 
             $title = $item['item']['title'] ?? '';
             $categoryId = $item['item']['category_id'] ?? '';
-            
+
             if (empty($title)) {
                 return ['success' => false, 'error' => 'Anúncio sem título'];
             }
@@ -1116,27 +1239,27 @@ class TechnicalSheetController extends BaseController
 
             $service = new TechSheetService($this->accountId);
             $item = $service->getItem($itemId);
-            
+
             if (!$item['success']) {
                 return $item;
             }
 
             $categoryId = $item['item']['category_id'] ?? '';
-            
+
             if (empty($categoryId)) {
                 return ['success' => false, 'error' => 'Categoria não encontrada para este item'];
             }
-            
+
             // Buscar atributos atuais do item via API ML
             $client = new \App\Services\MercadoLivreClient($this->accountId);
             $mlItem = $client->get("/items/{$itemId}");
-            
+
             if (isset($mlItem['error'])) {
                 return ['success' => false, 'error' => 'Erro ao buscar item: ' . ($mlItem['message'] ?? 'API error')];
             }
-            
+
             $currentAttributes = $mlItem['attributes'] ?? [];
-            
+
             try {
                 // Buscar concorrentes mais vendidos da categoria
                 $searchResult = $client->get('/sites/MLB/search', [
@@ -1144,33 +1267,33 @@ class TechnicalSheetController extends BaseController
                     'limit' => 15,
                     'sort' => 'sold_quantity_desc',
                 ]);
-                
+
                 if (isset($searchResult['error'])) {
                     return ['success' => false, 'error' => 'Erro na busca: ' . ($searchResult['message'] ?? 'Search failed')];
                 }
-                
+
                 $competitors = [];
                 $attributeUsage = [];
                 $attributeUsage = [];
-                
+
                 foreach ($searchResult['results'] ?? [] as $result) {
                     if (($result['id'] ?? '') === $itemId) {
                         continue; // Pular o próprio item
                     }
-                    
+
                     $competitorDetail = $client->get("/items/{$result['id']}");
-                    
+
                     $compAttrs = [];
                     foreach ($competitorDetail['attributes'] ?? [] as $attr) {
                         $attrId = $attr['id'] ?? '';
                         $attrName = $attr['name'] ?? '';
                         $attrValue = $attr['value_name'] ?? '';
-                        
+
                         $compAttrs[$attrId] = [
                             'name' => $attrName,
                             'value' => $attrValue,
                         ];
-                        
+
                         if (!isset($attributeUsage[$attrId])) {
                             $attributeUsage[$attrId] = [
                                 'name' => $attrName,
@@ -1183,7 +1306,7 @@ class TechnicalSheetController extends BaseController
                             $attributeUsage[$attrId]['values'][] = $attrValue;
                         }
                     }
-                    
+
                     $competitors[] = [
                         'id' => $result['id'],
                         'title' => $result['title'] ?? '',
@@ -1192,13 +1315,13 @@ class TechnicalSheetController extends BaseController
                         'attributes' => $compAttrs,
                     ];
                 }
-                
+
                 // Identificar gaps - atributos que concorrentes têm e nós não
                 $gaps = [];
                 $currentAttrIds = array_column($currentAttributes, 'id');
                 $totalCompetitors = count($competitors);
                 $minUsage = max(2, (int)($totalCompetitors * 0.3)); // Pelo menos 30% dos concorrentes
-                
+
                 foreach ($attributeUsage as $attrId => $usage) {
                     if (!in_array($attrId, $currentAttrIds) && $usage['count'] >= $minUsage) {
                         $usagePercent = $totalCompetitors > 0 ? round(($usage['count'] / $totalCompetitors) * 100) : 0;
@@ -1212,10 +1335,10 @@ class TechnicalSheetController extends BaseController
                         ];
                     }
                 }
-                
+
                 // Ordenar gaps por uso (mais usados primeiro)
                 usort($gaps, fn($a, $b) => $b['competitor_usage'] <=> $a['competitor_usage']);
-                
+
                 return [
                     'success' => true,
                     'item_id' => $itemId,
@@ -1224,7 +1347,7 @@ class TechnicalSheetController extends BaseController
                     'attribute_gaps' => $gaps,
                     'competitors' => array_slice($competitors, 0, 5), // Top 5
                 ];
-                
+
             } catch (\Exception $e) {
                 return [
                     'success' => false,
@@ -1247,7 +1370,7 @@ class TechnicalSheetController extends BaseController
 
             $service = new TechSheetService($this->accountId);
             $item = $service->getItem($itemId);
-            
+
             if (!$item['success']) {
                 return $item;
             }
@@ -1261,8 +1384,8 @@ class TechnicalSheetController extends BaseController
             $stmt = $db->prepare("
                 SELECT attribute_id, attribute_name, suggested_value, source, confidence
                 FROM tech_sheet_suggestions
-                WHERE item_id = :item_id 
-                  AND account_id = :account_id 
+                WHERE item_id = :item_id
+                  AND account_id = :account_id
                   AND status = 'approved'
                 ORDER BY confidence DESC
             ");
@@ -1285,11 +1408,11 @@ class TechnicalSheetController extends BaseController
             // Usar completeness_percent (campo real do DB) em vez de completeness_score
             $currentScore = $item['summary']['completeness_percent'] ?? 0;
             $newScore = $currentScore;
-            
+
             foreach ($approvedSuggestions as $suggestion) {
                 $attrId = $suggestion['attribute_id'];
                 $currentValue = $currentAttributes[$attrId]['value'] ?? null;
-                
+
                 $changes[] = [
                     'attribute_id' => $attrId,
                     'attribute_name' => $suggestion['attribute_name'],
@@ -1299,7 +1422,7 @@ class TechnicalSheetController extends BaseController
                     'source' => $suggestion['source'],
                     'confidence' => (int)$suggestion['confidence'],
                 ];
-                
+
                 // Estimar impacto no score
                 if ($currentValue === null) {
                     $newScore = min(100, $newScore + 2);
@@ -1325,7 +1448,7 @@ class TechnicalSheetController extends BaseController
     private function getPreviewWarnings(array $changes): array
     {
         $warnings = [];
-        
+
         $lowConfidenceCount = count(array_filter($changes, fn($c) => $c['confidence'] < 70));
         if ($lowConfidenceCount > 0) {
             $warnings[] = [
@@ -1334,7 +1457,7 @@ class TechnicalSheetController extends BaseController
                 'severity' => 'warning',
             ];
         }
-        
+
         $overwriteCount = count(array_filter($changes, fn($c) => !$c['is_new']));
         if ($overwriteCount > 0) {
             $warnings[] = [
@@ -1343,7 +1466,7 @@ class TechnicalSheetController extends BaseController
                 'severity' => 'info',
             ];
         }
-        
+
         if (count($changes) > 20) {
             $warnings[] = [
                 'type' => 'bulk_change',
@@ -1351,7 +1474,7 @@ class TechnicalSheetController extends BaseController
                 'severity' => 'warning',
             ];
         }
-        
+
         return $warnings;
     }
 
@@ -1655,7 +1778,7 @@ class TechnicalSheetController extends BaseController
     /**
      * 📈 Enriquece item com dados de Trends do Mercado Livre
      * GET /api/seo/technical-sheet/items/{itemId}/trends
-     * 
+     *
      * Usa endpoints oficiais:
      * - /trends/sites/{site_id}
      * - /trends/sites/{site_id}/categories/{category_id}
@@ -1675,7 +1798,7 @@ class TechnicalSheetController extends BaseController
     /**
      * 🌐 Tendências gerais do site (país)
      * GET /api/seo/technical-sheet/trends/site
-     * 
+     *
      * Endpoint ML: /trends/sites/{site_id}
      */
     public function getSiteTrends(): void
@@ -1686,12 +1809,12 @@ class TechnicalSheetController extends BaseController
             }
 
             $siteId = $this->request->get('site_id', 'MLB');
-            
+
             $trendsService = new \App\Services\TrendsService($this->accountId);
-            
+
             // Buscar tendências gerais
             $trends = $trendsService->getHotProducts(['site_id' => $siteId, 'limit' => 20]);
-            
+
             return [
                 'success' => true,
                 'site_id' => $siteId,
@@ -1704,7 +1827,7 @@ class TechnicalSheetController extends BaseController
     /**
      * 📊 Tendências por categoria
      * GET /api/seo/technical-sheet/trends/category/{categoryId}
-     * 
+     *
      * Endpoint ML: /trends/sites/{site_id}/categories/{category_id}
      */
     public function getCategoryTrends(string $categoryId): void
@@ -1715,22 +1838,22 @@ class TechnicalSheetController extends BaseController
             }
 
             $siteId = $this->request->get('site_id', 'MLB');
-            
+
             $trendsService = new \App\Services\TrendsService($this->accountId);
-            
+
             // Buscar tendências da categoria
             $categoryTrends = $trendsService->getCategoryTrends($categoryId, ['site_id' => $siteId]);
-            
+
             // Buscar produtos em alta na categoria
             $hotProducts = $trendsService->getHotProducts([
                 'site_id' => $siteId,
                 'category_id' => $categoryId,
                 'limit' => 10
             ]);
-            
+
             // Analisar sazonalidade
             $seasonality = $trendsService->analyzeSeasonality($categoryId);
-            
+
             return [
                 'success' => true,
                 'category_id' => $categoryId,
@@ -1746,7 +1869,7 @@ class TechnicalSheetController extends BaseController
     /**
      * 🎯 Smart Gap Filler - Preenche lacunas usando múltiplas fontes SEO
      * POST /api/seo/technical-sheet/items/{itemId}/smart-fill
-     * 
+     *
      * Body JSON (opcional):
      * {
      *   "sources": ["title", "description", "benchmark", "autocomplete", "trends", "history", "ai"],
@@ -1762,7 +1885,7 @@ class TechnicalSheetController extends BaseController
             }
 
             $input = $this->request->json() ?? [];
-            
+
             $options = [
                 'sources' => $input['sources'] ?? ['title', 'description', 'benchmark', 'autocomplete', 'trends'],
                 'min_confidence' => (int)($input['min_confidence'] ?? 50),
@@ -1777,7 +1900,7 @@ class TechnicalSheetController extends BaseController
     /**
      * 🎯 Smart Gap Filler em Lote
      * POST /api/seo/technical-sheet/batch/smart-fill
-     * 
+     *
      * Body JSON:
      * {
      *   "item_ids": ["MLB123", "MLB456"],
@@ -1804,7 +1927,7 @@ class TechnicalSheetController extends BaseController
                 $stmt = $db->prepare("
                     SELECT DISTINCT i.ml_item_id
                     FROM items i
-                    LEFT JOIN tech_sheet_item_summary s 
+                    LEFT JOIN tech_sheet_item_summary s
                         ON s.account_id = i.account_id AND s.item_id = i.ml_item_id
                     WHERE i.account_id = :account_id
                       AND i.status = 'active'
@@ -1883,7 +2006,7 @@ class TechnicalSheetController extends BaseController
             // Testar cada fonte individualmente
             $sources = ['title', 'description', 'benchmark', 'autocomplete', 'trends', 'history', 'ai'];
             $service = new TechSheetSmartGapFillerService($this->accountId);
-            
+
             $coverage = [];
             $allGaps = null;
 
@@ -1901,8 +2024,8 @@ class TechnicalSheetController extends BaseController
                 $coverage[$source] = [
                     'gaps_covered' => $result['gaps_covered'] ?? 0,
                     'suggestions' => $result['total_suggestions'] ?? 0,
-                    'coverage_percent' => $allGaps > 0 
-                        ? round(($result['gaps_covered'] ?? 0) / $allGaps * 100, 1) 
+                    'coverage_percent' => $allGaps > 0
+                        ? round(($result['gaps_covered'] ?? 0) / $allGaps * 100, 1)
                         : 0,
                 ];
             }
@@ -1921,8 +2044,8 @@ class TechnicalSheetController extends BaseController
                 'coverage_by_source' => $coverage,
                 'combined_coverage' => [
                     'gaps_covered' => $allResult['gaps_covered'] ?? 0,
-                    'coverage_percent' => $allGaps > 0 
-                        ? round(($allResult['gaps_covered'] ?? 0) / $allGaps * 100, 1) 
+                    'coverage_percent' => $allGaps > 0
+                        ? round(($allResult['gaps_covered'] ?? 0) / $allGaps * 100, 1)
                         : 0,
                     'total_suggestions' => $allResult['total_suggestions'] ?? 0,
                 ],
@@ -1942,14 +2065,14 @@ class TechnicalSheetController extends BaseController
                 $best[$source] = $data['coverage_percent'];
             }
         }
-        
+
         arsort($best);
         $topSources = array_keys(array_slice($best, 0, 3, true));
-        
+
         if (empty($topSources)) {
             return 'Considere usar IA para atributos que permitem inferência';
         }
-        
+
         return 'Fontes recomendadas: ' . implode(', ', $topSources);
     }
 
@@ -2055,7 +2178,7 @@ class TechnicalSheetController extends BaseController
             $limitSql = max(1, min(200, (int)$limit));
 
             $db = \App\Database::getInstance();
-            
+
             // Buscar sugestões elegíveis
             $stmt = $db->prepare("
                 SELECT id, item_id, attribute_id, suggested_value, confidence
@@ -2082,9 +2205,9 @@ class TechnicalSheetController extends BaseController
             // Aprovar em lote
             $ids = array_column($suggestions, 'id');
             $placeholders = implode(',', array_fill(0, count($ids), '?'));
-            
+
             $updateStmt = $db->prepare("
-                UPDATE tech_sheet_suggestions 
+                UPDATE tech_sheet_suggestions
                 SET status = 'approved',
                     decided_at = NOW(),
                     notes = CONCAT(COALESCE(notes, ''), ' [auto-approved: confidence >= {$threshold}%]')
@@ -2112,7 +2235,7 @@ class TechnicalSheetController extends BaseController
     /**
      * 🔍 Dry-run em lote: gera preview/diff sem aplicar
      * POST /api/seo/technical-sheet/bulk/dry-run
-     * 
+     *
      * Body: {
      *   "item_ids": ["MLB123", "MLB456"],
      *   "optimize_title": true,
@@ -2134,7 +2257,7 @@ class TechnicalSheetController extends BaseController
             }
 
             $service = new \App\Services\BulkSEOService($this->accountId);
-            
+
             return $service->dryRunBatch($itemIds, [
                 'optimize_title' => (bool)($data['optimize_title'] ?? true),
                 'optimize_description' => (bool)($data['optimize_description'] ?? true),
@@ -2145,7 +2268,7 @@ class TechnicalSheetController extends BaseController
     /**
      * ✅ Aplica otimizações aprovadas em lote
      * POST /api/seo/technical-sheet/bulk/apply
-     * 
+     *
      * Body: {
      *   "items": [
      *     {
@@ -2181,7 +2304,7 @@ class TechnicalSheetController extends BaseController
             ];
 
             $service = new \App\Services\BulkSEOService($this->accountId);
-            
+
             return $service->applyBatch($items, $userId, $meta);
         });
     }
@@ -2200,7 +2323,7 @@ class TechnicalSheetController extends BaseController
             // Usar o Service para centralizar a lógica
             $service = new \App\Services\BulkSEOService($this->accountId);
             $result = $service->getJobStatus($jobId);
-            
+
             if (!$result['success']) {
                 return $result;
             }
@@ -2227,7 +2350,7 @@ class TechnicalSheetController extends BaseController
     /**
      * 🔄 Inicia job assíncrono de aplicação em lote
      * POST /api/seo/technical-sheet/bulk/apply-async
-     * 
+     *
      * Para lotes grandes (>10 itens), executa em background com progresso
      */
     public function bulkApplyAsync(): void
@@ -2252,7 +2375,7 @@ class TechnicalSheetController extends BaseController
             ];
 
             $service = new \App\Services\BulkSEOService($this->accountId);
-            
+
             return $service->startBatchJob($items, $userId, $meta);
         });
     }
@@ -2272,7 +2395,7 @@ class TechnicalSheetController extends BaseController
             $offset = $this->request->getInt('offset', 0);
 
             $service = new \App\Services\BulkSEOService($this->accountId);
-            
+
             return $service->getBulkHistory($limit, $offset);
         });
     }
@@ -2280,7 +2403,7 @@ class TechnicalSheetController extends BaseController
     /**
      * ↩️ Rollback em lote
      * POST /api/seo/technical-sheet/bulk/rollback
-     * 
+     *
      * Body: {
      *   "version_ids": [1, 2, 3],
      *   "reason": "Revertendo otimização incorreta"
@@ -2304,7 +2427,7 @@ class TechnicalSheetController extends BaseController
             $reason = (string)($data['reason'] ?? 'Bulk rollback');
 
             $service = new \App\Services\BulkSEOService($this->accountId);
-            
+
             return $service->rollbackBatch($versionIds, $userId, $reason);
         });
     }
@@ -2325,7 +2448,7 @@ class TechnicalSheetController extends BaseController
             }
 
             $service = new \App\Services\AttributeSuggestionService($this->accountId);
-            
+
             return $service->previewSuggestions($itemId);
         });
     }
@@ -2333,7 +2456,7 @@ class TechnicalSheetController extends BaseController
     /**
      * ✅ Aplicar sugestão de atributo específico
      * POST /api/seo/technical-sheet/items/{itemId}/attribute-suggestions/apply
-     * 
+     *
      * Body: {
      *   "attribute_id": "BRAND",
      *   "value": "Samsung",
@@ -2362,7 +2485,7 @@ class TechnicalSheetController extends BaseController
 
             $userId = $this->getUserId() ?? 0;
             $service = new \App\Services\AttributeSuggestionService($this->accountId);
-            
+
             return $service->applySuggestion($itemId, $attributeId, $value, $userId);
         });
     }
@@ -2379,7 +2502,7 @@ class TechnicalSheetController extends BaseController
             }
 
             $service = new \App\Services\AttributeSuggestionService($this->accountId);
-            
+
             return $service->getApplicableAttributes($itemId);
         });
     }
