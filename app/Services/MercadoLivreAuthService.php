@@ -830,6 +830,11 @@ class MercadoLivreAuthService
      */
     public function refreshToken(int $accountId, int $maxRetries = 3): bool
     {
+        // Garante APP_TIMEZONE antes de gravar token_expires_at / last_refresh_at
+        if (class_exists(\App\Helpers\TimezoneHelper::class)) {
+            \App\Helpers\TimezoneHelper::applyFromEnv();
+        }
+
         $startTime = microtime(true);
 
         $lockName = $this->buildRefreshLockName($accountId);
@@ -1111,13 +1116,18 @@ class MercadoLivreAuthService
                 }
             }
 
-            $upd = $this->pdo()->prepare('UPDATE ml_accounts SET access_token = :access_token, refresh_token = :refresh_token, token_expires_at = :expires_at, tokens_encrypted = :tokens_encrypted, status = :status, last_refresh_at = NOW(), refresh_failure_count = 0, last_refresh_error = NULL, updated_at = NOW() WHERE id = :id');
+            // last_refresh_at/updated_at no mesmo relógio PHP de token_expires_at
+            // (evita skew PHP Europe/Berlin vs MySQL UTC em NOW()).
+            $refreshedAt = date('Y-m-d H:i:s');
+            $upd = $this->pdo()->prepare('UPDATE ml_accounts SET access_token = :access_token, refresh_token = :refresh_token, token_expires_at = :expires_at, tokens_encrypted = :tokens_encrypted, status = :status, last_refresh_at = :last_refresh_at, refresh_failure_count = 0, last_refresh_error = NULL, updated_at = :updated_at WHERE id = :id');
             $upd->execute([
                 'access_token' => $storeAccess,
                 'refresh_token' => $storeRefresh,
                 'expires_at' => $expiresAt,
                 'tokens_encrypted' => $tokensEncrypted,
                 'status' => 'active',
+                'last_refresh_at' => $refreshedAt,
+                'updated_at' => $refreshedAt,
                 'id' => $accountId
             ]);
 
@@ -1142,7 +1152,10 @@ class MercadoLivreAuthService
                 $executionTime
             );
 
-            return (bool)$upd->rowCount();
+            // Não depender de rowCount(): no MySQL/PDO UPDATE pode reportar 0
+            // "changed" mesmo com persistência ok, gerando falso negativo após
+            // consumir o refresh_token de uso único na API do ML.
+            return true;
         } finally {
             $this->releaseRefreshTokenLock($lockName);
         }

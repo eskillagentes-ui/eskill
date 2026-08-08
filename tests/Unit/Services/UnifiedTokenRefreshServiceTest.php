@@ -95,7 +95,6 @@ class UnifiedTokenRefreshServiceTest extends TestCase
         $this->assertArrayHasKey('DEFAULT_BUFFER_MINUTES', $constants);
         $this->assertArrayHasKey('DEFAULT_MAX_RETRIES', $constants);
         $this->assertArrayHasKey('DEFAULT_RATE_DELAY_MS', $constants);
-        $this->assertArrayHasKey('LOCK_TIMEOUT_SECONDS', $constants);
         $this->assertArrayHasKey('SKIP_EXPIRED_DAYS', $constants);
     }
 
@@ -107,12 +106,13 @@ class UnifiedTokenRefreshServiceTest extends TestCase
         $this->assertEquals(120, $constants['DEFAULT_BUFFER_MINUTES']);
     }
 
-    public function test_lock_timeout_is_five_minutes(): void
+    public function test_lock_uses_flock_handle(): void
     {
         $ref = new \ReflectionClass(UnifiedTokenRefreshService::class);
-        $constants = $ref->getConstants();
-
-        $this->assertEquals(300, $constants['LOCK_TIMEOUT_SECONDS']);
+        $this->assertTrue(
+            $ref->hasProperty('lockHandle'),
+            'Lock deve manter handle para flock durante a execução'
+        );
     }
 
     public function test_skip_expired_days_is_thirty(): void
@@ -164,9 +164,11 @@ class UnifiedTokenRefreshServiceTest extends TestCase
     {
         $source = file_get_contents(dirname(__DIR__, 3) . '/app/Services/UnifiedTokenRefreshService.php');
 
+        // flock(LOCK_EX|LOCK_NB) serializa processos; lock é liberado ao fechar o handle
+        // (inclui morte do processo) — não depende mais de filemtime/TTL.
         $this->assertTrue(
-            str_contains($source, 'filemtime(') && str_contains($source, 'LOCK_TIMEOUT_SECONDS'),
-            'Deve verificar idade do lock e remover se expirado'
+            str_contains($source, 'flock(') && str_contains($source, 'LOCK_EX'),
+            'Deve usar flock para serializar renovação e liberar lock ao fim do processo'
         );
     }
 

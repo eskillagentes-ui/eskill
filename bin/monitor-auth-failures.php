@@ -440,20 +440,65 @@ class AuthFailureMonitor
         // Try to parse JSON log
         if (str_starts_with(trim($line), '{')) {
             $data = json_decode($line, true);
-            if (isset($data['timestamp'])) {
-                return strtotime($data['timestamp']);
-            }
-            if (isset($data['datetime'])) {
-                return strtotime($data['datetime']);
+            if (is_array($data)) {
+                if (array_key_exists('timestamp', $data)) {
+                    $parsed = $this->coerceLogTimestamp($data['timestamp']);
+                    if ($parsed !== null) {
+                        return $parsed;
+                    }
+                }
+                if (array_key_exists('datetime', $data)) {
+                    $parsed = $this->coerceLogTimestamp($data['datetime']);
+                    if ($parsed !== null) {
+                        return $parsed;
+                    }
+                }
             }
         }
 
         // Try to extract timestamp from text log
         if (preg_match('/\[(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})\]/', $line, $matches)) {
-            return strtotime($matches[1]);
+            $parsed = strtotime($matches[1]);
+            return $parsed !== false ? $parsed : null;
         }
 
         return null;
+    }
+
+    /**
+     * Normaliza timestamp de log JSON (string ISO, unix seconds ou unix ms).
+     * StructuredLogService grava timestamp numérico — strtotime() com
+     * declare(strict_types=1) lança TypeError e derruba o cron.
+     */
+    private function coerceLogTimestamp(mixed $value): ?int
+    {
+        if (is_int($value) || is_float($value)) {
+            $numeric = (float) $value;
+            if ($numeric <= 0) {
+                return null;
+            }
+            // ms since epoch (~1e12+) → seconds
+            if ($numeric > 1000000000000) {
+                return (int) floor($numeric / 1000);
+            }
+            return (int) floor($numeric);
+        }
+
+        if (!is_string($value)) {
+            return null;
+        }
+
+        $trimmed = trim($value);
+        if ($trimmed === '') {
+            return null;
+        }
+
+        if (is_numeric($trimmed)) {
+            return $this->coerceLogTimestamp((float) $trimmed);
+        }
+
+        $parsed = strtotime($trimmed);
+        return $parsed !== false ? $parsed : null;
     }
 
     /**
@@ -514,21 +559,50 @@ class AuthFailureMonitor
     {
         // Try JSON first
         $data = json_decode($line, true);
-        if (isset($data['ip']) || isset($data['ip_address'])) {
-            return $data['ip'] ?? $data['ip_address'];
+        if (is_array($data)) {
+            $jsonIp = $data['ip'] ?? $data['ip_address'] ?? null;
+            if (is_string($jsonIp) && $jsonIp !== '') {
+                $validated = $this->validateIpAddress($jsonIp);
+                if ($validated !== null) {
+                    return $validated;
+                }
+            }
         }
 
         // IPv4 pattern
         if (preg_match('/\b(\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3})\b/', $line, $matches)) {
-            return $matches[1];
+            $validated = $this->validateIpAddress($matches[1]);
+            if ($validated !== null) {
+                return $validated;
+            }
         }
 
-        // IPv6 pattern (simplified)
-        if (preg_match('/\b([0-9a-fA-F:]{7,39})\b/', $line, $matches)) {
-            return $matches[1];
+        // IPv6 pattern (simplified) — exige ':' para não capturar unix timestamps (7+ dígitos hex)
+        if (preg_match('/\b([0-9a-fA-F]{0,4}(?::[0-9a-fA-F]{0,4}){2,7})\b/', $line, $matches)) {
+            $validated = $this->validateIpAddress($matches[1]);
+            if ($validated !== null) {
+                return $validated;
+            }
         }
 
         return null;
+    }
+
+    /**
+     * Aceita apenas IP real (IPv4/IPv6). Evita timestamps/horários como "1786062602" ou "02:30:02".
+     */
+    private function validateIpAddress(string $candidate): ?string
+    {
+        $candidate = trim($candidate);
+        if ($candidate === '') {
+            return null;
+        }
+
+        if (filter_var($candidate, FILTER_VALIDATE_IP) === false) {
+            return null;
+        }
+
+        return $candidate;
     }
 
     /**

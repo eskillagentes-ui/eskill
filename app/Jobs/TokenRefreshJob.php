@@ -46,17 +46,17 @@ class TokenRefreshJob
      * 
      * @param bool $forceAll Se true, renova TODAS as contas ativas, não apenas as que expiram em breve
      */
-    public function run(bool $forceAll = false): array
+    public function run(bool $forceAll = false, bool $useLock = true): array
     {
         // Carregar configurações de ambiente
         $bufferMinutes = (int)($_ENV['TOKEN_REFRESH_MARGIN_MINUTES'] ?? (self::REFRESH_BUFFER_HOURS * 60));
-        
+
         // Delegar para UnifiedTokenRefreshService
         if ($forceAll) {
-            return $this->unifiedService->forceRefreshAll();
-        } else {
-            return $this->unifiedService->refreshExpiring($bufferMinutes);
+            return $this->unifiedService->forceRefreshAll($useLock);
         }
+
+        return $this->unifiedService->refreshExpiring($bufferMinutes, $useLock);
     }
     
     /**

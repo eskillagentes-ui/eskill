@@ -185,6 +185,19 @@ class MercadoLivreAuthServiceTest extends TestCase
         );
     }
 
+    public function test_refreshToken_success_does_not_depend_on_rowCount(): void
+    {
+        $source = (string)file_get_contents(dirname(__DIR__, 3) . '/app/Services/MercadoLivreAuthService.php');
+
+        // Após persistir tokens, deve retornar true sem (bool)$upd->rowCount()
+        // (falso negativo no MySQL/PDO após consumir refresh_token de uso único).
+        $this->assertStringContainsString('Não depender de rowCount()', $source);
+        $this->assertDoesNotMatchRegularExpression(
+            '/return \(bool\)\$upd->rowCount\(\);/',
+            $source
+        );
+    }
+
     public function test_refreshToken_handles_invalid_grant(): void
     {
         $source = file_get_contents(dirname(__DIR__, 3) . '/app/Services/MercadoLivreAuthService.php');

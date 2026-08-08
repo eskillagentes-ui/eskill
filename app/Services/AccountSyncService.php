@@ -455,6 +455,10 @@ class AccountSyncService
 
     /**
      * Verifica se precisa sincronizar
+     *
+     * Usa o relógio do MySQL (mesmo critério de AccountAutoSyncService /
+     * getStaleActiveAccounts) para não divergir do badge quando PHP está
+     * em outro fuso (ex.: Europe/Berlin vs DATETIME UTC do servidor).
      */
     private function needsSync(?string $lastSync): bool
     {
@@ -462,11 +466,22 @@ class AccountSyncService
             return true;
         }
 
-        $lastSyncTime = strtotime($lastSync);
-        $hoursSinceSync = (time() - $lastSyncTime) / 3600;
+        $maxAgeHours = max(1, (int)($_ENV['ACCOUNT_SYNC_MAX_AGE_HOURS'] ?? getenv('ACCOUNT_SYNC_MAX_AGE_HOURS') ?: 6));
+        $maxAgeMinutes = $maxAgeHours * 60;
 
-        // Sincronizar se passou mais de 6 horas
-        return $hoursSinceSync > 6;
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT CASE WHEN TIMESTAMPDIFF(MINUTE, ?, NOW()) > ? THEN 1 ELSE 0 END'
+            );
+            $stmt->execute([$lastSync, $maxAgeMinutes]);
+            return (int)$stmt->fetchColumn() === 1;
+        } catch (\Throwable $e) {
+            $lastSyncTime = strtotime($lastSync . ' UTC');
+            if ($lastSyncTime === false) {
+                return true;
+            }
+            return ((time() - $lastSyncTime) / 3600) > $maxAgeHours;
+        }
     }
 
     /**

@@ -23,6 +23,8 @@ if (file_exists(__DIR__ . '/../.env')) {
     $dotenv->safeLoad();
 }
 
+\App\Helpers\TimezoneHelper::applyFromEnv();
+
 use App\Database;
 use App\Services\UnifiedTokenRefreshService;
 use App\Services\MercadoLivreClient;
@@ -628,42 +630,60 @@ try {
         exit(0);
     }
 
-    echo "[auto-token-refresh-worker] Delegando ciclo ML ao MercadoLivreOrchestratorService (modo padrão)\n";
-    echo "[auto-token-refresh-worker] Use --legacy para executar o fluxo antigo completo\n";
+    // Padrão: só refresh de token (rápido). --cycle mantém o orquestrador completo
+    // (poll+fila) que segurava o lock por horas e causava lock_busy no cron.
+    $runCycle = in_array('--cycle', $args, true) || in_array('--full', $args, true);
 
     $orchestrator = new MercadoLivreOrchestratorService(dirname(__DIR__));
-    $cycle = $orchestrator->runCycle([
-        'force_all' => $forceAll,
-        'account_id' => $accountId,
-        'orders_limit' => 100,
-        'items_limit' => 100,
-        'questions_limit' => 50,
-        'queue_batch_size' => 25,
-        'queue_max_batches' => 4,
-        'cleanup_old_jobs' => false,
-        'cleanup_days' => 30,
-    ], true);
+
+    if ($runCycle) {
+        echo "[auto-token-refresh-worker] Modo --cycle: orquestrador completo (refresh+poll+fila)\n";
+        echo "[auto-token-refresh-worker] Use o padrão (sem --cycle) para só renovar tokens\n";
+
+        $cycle = $orchestrator->runCycle([
+            'force_all' => $forceAll,
+            'account_id' => $accountId,
+            'orders_limit' => 100,
+            'items_limit' => 100,
+            'questions_limit' => 50,
+            'queue_batch_size' => 25,
+            'queue_max_batches' => 4,
+            'cleanup_old_jobs' => false,
+            'cleanup_days' => 30,
+        ], true);
+
+        echo json_encode(
+            $cycle,
+            $compact ? 0 : (JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
+        ) . PHP_EOL;
+
+        if (!empty($cycle['skipped'])) {
+            exit(0);
+        }
+
+        $mpEnabled = filter_var($_ENV['MERCADO_PAGO_ENABLED'] ?? getenv('MERCADO_PAGO_ENABLED') ?? false, FILTER_VALIDATE_BOOLEAN);
+        if ($mpEnabled && !$skipMercadoPago) {
+            echo "[auto-token-refresh-worker] Executando fase legada de Mercado Pago (compatibilidade temporária)\n";
+            $worker = new AutoTokenRefreshWorker();
+            $worker->runMercadoPagoOnly();
+        } elseif ($mpEnabled && $skipMercadoPago) {
+            echo "[auto-token-refresh-worker] Fase Mercado Pago ignorada via flag --skip-mercadopago\n";
+        }
+
+        exit((bool)($cycle['success'] ?? false) ? 0 : 1);
+    }
+
+    echo "[auto-token-refresh-worker] Modo padrão: apenas refresh de tokens ML\n";
+    echo "[auto-token-refresh-worker] Use --cycle para orquestrador completo; --legacy para fluxo antigo\n";
+
+    $refresh = $orchestrator->runTokenRefresh($forceAll, $accountId, true);
 
     echo json_encode(
-        $cycle,
+        $refresh,
         $compact ? 0 : (JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES)
     ) . PHP_EOL;
 
-    if (!empty($cycle['skipped'])) {
-        exit(0);
-    }
-
-    // Compatibilidade temporária: preserva sync MP legado se habilitado no ambiente.
-    $mpEnabled = filter_var($_ENV['MERCADO_PAGO_ENABLED'] ?? getenv('MERCADO_PAGO_ENABLED') ?? false, FILTER_VALIDATE_BOOLEAN);
-    if ($mpEnabled && !$skipMercadoPago) {
-        echo "[auto-token-refresh-worker] Executando fase legada de Mercado Pago (compatibilidade temporária)\n";
-        $worker = new AutoTokenRefreshWorker();
-        $worker->runMercadoPagoOnly();
-    } elseif ($mpEnabled && $skipMercadoPago) {
-        echo "[auto-token-refresh-worker] Fase Mercado Pago ignorada via flag --skip-mercadopago\n";
-    }
-
-    exit((bool)($cycle['success'] ?? false) ? 0 : 1);
+    exit((bool)($refresh['success'] ?? false) ? 0 : 1);
 } catch (\Throwable $e) {
     echo "FATAL ERROR: " . $e->getMessage() . "\n";
     exit(1);

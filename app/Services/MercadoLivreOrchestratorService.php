@@ -104,8 +104,11 @@ class MercadoLivreOrchestratorService
         ?int $accountId = null,
         bool $useLock = true
     ): array {
-        $runner = function () use ($forceAll, $accountId): array {
+        $runner = function () use ($forceAll, $accountId, $useLock): array {
             $job = new TokenRefreshJob();
+            // Com flock do orchestrator ativo, evitar segundo lock do Unified
+            // (corrida com scheduler gerava skip falso: "Lock acquisition failed").
+            $innerLock = !$useLock;
 
             if ($accountId !== null && $accountId > 0) {
                 $rawResult = $job->refreshAccount($accountId);
@@ -119,7 +122,7 @@ class MercadoLivreOrchestratorService
                 ];
             }
 
-            $result = $job->run($forceAll);
+            $result = $job->run($forceAll, $innerLock);
             return [
                 'success' => $this->resolveBatchRefreshSuccess($result),
                 'mode' => $forceAll ? 'force_all' : 'expiring_only',

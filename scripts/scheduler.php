@@ -16,9 +16,11 @@ $dotenv = Dotenv\Dotenv::createImmutable(__DIR__ . '/..');
 $dotenv->safeLoad();
 
 use App\Database;
+use App\Helpers\TimezoneHelper;
 use App\Services\ApiTokenService;
 use App\Services\RealTimeNotificationService;
-use App\Jobs\TokenRefreshJob;
+
+TimezoneHelper::applyFromEnv();
 
 // Configurar log
 $logFile = __DIR__ . '/../storage/logs/scheduler.log';
@@ -28,6 +30,20 @@ function logMessage(string $message): void
     $timestamp = date('Y-m-d H:i:s');
     file_put_contents($logFile, "[{$timestamp}] {$message}\n", FILE_APPEND);
     echo "[{$timestamp}] {$message}\n";
+}
+
+// Evitar corrida quando há mais de um cron (usuário/root) invocando o mesmo script.
+// /tmp evita Permission denied se outro uid criou storage/locks/scheduler.lock.
+$lockPath = rtrim(sys_get_temp_dir(), '/') . '/eskill-com-br-scheduler.lock';
+$lockHandle = fopen($lockPath, 'c+');
+if ($lockHandle === false) {
+    fwrite(STDERR, "[scheduler] falha ao abrir lock: {$lockPath}\n");
+    exit(1);
+}
+@chmod($lockPath, 0666);
+if (!flock($lockHandle, LOCK_EX | LOCK_NB)) {
+    echo '[' . date('Y-m-d H:i:s') . "] Scheduler já em execução — saindo\n";
+    exit(0);
 }
 
 logMessage('=== Iniciando Scheduler ===');
@@ -138,25 +154,24 @@ try {
     // ============================================
     // 5. REFRESH AUTOMÁTICO DE TOKENS ML
     // ============================================
-    logMessage('Renovando tokens do Mercado Livre...');
-    try {
-        $tokenRefreshJob = new TokenRefreshJob();
-        $refreshResult = $tokenRefreshJob->run();
-        $refreshed = (int)($refreshResult['tokens_refreshed'] ?? $refreshResult['refreshed'] ?? 0);
-        $failed = (int)($refreshResult['tokens_failed'] ?? $refreshResult['failed'] ?? 0);
-        $skipped = (int)($refreshResult['tokens_skipped'] ?? $refreshResult['skipped'] ?? 0);
-        logMessage(
-            "Tokens ML: {$refreshed} renovados, {$failed} falharam, {$skipped} ignorados"
-        );
-    } catch (\Exception $e) {
-        logMessage('Erro ao renovar tokens ML: ' . $e->getMessage());
-    }
+    // Escritor único: bin/auto-token-refresh-worker.php (cron */30).
+    // Evita corrida de lock com UnifiedTokenRefreshService a cada :00/:30.
+    logMessage('Refresh de tokens ML delegado ao auto-token-refresh-worker (cron */30)');
 
     logMessage('=== Scheduler Concluído ===');
 } catch (\Exception $e) {
     logMessage('ERRO FATAL: ' . $e->getMessage());
     logMessage($e->getTraceAsString());
+    if (isset($lockHandle) && is_resource($lockHandle)) {
+        flock($lockHandle, LOCK_UN);
+        fclose($lockHandle);
+    }
     exit(1);
+}
+
+if (isset($lockHandle) && is_resource($lockHandle)) {
+    flock($lockHandle, LOCK_UN);
+    fclose($lockHandle);
 }
 
 /**

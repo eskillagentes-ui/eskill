@@ -42,6 +42,11 @@ class Database
         }
 
         try {
+            // Alinhar PHP ao APP_TIMEZONE antes de qualquer date()/comparação de tokens
+            if (class_exists(\App\Helpers\TimezoneHelper::class)) {
+                \App\Helpers\TimezoneHelper::applyFromEnv();
+            }
+
             // Connect to MySQL/MariaDB
             $dsn = "mysql:host={$host};port={$port};dbname={$dbname};charset=utf8mb4";
             $this->connection = new \PDO($dsn, $username, $password, [
@@ -49,6 +54,14 @@ class Database
                 \PDO::ATTR_DEFAULT_FETCH_MODE => \PDO::FETCH_ASSOC,
                 \PDO::ATTR_EMULATE_PREPARES => false,
             ]);
+
+            if (class_exists(\App\Helpers\TimezoneHelper::class)) {
+                try {
+                    \App\Helpers\TimezoneHelper::applyMysqlSession($this->connection);
+                } catch (\Throwable $tzError) {
+                    error_log('Falha ao alinhar time_zone MySQL: ' . $tzError->getMessage());
+                }
+            }
         } catch (\PDOException $e) {
             $errorMessage = "Database connection failed: " . $e->getMessage();
             $debugInfo = " | Host: {$host}, Port: {$port}, DB: {$dbname}";

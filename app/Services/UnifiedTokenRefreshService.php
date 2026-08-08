@@ -30,12 +30,13 @@ class UnifiedTokenRefreshService
     private MercadoLivreAuthService $authService;
     private ?StructuredLogService $logger = null;
     private ?string $lockFile = null;
+    /** @var resource|null */
+    private $lockHandle = null;
     
     // Configurações padrão
     private const DEFAULT_BUFFER_MINUTES = 120;      // 2 horas
     private const DEFAULT_MAX_RETRIES = 3;
     private const DEFAULT_RATE_DELAY_MS = 500;       // 0.5 segundos entre renovações
-    private const LOCK_TIMEOUT_SECONDS = 300;        // 5 minutos
     private const SKIP_EXPIRED_DAYS = 30;            // Ignorar tokens expirados há mais de 30 dias
     
     public function __construct()
@@ -449,48 +450,51 @@ class UnifiedTokenRefreshService
     
     private function acquireLock(): bool
     {
-        if (file_exists($this->lockFile)) {
-            $lockAge = time() - filemtime($this->lockFile);
-            
-            if ($lockAge < self::LOCK_TIMEOUT_SECONDS) {
-                $this->log('warning', 'Renovação já em execução em outro processo', [
-                    'lock_age' => $lockAge,
-                ]);
-                return false;
-            }
-            
-            $this->log('warning', 'Removendo lock expirado', ['lock_age' => $lockAge]);
-            @unlink($this->lockFile);
+        if ($this->lockHandle !== null) {
+            return true;
         }
-        
+
+        $handle = @fopen($this->lockFile, 'c+');
+        if ($handle === false) {
+            $this->log('error', 'Falha ao abrir arquivo de lock', ['lock_file' => $this->lockFile]);
+            return false;
+        }
+
+        if (!flock($handle, LOCK_EX | LOCK_NB)) {
+            fclose($handle);
+            $this->log('warning', 'Renovação já em execução em outro processo', [
+                'lock_file' => $this->lockFile,
+            ]);
+            return false;
+        }
+
+        ftruncate($handle, 0);
         $lockData = [
             'pid' => getmypid(),
             'hostname' => gethostname(),
             'started_at' => date('Y-m-d H:i:s'),
         ];
-        
-        $written = file_put_contents(
-            $this->lockFile,
-            json_encode($lockData, JSON_PRETTY_PRINT),
-            LOCK_EX
-        );
-        
-        if ($written === false) {
-            $this->log('error', 'Falha ao criar arquivo de lock', ['lock_file' => $this->lockFile]);
-            return false;
-        }
-        
+        fwrite($handle, (string) json_encode($lockData, JSON_PRETTY_PRINT));
+        fflush($handle);
+
+        $this->lockHandle = $handle;
         $this->log('info', 'Lock adquirido', ['pid' => getmypid()]);
         return true;
     }
     
     private function releaseLock(): void
     {
-        if (file_exists($this->lockFile)) {
-            if (@unlink($this->lockFile)) {
-                $this->log('info', 'Lock liberado');
-            }
+        if ($this->lockHandle === null) {
+            return;
         }
+
+        flock($this->lockHandle, LOCK_UN);
+        fclose($this->lockHandle);
+        $this->lockHandle = null;
+
+        // Melhor esforço: limpar conteúdo; o flock já serializa concorrência.
+        @unlink($this->lockFile);
+        $this->log('info', 'Lock liberado');
     }
     
     // ===== MÉTRICAS =====
