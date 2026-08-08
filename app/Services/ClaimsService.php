@@ -37,17 +37,22 @@ class ClaimsService
      */
     public function getClaims(string $type = 'to_seller', int $limit = 50, int $offset = 0): array
     {
-        // Try local DB first (if implemented)
-        // For now, fetch from API directly to ensure freshness
         try {
             $params = [
                 'limit' => $limit,
                 'offset' => $offset,
-                'status' => 'opened' // Filter by status instead of type
+                'status' => 'opened',
             ];
 
-            // Use correct endpoint: /post-purchase/v1/claims
-            $response = $this->client->get('/post-purchase/v1/claims', $params);
+            // Doc ML: listagem é /claims/search (sem /search → 404 resource not found).
+            $sellerId = $this->resolveSellerId();
+            if ($sellerId !== null) {
+                $params['players.user_id'] = $sellerId;
+                $params['players.role'] = 'respondent';
+            }
+
+            $endpoint = '/post-purchase/v1/claims/search';
+            $response = $this->client->get($endpoint, $params);
 
             if (isset($response['error'])) {
                 return ['error' => $response['message'] ?? 'Failed to fetch claims'];
@@ -59,13 +64,29 @@ class ClaimsService
         }
     }
 
+    private function resolveSellerId(): ?string
+    {
+        try {
+            $me = $this->client->get('/users/me');
+            if (isset($me['id']) && $me['id'] !== '' && $me['id'] !== null) {
+                return (string) $me['id'];
+            }
+        } catch (\Throwable) {
+            // segue sem filtro de player
+        }
+        return null;
+    }
+
+
     /**
      * Get single claim details
      */
     public function getClaim(string $claimId): array
     {
         try {
-            $response = $this->client->get("/v1/claims/{$claimId}");
+            // Doc ML: detalhe é /post-purchase/v1/claims/{id} (/v1/claims/{id} → 404).
+            $endpoint = '/post-purchase/v1/claims/' . rawurlencode($claimId);
+            $response = $this->client->get($endpoint);
 
             if (isset($response['error'])) {
                 return ['error' => $response['message'] ?? $response['error'] ?? 'Failed to fetch claim'];
@@ -80,6 +101,7 @@ class ClaimsService
             return ['error' => $e->getMessage()];
         }
     }
+
 
     /**
      * Sync single claim to local database
@@ -105,7 +127,10 @@ class ClaimsService
                 'attachments' => $attachments
             ];
 
-            $response = $this->client->post("/v1/claims/{$claimId}/messages", $payload);
+            $response = $this->client->post(
+                '/post-purchase/v1/claims/' . rawurlencode($claimId) . '/messages',
+                $payload
+            );
 
             if (isset($response['error'])) {
                 return ['error' => $response['message'] ?? $response['error'] ?? 'Failed to send message'];

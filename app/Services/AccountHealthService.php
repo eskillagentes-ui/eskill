@@ -1627,12 +1627,22 @@ class AccountHealthService
             // ── Mediações / Claims abertas (0-15 pts) ──
             $claimsScore = 15; // assume perfeito
             try {
-                // Endpoint correto: /post-purchase/v1/claims
-                $claimsResult = $this->client->get('/post-purchase/v1/claims', [
+                // Endpoint correto: /post-purchase/v1/claims/search (sem /search → 404)
+                $claimsParams = [
                     'status' => 'opened',
                     'limit'  => 50,
                     'offset' => 0,
-                ], 600);
+                ];
+                try {
+                    $me = $this->client->get('/users/me', [], 600);
+                    if (isset($me['id']) && $me['id'] !== '' && $me['id'] !== null) {
+                        $claimsParams['players.user_id'] = (string) $me['id'];
+                        $claimsParams['players.role'] = 'respondent';
+                    }
+                } catch (\Throwable) {
+                    // segue sem filtro de player
+                }
+                $claimsResult = $this->client->get('/post-purchase/v1/claims/search', $claimsParams, 600);
                 $allClaims = $claimsResult['data'] ?? $claimsResult['results'] ?? [];
                 $totalClaims = (int)($claimsResult['paging']['total'] ?? count($allClaims));
 

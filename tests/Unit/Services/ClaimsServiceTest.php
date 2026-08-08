@@ -83,14 +83,22 @@ class ClaimsServiceTest extends TestCase
             'paging' => ['total' => 2, 'offset' => 0, 'limit' => 50],
         ];
 
-        $this->mockClient->expects($this->once())
+        $this->mockClient->expects($this->exactly(2))
             ->method('get')
-            ->with('/post-purchase/v1/claims', [
-                'limit' => 50,
-                'offset' => 0,
-                'status' => 'opened',
-            ])
-            ->willReturn($expected);
+            ->willReturnCallback(function (string $endpoint, array $params = []) use ($expected) {
+                if ($endpoint === '/users/me') {
+                    return ['id' => 3058804121];
+                }
+                $this->assertSame('/post-purchase/v1/claims/search', $endpoint);
+                $this->assertSame([
+                    'limit' => 50,
+                    'offset' => 0,
+                    'status' => 'opened',
+                    'players.user_id' => '3058804121',
+                    'players.role' => 'respondent',
+                ], $params);
+                return $expected;
+            });
 
         $result = $this->service->getClaims();
         $this->assertSame($expected, $result);
@@ -100,14 +108,22 @@ class ClaimsServiceTest extends TestCase
     {
         $expected = ['data' => [], 'paging' => ['total' => 0]];
 
-        $this->mockClient->expects($this->once())
+        $this->mockClient->expects($this->exactly(2))
             ->method('get')
-            ->with('/post-purchase/v1/claims', [
-                'limit' => 10,
-                'offset' => 20,
-                'status' => 'opened',
-            ])
-            ->willReturn($expected);
+            ->willReturnCallback(function (string $endpoint, array $params = []) use ($expected) {
+                if ($endpoint === '/users/me') {
+                    return ['id' => 1];
+                }
+                $this->assertSame('/post-purchase/v1/claims/search', $endpoint);
+                $this->assertSame([
+                    'limit' => 10,
+                    'offset' => 20,
+                    'status' => 'opened',
+                    'players.user_id' => '1',
+                    'players.role' => 'respondent',
+                ], $params);
+                return $expected;
+            });
 
         $result = $this->service->getClaims('to_seller', 10, 20);
         $this->assertSame($expected, $result);
@@ -115,9 +131,14 @@ class ClaimsServiceTest extends TestCase
 
     public function testGetClaimsReturnsErrorOnApiError(): void
     {
-        $this->mockClient->expects($this->once())
+        $this->mockClient->expects($this->exactly(2))
             ->method('get')
-            ->willReturn(['error' => 'forbidden', 'message' => 'Access denied']);
+            ->willReturnCallback(function (string $endpoint) {
+                if ($endpoint === '/users/me') {
+                    return ['id' => 1];
+                }
+                return ['error' => 'forbidden', 'message' => 'Access denied'];
+            });
 
         $result = $this->service->getClaims();
         $this->assertArrayHasKey('error', $result);
@@ -126,9 +147,14 @@ class ClaimsServiceTest extends TestCase
 
     public function testGetClaimsReturnsErrorOnApiErrorWithoutMessage(): void
     {
-        $this->mockClient->expects($this->once())
+        $this->mockClient->expects($this->exactly(2))
             ->method('get')
-            ->willReturn(['error' => 'unknown']);
+            ->willReturnCallback(function (string $endpoint) {
+                if ($endpoint === '/users/me') {
+                    return ['id' => 1];
+                }
+                return ['error' => 'unknown'];
+            });
 
         $result = $this->service->getClaims();
         $this->assertArrayHasKey('error', $result);
@@ -137,9 +163,14 @@ class ClaimsServiceTest extends TestCase
 
     public function testGetClaimsReturnsErrorOnException(): void
     {
-        $this->mockClient->expects($this->once())
+        $this->mockClient->expects($this->exactly(2))
             ->method('get')
-            ->willThrowException(new \RuntimeException('Connection timeout'));
+            ->willReturnCallback(function (string $endpoint) {
+                if ($endpoint === '/users/me') {
+                    return ['id' => 1];
+                }
+                throw new \RuntimeException('Connection timeout');
+            });
 
         $result = $this->service->getClaims();
         $this->assertArrayHasKey('error', $result);
@@ -148,9 +179,14 @@ class ClaimsServiceTest extends TestCase
 
     public function testGetClaimsEmptyResponse(): void
     {
-        $this->mockClient->expects($this->once())
+        $this->mockClient->expects($this->exactly(2))
             ->method('get')
-            ->willReturn([]);
+            ->willReturnCallback(function (string $endpoint) {
+                if ($endpoint === '/users/me') {
+                    return ['id' => 1];
+                }
+                return [];
+            });
 
         $result = $this->service->getClaims();
         $this->assertSame([], $result);
@@ -174,7 +210,7 @@ class ClaimsServiceTest extends TestCase
 
         $this->mockClient->expects($this->once())
             ->method('get')
-            ->with('/v1/claims/CLM123')
+            ->with('/post-purchase/v1/claims/CLM123')
             ->willReturn($claim);
 
         $this->mockDb->expects($this->once())
@@ -192,7 +228,7 @@ class ClaimsServiceTest extends TestCase
     {
         $this->mockClient->expects($this->once())
             ->method('get')
-            ->with('/v1/claims/CLM999')
+            ->with('/post-purchase/v1/claims/CLM999')
             ->willReturn(['error' => 'not_found']);
 
         $this->mockDb->expects($this->never())
@@ -322,7 +358,7 @@ class ClaimsServiceTest extends TestCase
 
         $this->mockClient->expects($this->once())
             ->method('post')
-            ->with('/v1/claims/CLM123/messages', [
+            ->with('/post-purchase/v1/claims/CLM123/messages', [
                 'receiver_role' => 'complainant',
                 'message' => 'Olá, vamos resolver isso.',
                 'attachments' => [],
@@ -340,7 +376,7 @@ class ClaimsServiceTest extends TestCase
 
         $this->mockClient->expects($this->once())
             ->method('post')
-            ->with('/v1/claims/CLM456/messages', [
+            ->with('/post-purchase/v1/claims/CLM456/messages', [
                 'receiver_role' => 'complainant',
                 'message' => 'Segue comprovante.',
                 'attachments' => $attachments,
@@ -437,12 +473,18 @@ class ClaimsServiceTest extends TestCase
 
     public function testGetClaimsDefaultParams(): void
     {
-        $this->mockClient->expects($this->once())
+        $this->mockClient->expects($this->exactly(2))
             ->method('get')
-            ->willReturnCallback(function (string $url, array $params) {
+            ->willReturnCallback(function (string $url, array $params = []) {
+                if ($url === '/users/me') {
+                    return ['id' => 1];
+                }
+                $this->assertSame('/post-purchase/v1/claims/search', $url);
                 $this->assertSame(50, $params['limit']);
                 $this->assertSame(0, $params['offset']);
                 $this->assertSame('opened', $params['status']);
+                $this->assertSame('1', $params['players.user_id']);
+                $this->assertSame('respondent', $params['players.role']);
                 return ['data' => []];
             });
 
