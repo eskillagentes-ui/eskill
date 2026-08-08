@@ -1209,11 +1209,11 @@ body {
         <div class="metadata-container">
         <div class="metadata-row">
           <div class="metadata-label text-body-medium">Project Name</div>
-          <div class="metadata-value text-body">eskill.com.br</div>
+          <div class="metadata-value text-body">eskill.com.br (Ficha Técnica / SEO Killer)</div>
         </div>
         <div class="metadata-row">
           <div class="metadata-label text-body-medium">Date</div>
-          <div class="metadata-value text-body">8/6/2026</div>
+          <div class="metadata-value text-body">8/7/2026</div>
         </div>
         <div class="metadata-row">
           <div class="metadata-label text-body-medium">Prepared by</div>
@@ -1234,17 +1234,21 @@ body {
         
         <div class="coverage-summary">
           <ul class="coverage-list text-body">
-            <li><span class="coverage-highlight">2/2</span> of tests passed</li>
+            <li><span class="coverage-highlight">3/3</span> of tests passed</li>
             <li><span class="coverage-highlight">Key gaps / risks:</span>
             
-              <ul>
-<li><strong>Credentials:</strong> Without staging dashboard user/password, TestSprite cannot cover authenticated flows (majority of the plan).</li>
-<li><strong>Port 8080 bare Host:</strong> Requests without <code>Host: staging.eskill.com.br</code> hit <strong>production</strong>. MCP must keep using the staging proxy (<code>:8877</code>) or equivalent.</li>
-<li><strong>Public staging DNS/TLS:</strong> Still incomplete for CLI cloud runs against <code>https://staging.eskill.com.br</code>; MCP tunnel is the workable path today.</li>
-<li><strong>API key hygiene:</strong> TestSprite key lives in Cursor MCP config; prefer env/secret store and rotate if the key was ever committed or pasted.</li>
-<li><strong>Next:</strong> Provide staging login credentials → update <code>testsprite_tests/tmp/config.json</code> (<code>loginUser</code>/<code>loginPassword</code>) → re-run high-priority authenticated cases (TC001–TC008 first).</li>
-</ul>
-<hr>
+              <ol>
+<li><strong>Apply no ML (prod 1335)</strong> ainda não executado de propósito — exige OK explícito do dono.</li>
+<li>Fixture staging tem tokens dummy; serve UI/lista/paginação, <strong>não</strong> sync real com API ML.</li>
+<li>Script TC038 exportado pelo agente ainda clica várias vezes em chat/Minimizar (ruído); assertions finais estão corretas.</li>
+<li>Instrumentação de debug (<code>TechnicalSheetController</code> staging) ainda ativa até confirmação do usuário.</li>
+<li>Re-seed: se limpar <code>eskill_staging</code>, recriar conta <code>1336</code> + 25 items antes de TC038.</li>
+</ol>
+<h3>Reproduzir</h3>
+<pre><code class="language-bash"># proxy :8877 já usado pelo TestSprite
+export TESTSPRITE_TEST_IDS='TC037,TC038,TC039'
+# via MCP: testsprite_generate_code_and_execute com testIds
+</code></pre>
 
             </li>
 </ul>
@@ -1269,17 +1273,9 @@ body {
           <div class="table-rows">
             
             <div class="table-row">
-              <div class="table-cell"><span class="text-body">Requirement: User Login — invalid credentials</span></div>
-              <div class="table-cell"><span class="text-body">2</span></div>
-              <div class="table-cell"><span class="text-body">2</span></div>
-              <div class="table-cell"><span class="text-body">0</span></div>
-            </div>
-        
-
-            <div class="table-row">
-              <div class="table-cell"><span class="text-body">Requirement: Authenticated dashboard / Financials / Pregão / Pricing / Catalog (not executed)</span></div>
-              <div class="table-cell"><span class="text-body">0</span></div>
-              <div class="table-cell"><span class="text-body">0</span></div>
+              <div class="table-cell"><span class="text-body">Requirement: Ficha Técnica (SEO Killer tab)</span></div>
+              <div class="table-cell"><span class="text-body">3</span></div>
+              <div class="table-cell"><span class="text-body">3</span></div>
               <div class="table-cell"><span class="text-body">0</span></div>
             </div>
         
@@ -1303,13 +1299,13 @@ body {
           <div class="accordion-header" onclick="toggleAccordion(this)">
             <div class="requirement-content">
                                           <div class="requirement-title-row">
-              <h3 class="title-requirement">Requirement: User Login — invalid credentials</h3>
+              <h3 class="title-requirement">Requirement: Ficha Técnica (SEO Killer tab)</h3>
                 <div class="requirement-status-tag status-success">
               <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
                 <circle cx="7.99961" cy="7.99998" r="6.4" fill="#10A363" fill-opacity="0.2"/>
                 <path d="M5.59961 8.00002L7.19961 9.60002L10.3996 6.40002" stroke="#19C379" stroke-width="1.28" stroke-linecap="round" stroke-linejoin="round"/>
               </svg>
-              <span>2/2</span>
+              <span>3/3</span>
             </div>
               </div>
               <p class="text-body-medium requirement-description">Proper error handling for API calls and invalid data scenarios.</p>
@@ -1325,23 +1321,23 @@ body {
             <div class="test-wrapper">
 <div class="test-card">
                 <div class="test-header">
-                  <h4 class="text-body-medium">TC019 Show an authentication error for invalid login credentials</h4>
+                  <h4 class="text-body-medium">TC037 Open SEO Killer Ficha Técnica tab and see KPIs plus list</h4>
                 </div>
                 <div class="test-content">
                   <div class="test-field">
                     <div class="test-field-label text-body-medium">Test Code</div>
                     <div class="test-field-value text-body">
-                      <a href="./TC019_Show_an_authentication_error_for_invalid_login_credentials.py" class="text-link">TC019_Show_an_authentication_error_for_invalid_login_credentials.py</a>
+                      <a href="./TC037_Open_SEO_Killer_Ficha_Tcnica_tab_and_see_KPIs_plus_list.py" class="text-link">TC037_Open_SEO_Killer_Ficha_Tcnica_tab_and_see_KPIs_plus_list.py</a>
                     </div>
                   </div>
                   <div class="test-field">
                     <div class="test-field-label text-body-medium">Test Error</div>
-                    <div class="test-field-value text-body">- **Test Visualization and Result:** https://www.testsprite.com/dashboard/mcp/tests/02b48cc6-07e9-4140-a0f3-9970f2d2dec4/test/29af94ff-67ae-4a34-8e1e-56aff70405de</div>
+                    <div class="test-field-value text-body">N/A</div>
                   </div>
                   <div class="test-field">
                     <div class="test-field-label text-body-medium">Test Visualization and Result</div>
                     <div class="test-field-value text-body">
-                      <a href="https://www.testsprite.com/dashboard/mcp/tests/02b48cc6-07e9-4140-a0f3-9970f2d2dec4/test/29af94ff-67ae-4a34-8e1e-56aff70405de" class="text-link">View Results</a>
+                      <a href="(execução anterior nesta onda)" class="text-link">View Results</a>
                     </div>
                   </div>
                   <div class="test-field">
@@ -1364,29 +1360,74 @@ body {
                   </div>
                   <div class="test-field">
                     <div class="test-field-label text-body-medium">Analysis / Findings</div>
-                    <div class="test-field-value text-body">Staging login UI rejects invalid credentials and surfaces an error; tunnel + Host-proxy path to staging is healthy.</div>
+                    <div class="test-field-value text-body">KPIs + área `#tech-sheet-list` visíveis após login e navegação para Ficha Técnica.</div>
                   </div>
                 </div>
               </div>
 <div class="test-card">
                 <div class="test-header">
-                  <h4 class="text-body-medium">TC022 Stay on the login page with invalid credentials</h4>
+                  <h4 class="text-body-medium">TC038 Ficha Técnica list shows pagination controls when many items</h4>
                 </div>
                 <div class="test-content">
                   <div class="test-field">
                     <div class="test-field-label text-body-medium">Test Code</div>
                     <div class="test-field-value text-body">
-                      <a href="./TC022_Stay_on_the_login_page_with_invalid_credentials.py" class="text-link">TC022_Stay_on_the_login_page_with_invalid_credentials.py</a>
+                      <a href="./TC038_Ficha_Tcnica_list_shows_pagination_controls_when_many_items.py" class="text-link">TC038_Ficha_Tcnica_list_shows_pagination_controls_when_many_items.py</a>
                     </div>
                   </div>
                   <div class="test-field">
                     <div class="test-field-label text-body-medium">Test Error</div>
-                    <div class="test-field-value text-body">- **Test Visualization and Result:** https://www.testsprite.com/dashboard/mcp/tests/02b48cc6-07e9-4140-a0f3-9970f2d2dec4/test/457b3652-e4c2-4124-8d9b-0f7b3aa344dc</div>
+                    <div class="test-field-value text-body">N/A</div>
                   </div>
                   <div class="test-field">
                     <div class="test-field-label text-body-medium">Test Visualization and Result</div>
                     <div class="test-field-value text-body">
-                      <a href="https://www.testsprite.com/dashboard/mcp/tests/02b48cc6-07e9-4140-a0f3-9970f2d2dec4/test/457b3652-e4c2-4124-8d9b-0f7b3aa344dc" class="text-link">View Results</a>
+                      <a href="https://www.testsprite.com/dashboard/mcp/tests/42cd6a03-b355-4d27-829c-5e31c8068bed/test/fdf7cc68-9655-4d27-829c-5e31c8068bed" class="text-link">View Results</a>
+                    </div>
+                  </div>
+                  <div class="test-field">
+                    <div class="test-field-label text-body-medium">Status</div>
+                    <div class="test-field-value">
+                      <div class="status-wrapper">
+                <div class="status-icon">
+                    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <circle cx="7.99961" cy="7.99998" r="6.4" fill="#10A363" fill-opacity="0.2"/>
+                        <path d="M5.59961 8.00002L7.19961 9.60002L10.3996 6.40002" stroke="#19C379" stroke-width="1.28" stroke-linecap="round" stroke-linejoin="round"/>
+                    </svg>
+                </div>
+                <span class="text-body status-pass">Pass</span>
+            </div>
+                    </div>
+                  </div>
+                  <div class="test-field">
+                    <div class="test-field-label text-body-medium">Severity</div>
+                    <div class="test-field-value text-body">MEDIUM</div>
+                  </div>
+                  <div class="test-field">
+                    <div class="test-field-label text-body-medium">Analysis / Findings</div>
+                    <div class="test-field-value text-body">- Antes: bloqueado (`Nenhum anúncio` / script com `assert False`) por staging sem items **e** bug de conta: `TechnicalSheetController` usava só `BaseController::getActiveAccountId()` (sessão), sem fallback `SessionHelper` → API respondia `Nenhuma conta conectada` mesmo com `users.active_ml_account_id=1336`.</div>
+                  </div>
+                </div>
+              </div>
+<div class="test-card">
+                <div class="test-header">
+                  <h4 class="text-body-medium">TC039 Ficha Técnica approve button is enabled without selection</h4>
+                </div>
+                <div class="test-content">
+                  <div class="test-field">
+                    <div class="test-field-label text-body-medium">Test Code</div>
+                    <div class="test-field-value text-body">
+                      <a href="./TC039_Ficha_Tcnica_approve_button_is_enabled_without_selection.py" class="text-link">TC039_Ficha_Tcnica_approve_button_is_enabled_without_selection.py</a>
+                    </div>
+                  </div>
+                  <div class="test-field">
+                    <div class="test-field-label text-body-medium">Test Error</div>
+                    <div class="test-field-value text-body">N/A</div>
+                  </div>
+                  <div class="test-field">
+                    <div class="test-field-label text-body-medium">Test Visualization and Result</div>
+                    <div class="test-field-value text-body">
+                      <a href="null" class="text-link">View Results</a>
                     </div>
                   </div>
                   <div class="test-field">
@@ -1409,39 +1450,10 @@ body {
                   </div>
                   <div class="test-field">
                     <div class="test-field-label text-body-medium">Analysis / Findings</div>
-                    <div class="test-field-value text-body">After failed login the browser remains on `/login` (no accidental dashboard access).</div>
+                    <div class="test-field-value text-body">Toolbar com “Aprovar pendentes” e link Completo → `/dashboard/tech-sheet` permanecem visíveis.</div>
                   </div>
                 </div>
               </div>
-            </div>
-          </div>
-        </div>
-
-                <div class="requirement-wrapper accordion-item active">
-          <div class="accordion-header" onclick="toggleAccordion(this)">
-            <div class="requirement-content">
-                                          <div class="requirement-title-row">
-              <h3 class="title-requirement">Requirement: Authenticated dashboard / Financials / Pregão / Pricing / Catalog (not executed)</h3>
-                <div class="requirement-status-tag status-success">
-              <svg width="18" height="18" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <circle cx="7.99961" cy="7.99998" r="6.4" fill="#10A363" fill-opacity="0.2"/>
-                <path d="M5.59961 8.00002L7.19961 9.60002L10.3996 6.40002" stroke="#19C379" stroke-width="1.28" stroke-linecap="round" stroke-linejoin="round"/>
-              </svg>
-              <span>0/0</span>
-            </div>
-              </div>
-              <p class="text-body-medium requirement-description">Proper error handling for API calls and invalid data scenarios.</p>
-            </div>
-            <div class="accordion-icon">
-              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" xmlns="http://www.w3.org/2000/svg">
-                <path d="M11.4276 6C11.9145 6 12.1687 6.61626 11.875 7.01439L11.8316 7.06689L8.40295 10.817C8.30455 10.9246 8.17364 10.9892 8.03476 10.9988C7.89589 11.0083 7.7586 10.9621 7.64865 10.8688L7.59493 10.817L4.16629 7.06689L4.11886 7.00814L4.088 6.96002L4.05714 6.90002L4.04743 6.87752L4.032 6.83564L4.01371 6.76814L4.008 6.73501L4.00229 6.69751L4 6.66189V6.58814L4.00286 6.55188L4.008 6.51438L4.01371 6.48188L4.032 6.41438L4.04743 6.37251L4.08743 6.29L4.12457 6.23375L4.16629 6.18313L4.22 6.13125L4.26401 6.0975L4.31886 6.06375L4.33944 6.05313L4.37772 6.03625L4.43944 6.01625L4.46972 6.01L4.50401 6.00375L4.53658 6.00125L11.4276 6Z" fill="var(--fg-secondary)"/>
-              </svg>
-            </div>
-          </div>
-
-            <div class="accordion-content">
-            <div class="test-wrapper">
-
             </div>
           </div>
         </div>
@@ -1462,7 +1474,7 @@ body {
         </div>
         <div class="metadata-row">
           <div class="metadata-label text-body-medium">Code Repo</div>
-          <div class="metadata-value text-body">eskill.com.br</div>
+          <div class="metadata-value text-body">eskill.com.br (Ficha Técnica / SEO Killer)</div>
         </div>
         <div class="metadata-row">
           <div class="metadata-label text-body-medium">Test Results</div>

@@ -40,60 +40,60 @@ async def run_test():
         except Exception:
             pass
         
-        # -> Fill the E-mail and Senha fields and click the 'Entrar na Plataforma' button to log into the staging platform.
+        # -> Click the 'Entrar na Plataforma' button to submit the login form after filling email and password.
         # seu@email.com email field
         elem = page.locator('[id="email"]')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("admin@eskill.com.br")
         
-        # -> Fill the E-mail and Senha fields and click the 'Entrar na Plataforma' button to log into the staging platform.
+        # -> Click the 'Entrar na Plataforma' button to submit the login form after filling email and password.
         # •••••••• password field
         elem = page.locator('[id="password"]')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("Awa@2026#Eskill!")
         
-        # -> Fill the E-mail and Senha fields and click the 'Entrar na Plataforma' button to log into the staging platform.
+        # -> Click the 'Entrar na Plataforma' button to submit the login form after filling email and password.
         # Entrar na Plataforma button
         elem = page.get_by_role('button', name='Entrar na Plataforma', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Scroll down the Dashboard/left navigation to reveal the 'Financeiro' (Financials) link in the left sidebar.
+        # -> Scroll the page/sidebar to reveal more navigation items and find the 'Financeiro' link in the sidebar.
         await page.mouse.wheel(0, 300)
         
-        # -> Scroll the page to reveal the 'Financeiro' (Financials) link in the left navigation.
-        await page.mouse.wheel(0, 300)
-        
-        # -> Click the 'Movimentações' link in the left navigation to open the Financials (Transactions) page.
-        # Movimentações link
-        elem = page.get_by_role('link', name='Movimentações', exact=True)
+        # -> Click the 'Relatórios' link under the FINANCEIRO section in the sidebar to open the Financials page.
+        # Relatórios link
+        elem = page.locator('a[href="/dashboard/financials"]')
         await elem.click(timeout=10000)
         
-        # -> Set 'Data inicial' to 01/07/2026 and 'Data final' to 31/07/2026, then click the 'Filtrar' button to apply the new date range.
-        # date field
-        elem = page.locator('[id="mov-date-start"]')
+        # -> Set 'Data Inicial' to 07/01/2026 and 'Data Final' to 07/31/2026, then click the 'Filtrar' button to apply the new date range.
+        # start date field
+        elem = page.locator('[id="date-start"]')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("2026-07-01")
         
-        # -> Set 'Data inicial' to 01/07/2026 and 'Data final' to 31/07/2026, then click the 'Filtrar' button to apply the new date range.
-        # date field
-        elem = page.locator('[id="mov-date-end"]')
+        # -> Set 'Data Inicial' to 07/01/2026 and 'Data Final' to 07/31/2026, then click the 'Filtrar' button to apply the new date range.
+        # end date field
+        elem = page.locator('[id="date-end"]')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("2026-07-31")
         
-        # -> Set 'Data inicial' to 01/07/2026 and 'Data final' to 31/07/2026, then click the 'Filtrar' button to apply the new date range.
+        # -> Set 'Data Inicial' to 07/01/2026 and 'Data Final' to 07/31/2026, then click the 'Filtrar' button to apply the new date range.
         # Filtrar button
-        elem = page.locator('[id="mov-btn-filter"]')
+        elem = page.locator('[id="btn-financial-filter"]')
         await elem.click(timeout=10000)
         
         # --> Assertions to verify final state
         
         # --> Verify the financial summary updates for the selected date range
-        # Assert: The start date input is set to 2026-07-01.
-        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[3]/div/div/div/form/div[1]/input").nth(0)).to_have_value("2026-07-01", timeout=15000), "The start date input is set to 2026-07-01."
-        # Assert: The end date input is set to 2026-07-31.
-        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[3]/div/div/div/form/div[2]/input").nth(0)).to_have_value("2026-07-31", timeout=15000), "The end date input is set to 2026-07-31."
-        # Assert: The ledger table shows 'Nenhuma movimentação no período' for the selected range.
-        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[5]/div[1]/div/div[2]/div/table/tbody/tr/td").nth(0)).to_have_text("Nenhuma movimenta\u00e7\u00e3o no per\u00edodo", timeout=15000), "The ledger table shows 'Nenhuma movimenta\u00e7\u00e3o no per\u00edodo' for the selected range."
+        # Assert: The Data Inicial input shows 2026-07-01, confirming the start date was applied.
+        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[3]/div/div/div/form/div[1]/input").nth(0)).to_have_value("2026-07-01", timeout=15000), "The Data Inicial input shows 2026-07-01, confirming the start date was applied."
+        # Assert: The Data Final input shows 2026-07-31, confirming the end date was applied.
+        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[3]/div/div/div/form/div[2]/input").nth(0)).to_have_value("2026-07-31", timeout=15000), "The Data Final input shows 2026-07-31, confirming the end date was applied."
+        await page.locator("xpath=/html/body/div[4]/main/div/div[8]/div[1]/button").nth(0).scroll_into_view_if_needed()
+        # Assert: The financial summary's 'Ver detalhe' button is visible, indicating the summary cards were rendered for the selected range.
+        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[8]/div[1]/button").nth(0)).to_be_visible(timeout=15000), "The financial summary's 'Ver detalhe' button is visible, indicating the summary cards were rendered for the selected range."
+        # Assert: The page URL contains /dashboard/financials, confirming the Financials page is open.
+        await expect(page).to_have_url(re.compile("/dashboard/financials"), timeout=15000), "The page URL contains /dashboard/financials, confirming the Financials page is open."
         await asyncio.sleep(5)
 
     finally:

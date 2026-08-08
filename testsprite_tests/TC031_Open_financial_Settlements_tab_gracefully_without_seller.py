@@ -40,66 +40,52 @@ async def run_test():
         except Exception:
             pass
         
-        # -> Open the Financials page from the sidebar (click the sidebar link labeled 'Financials' or equivalent to reach the Financials page).
+        # -> Fill the 'E-mail' field with admin@eskill.com.br and the 'Senha' field with Awa@2026#Eskill!, then click the 'Entrar na Plataforma' button.
         # seu@email.com email field
         elem = page.locator('[id="email"]')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("admin@eskill.com.br")
         
-        # -> Open the Financials page from the sidebar (click the sidebar link labeled 'Financials' or equivalent to reach the Financials page).
+        # -> Fill the 'E-mail' field with admin@eskill.com.br and the 'Senha' field with Awa@2026#Eskill!, then click the 'Entrar na Plataforma' button.
         # •••••••• password field
         elem = page.locator('[id="password"]')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("Awa@2026#Eskill!")
         
-        # -> Open the Financials page from the sidebar (click the sidebar link labeled 'Financials' or equivalent to reach the Financials page).
+        # -> Fill the 'E-mail' field with admin@eskill.com.br and the 'Senha' field with Awa@2026#Eskill!, then click the 'Entrar na Plataforma' button.
         # Entrar na Plataforma button
         elem = page.get_by_role('button', name='Entrar na Plataforma', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Scroll the sidebar/navigation to reveal and then click the 'Financials' sidebar link (open the Financials page).
+        # -> Scroll down the dashboard/sidebar to reveal the 'Financials' link in the sidebar so it can be clicked.
         await page.mouse.wheel(0, 300)
         
-        # -> Scroll the sidebar/page to reveal the 'Financials' sidebar link so it can be clicked.
+        # -> Reveal the 'Financials' link in the dashboard sidebar by scrolling the page and searching for the label 'Financials'.
         await page.mouse.wheel(0, 300)
         
-        # -> Scroll the sidebar/navigation to reveal the 'Financials' sidebar link so it can be clicked.
-        await page.mouse.wheel(0, 300)
-        
-        # -> Type 'Financeiro' into the sidebar search box (the field labeled 'Buscar...') to locate the Financials sidebar link.
-        # Buscar... text field
-        elem = page.locator('[id="sidebarSearch"]')
-        await elem.wait_for(state="visible", timeout=10000)
-        await elem.fill("Financeiro")
-        
-        # -> Open the Financials page by navigating to the Dashboard → Financials page (ensure the path is /dashboard/financials).
+        # -> Open the Financials page (Dashboard → Financials) by navigating to the Financials URL and load the page.
         await page.goto("http://localhost:8877/dashboard/financials")
         try:
             await page.wait_for_load_state("domcontentloaded", timeout=5000)
         except Exception:
             pass
         
-        # -> Set 'Data Inicial' to 2000-01-01, set 'Data Final' to 2000-01-31, then click the 'Filtrar' button to apply a date range expected to have no financial data.
-        # start date field
-        elem = page.locator('[id="date-start"]')
-        await elem.wait_for(state="visible", timeout=10000)
-        await elem.fill("2000-01-01")
+        # -> Scroll the Financials page content down to reveal the tab area so the 'Settlements' tab button becomes visible.
+        await page.mouse.wheel(0, 300)
         
-        # -> Set 'Data Inicial' to 2000-01-01, set 'Data Final' to 2000-01-31, then click the 'Filtrar' button to apply a date range expected to have no financial data.
-        # end date field
-        elem = page.locator('[id="date-end"]')
-        await elem.wait_for(state="visible", timeout=10000)
-        await elem.fill("2000-01-31")
-        
-        # -> Set 'Data Inicial' to 2000-01-01, set 'Data Final' to 2000-01-31, then click the 'Filtrar' button to apply a date range expected to have no financial data.
-        # Filtrar button
-        elem = page.locator('[id="btn-financial-filter"]')
+        # -> Click the 'Liquidações MP' tab button (visible label: 'Liquidações MP') to open the Settlements panel.
+        # Liquidações MP button
+        elem = page.locator('[id="tab-settlements-btn"]')
         await elem.click(timeout=10000)
         
         # --> Assertions to verify final state
-        current_url = await page.evaluate("() => window.location.href")
-        # Assert: page loaded with a URL (final outcome verified by the AI judge during the run)
-        assert current_url, 'Page should have loaded with a URL'
+        
+        # --> Verify the Settlements tab panel is visible with a table, empty-state, or graceful message — not a blank crash or PHP error page
+        await page.locator("xpath=/html/body/div[4]/main/div/ul/li[7]/button").nth(0).scroll_into_view_if_needed()
+        # Assert: The 'Liquidações MP' (Settlements) tab button is visible.
+        await expect(page.locator("xpath=/html/body/div[4]/main/div/ul/li[7]/button").nth(0)).to_be_visible(timeout=15000), "The 'Liquida\u00e7\u00f5es MP' (Settlements) tab button is visible."
+        # Assert: A graceful message 'Seller ID não encontrado' is visible in the Settlements panel.
+        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[1]").nth(0)).to_contain_text("Seller ID n\u00e3o encontrado", timeout=15000), "A graceful message 'Seller ID n\u00e3o encontrado' is visible in the Settlements panel."
         await asyncio.sleep(5)
 
     finally:

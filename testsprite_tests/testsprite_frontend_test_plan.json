@@ -179,7 +179,7 @@
   {
     "id": "TC006",
     "title": "Open the financials overview from the dashboard",
-    "description": "This test verifies that a logged-in user can open financial reporting and see the core summary widgets for PnL and settlements.",
+    "description": "This test verifies that a logged-in user can open financial reporting and see the core summary widgets for PnL and settlements. Use URL path /dashboard/financials only; /financeiro is not a valid route.",
     "category": "Financials",
     "steps": [
       {
@@ -201,6 +201,10 @@
       {
         "type": "action",
         "description": "Click the navigation item for financial reporting"
+      },
+      {
+        "type": "action",
+        "description": "Open Financials via the sidebar link to /dashboard/financials (never /financeiro)"
       },
       {
         "type": "assertion",
@@ -290,7 +294,7 @@
   {
     "id": "TC009",
     "title": "Update financials with a date filter change",
-    "description": "This verifies changing the financial date filter updates the displayed reporting summary for the selected range.",
+    "description": "This verifies changing the financial date filter updates the displayed reporting summary for the selected range. Use URL path /dashboard/financials only; /financeiro is not a valid route.",
     "category": "Financials Dashboard",
     "steps": [
       {
@@ -316,6 +320,10 @@
       {
         "type": "action",
         "description": "Select a different valid date range in the financial filter"
+      },
+      {
+        "type": "action",
+        "description": "Open Financials via the sidebar link to /dashboard/financials (never /financeiro)"
       },
       {
         "type": "assertion",
@@ -808,7 +816,7 @@
   {
     "id": "TC023",
     "title": "Show the financials empty or missing-data state",
-    "description": "This verifies the financials page handles a no-data period gracefully when a valid empty range is selected or displayed.",
+    "description": "This verifies the financials page handles a no-data period gracefully when a valid empty range is selected or displayed. Use URL path /dashboard/financials only; /financeiro is not a valid route.",
     "category": "Financials Dashboard",
     "steps": [
       {
@@ -834,6 +842,10 @@
       {
         "type": "action",
         "description": "Select a valid date range with no available financial data"
+      },
+      {
+        "type": "action",
+        "description": "Open Financials via the sidebar link to /dashboard/financials (never /financeiro)"
       },
       {
         "type": "assertion",
@@ -952,5 +964,530 @@
       }
     ],
     "priority": "Low"
+  },
+  {
+    "id": "TC027",
+    "title": "Open financials conciliation shell read-only",
+    "description": "An authenticated user can open the financials conciliation page and see the read-only reconciliation workspace without uploading files or posting sync.",
+    "category": "Financials Conciliation",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open Financials from the dashboard navigation"
+      },
+      {
+        "type": "action",
+        "description": "Open the Conciliation section or link from the financials area"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the conciliation workspace page is displayed with reconciliation-related content visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify no irreversible upload or sync mutation was required to view the shell"
+      }
+    ]
+  },
+  {
+    "id": "TC028",
+    "title": "Open financial discrepancies view from financials",
+    "description": "An authenticated user can open /dashboard/financials/conciliation?view=discrepancies and see the Divergências do Ledger shell or empty-state without mutating data.",
+    "category": "Financials Discrepancies",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open Financials from the dashboard navigation"
+      },
+      {
+        "type": "action",
+        "description": "Open /dashboard/financials/conciliation?view=discrepancies from financials navigation"
+      },
+      {
+        "type": "assertion",
+        "description": "Open /dashboard/financials/conciliation?view=discrepancies from financials navigation"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the view loads without requiring a file upload or sync action"
+      }
+    ]
+  },
+  {
+    "id": "TC029",
+    "title": "Review financial PnL and settlements panels on financials",
+    "description": "An authenticated user opening financials can see PnL/summary widgets and settlements-related panels (including zero/empty values) without posting sync.",
+    "category": "Financials Panels",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open Financials from the dashboard navigation"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify PnL or revenue/summary widgets are visible in the financials main content area"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify settlements, fees, or cash-related panels are present in the financials layout even if values are zero"
+      }
+    ]
+  },
+  {
+    "id": "TC030",
+    "title": "Open financial Fees tab and see fee breakdown panel",
+    "description": "On /dashboard/financials, opening the Fees tab shows the fee breakdown panel (zeros allowed without ML).",
+    "category": "Financials Tabs",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open Financials via the sidebar using /dashboard/financials (never /financeiro)"
+      },
+      {
+        "type": "action",
+        "description": "Click the Fees tab button on the financials page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the Fees tab panel is active and fee breakdown content is visible in the financials main area"
+      }
+    ]
+  },
+  {
+    "id": "TC031",
+    "title": "Open financial Settlements tab gracefully without seller",
+    "description": "On /dashboard/financials, opening Settlements shows the settlements panel or a graceful empty/error state without crashing, even when Seller ID is missing.",
+    "category": "Financials Tabs",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open Financials via the sidebar using /dashboard/financials (never /financeiro)"
+      },
+      {
+        "type": "action",
+        "description": "Click the Settlements tab button on the financials page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the Settlements tab panel is visible with a table, empty-state, or graceful message — not a blank crash or PHP error page"
+      }
+    ]
+  },
+  {
+    "id": "TC032",
+    "title": "Open financial Cashflow tab and see cashflow panel",
+    "description": "On /dashboard/financials, opening the Cashflow tab shows inflows/outflows cashflow content (zeros allowed).",
+    "category": "Financials Tabs",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open Financials via the sidebar using /dashboard/financials (never /financeiro)"
+      },
+      {
+        "type": "action",
+        "description": "Click the Cashflow tab button on the financials page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the Cashflow tab panel is active and cashflow summary content is visible"
+      }
+    ]
+  },
+  {
+    "id": "TC033",
+    "title": "Open financial Compare and Projection tabs",
+    "description": "On /dashboard/financials, the Compare and Projection tabs each reveal their panels without error (zeros allowed).",
+    "category": "Financials Tabs",
+    "priority": "Medium",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open Financials via the sidebar using /dashboard/financials (never /financeiro)"
+      },
+      {
+        "type": "action",
+        "description": "Click the Compare tab button on the financials page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the Compare tab panel content is visible in the financials area"
+      },
+      {
+        "type": "action",
+        "description": "Click the Projection tab button on the financials page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the Projection tab panel content is visible in the financials area"
+      }
+    ]
+  },
+  {
+    "id": "TC034",
+    "title": "Open financial Curva ABC tab gracefully",
+    "description": "On /dashboard/financials, opening Curva ABC shows the ABC panel or a graceful empty/insufficient-data state without crashing.",
+    "category": "Financials Tabs",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open Financials via the sidebar using /dashboard/financials (never /financeiro)"
+      },
+      {
+        "type": "action",
+        "description": "Click the Curva ABC tab button on the financials page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the Curva ABC tab panel is visible with chart/table content or a graceful empty/insufficient-data message — not a PHP error page"
+      }
+    ]
+  },
+  {
+    "id": "TC035",
+    "title": "Open financial Reclamações claims tab",
+    "description": "On /dashboard/financials, opening Reclamações shows the claims report panel (zeros allowed).",
+    "category": "Financials Tabs",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open Financials via the sidebar using /dashboard/financials (never /financeiro)"
+      },
+      {
+        "type": "action",
+        "description": "Click the Reclamações tab button on the financials page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the Reclamações/claims tab panel content is visible in the financials area"
+      }
+    ]
+  },
+  {
+    "id": "TC036",
+    "title": "Open financial Lucratividade profitability tab",
+    "description": "On /dashboard/financials, opening Lucratividade shows profitability panels (empty lists allowed without ML).",
+    "category": "Financials Tabs",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Open Financials via the sidebar using /dashboard/financials (never /financeiro)"
+      },
+      {
+        "type": "action",
+        "description": "Click the Lucratividade tab button on the financials page"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the Lucratividade/profitability tab panel is visible with content or empty-state"
+      }
+    ]
+  },
+  {
+    "id": "TC037",
+    "title": "Open SEO Killer Ficha Técnica tab and see KPIs plus list",
+    "description": "Authenticated user opens /dashboard/seo-killer#technical-sheet and sees Ficha Técnica KPIs (Total active, Hidden SEO, Modelos) and the tech-sheet-list table.",
+    "category": "SEO Killer Tech Sheet",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /dashboard/seo-killer#technical-sheet"
+      },
+      {
+        "type": "action",
+        "description": "If needed click the Ficha Técnica / technical-sheet tab"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the tech-sheet-root or Ficha Técnica heading is visible"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify KPI labels include Total, Hidden SEO or Modelos, and Completude"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the tech-sheet-list area shows the table headers Anúncio and Completude or item rows"
+      }
+    ]
+  },
+  {
+    "id": "TC038",
+    "title": "Ficha Técnica list shows pagination controls when many items",
+    "description": "On the Ficha Técnica tab with multiple pages of active items, pagination controls Anterior/Próxima are visible under the list.",
+    "category": "SEO Killer Tech Sheet",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /dashboard/seo-killer#technical-sheet"
+      },
+      {
+        "type": "action",
+        "description": "Wait for the tech-sheet list to finish loading"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify pagination text like Página X de Y OR Próxima button is present in the tech-sheet list area"
+      },
+      {
+        "type": "action",
+        "description": "If the Próxima button is enabled, click it once"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the list still shows anúncios after pagination (or stays on page 1 if only one page)"
+      }
+    ]
+  },
+  {
+    "id": "TC039",
+    "title": "Ficha Técnica approve button is enabled without selection",
+    "description": "On Ficha Técnica, Aprovar pendentes is clickable without selecting rows; do NOT confirm the dialog and do NOT click Aplicar aprovadas (read-only).",
+    "category": "SEO Killer Tech Sheet",
+    "priority": "High",
+    "steps": [
+      {
+        "type": "action",
+        "description": "Navigate to /login"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the email field with {{LOGIN_USER}}"
+      },
+      {
+        "type": "action",
+        "description": "Fill in the password field with {{LOGIN_PASSWORD}}"
+      },
+      {
+        "type": "action",
+        "description": "Submit the login form"
+      },
+      {
+        "type": "action",
+        "description": "Navigate to /dashboard/seo-killer#technical-sheet"
+      },
+      {
+        "type": "action",
+        "description": "Wait for the tech-sheet toolbar to load"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify the button labeled Aprovar pendentes is visible and not disabled"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify a Completo link/button toward /dashboard/tech-sheet is visible"
+      },
+      {
+        "type": "action",
+        "description": "Optionally click Aprovar pendentes then cancel/dismiss the confirm dialog without approving"
+      },
+      {
+        "type": "assertion",
+        "description": "Verify still on the Ficha Técnica tab and no Mercado Livre apply was triggered"
+      }
+    ]
   }
 ]

@@ -40,49 +40,51 @@ async def run_test():
         except Exception:
             pass
         
-        # -> Fill 'admin@eskill.com.br' into the E-mail field
+        # -> Fill the E-mail field with 'admin@eskill.com.br', fill the Senha field with the provided password, then click the 'Entrar na Plataforma' button.
         # seu@email.com email field
         elem = page.locator('[id="email"]')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("admin@eskill.com.br")
         
-        # -> Fill 'admin@eskill.com.br' into the E-mail field
+        # -> Fill the E-mail field with 'admin@eskill.com.br', fill the Senha field with the provided password, then click the 'Entrar na Plataforma' button.
         # •••••••• password field
         elem = page.locator('[id="password"]')
         await elem.wait_for(state="visible", timeout=10000)
         await elem.fill("Awa@2026#Eskill!")
         
-        # -> Fill 'admin@eskill.com.br' into the E-mail field
+        # -> Fill the E-mail field with 'admin@eskill.com.br', fill the Senha field with the provided password, then click the 'Entrar na Plataforma' button.
         # Entrar na Plataforma button
         elem = page.get_by_role('button', name='Entrar na Plataforma', exact=True)
         await elem.click(timeout=10000)
         
-        # -> Scroll the page to reveal the left navigation items so the 'Financeiro' (Financials) link becomes visible.
+        # -> Scroll the dashboard so the sidebar reveals the 'Financeiro' (Financials) link.
         await page.mouse.wheel(0, 300)
         
-        # -> Click the 'Movimentações' link in the left navigation to open the Financials module.
-        # Movimentações link
-        elem = page.get_by_role('link', name='Movimentações', exact=True)
+        # -> Scroll the sidebar to reveal the 'Financeiro' link in the navigation.
+        await page.mouse.wheel(0, 300)
+        
+        # -> Click the 'Relatórios' link under the 'Financeiro' heading in the sidebar to open the financial reports view.
+        # Relatórios link
+        elem = page.locator('a[href="/dashboard/financials"]')
         await elem.click(timeout=10000)
         
         # --> Assertions to verify final state
         
         # --> Verify PnL information is displayed
-        await page.locator("xpath=/html/body/div[4]/main/div/div[3]/div/div/div/form/div[4]/div/a[1]").nth(0).scroll_into_view_if_needed()
-        # Assert: The DRE (PnL) link is visible on the Financials page.
-        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[3]/div/div/div/form/div[4]/div/a[1]").nth(0)).to_be_visible(timeout=15000), "The DRE (PnL) link is visible on the Financials page."
-        await page.locator("xpath=/html/body/div[4]/main/div/div[5]/div[1]/div/div[1]/span").nth(0).scroll_into_view_if_needed()
-        # Assert: A PnL summary widget value of "0" is visible.
-        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[5]/div[1]/div/div[1]/span").nth(0)).to_be_visible(timeout=15000), "A PnL summary widget value of \"0\" is visible."
-        await page.locator("xpath=/html/body/div[4]/main/div/div[5]/div[1]/div/div[2]/div/table/tbody/tr/td").nth(0).scroll_into_view_if_needed()
-        # Assert: The ledger area displays the 'Nenhuma movimentação no período' message, confirming the PnL section is present.
-        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[5]/div[1]/div/div[2]/div/table/tbody/tr/td").nth(0)).to_be_visible(timeout=15000), "The ledger area displays the 'Nenhuma movimenta\u00e7\u00e3o no per\u00edodo' message, confirming the PnL section is present."
+        # Assert: The PnL label 'Faturamento' is visible.
+        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[1]").nth(0)).to_contain_text("Faturamento", timeout=15000), "The PnL label 'Faturamento' is visible."
+        # Assert: The PnL label 'Receita Líquida' is visible.
+        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[1]").nth(0)).to_contain_text("Receita L\u00edquida", timeout=15000), "The PnL label 'Receita L\u00edquida' is visible."
+        # Assert: The PnL label 'Lucro Bruto' is visible.
+        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[1]").nth(0)).to_contain_text("Lucro Bruto", timeout=15000), "The PnL label 'Lucro Bruto' is visible."
+        # Assert: The PnL label 'Número de Vendas' is visible.
+        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[1]").nth(0)).to_contain_text("N\u00famero de Vendas", timeout=15000), "The PnL label 'N\u00famero de Vendas' is visible."
         
         # --> Verify financial summary widgets are visible
-        # Assert: A financial summary widget is visible and displays the value "0".
-        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[5]/div[1]/div/div[1]/span").nth(0)).to_have_text("0", timeout=15000), "A financial summary widget is visible and displays the value \"0\"."
-        # Assert: The ledger area is visible and shows "Nenhuma movimentação no período".
-        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[5]/div[1]/div/div[2]/div/table/tbody/tr/td").nth(0)).to_have_text("Nenhuma movimenta\u00e7\u00e3o no per\u00edodo", timeout=15000), "The ledger area is visible and shows \"Nenhuma movimenta\u00e7\u00e3o no per\u00edodo\"."
+        # Assert: The Caixa Mercado Pago financial summary widget is visible.
+        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[1]").nth(0)).to_contain_text("Caixa Mercado Pago", timeout=15000), "The Caixa Mercado Pago financial summary widget is visible."
+        # Assert: The Caixa do Ledger (livro financeiro) financial summary widget is visible.
+        await expect(page.locator("xpath=/html/body/div[4]/main/div/div[1]").nth(0)).to_contain_text("Caixa do Ledger (livro financeiro)", timeout=15000), "The Caixa do Ledger (livro financeiro) financial summary widget is visible."
         await asyncio.sleep(5)
 
     finally:
