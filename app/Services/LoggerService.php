@@ -348,14 +348,20 @@ class LoggerService extends AbstractLogger
 
     /**
      * Appends a line to a file and keeps permissions constrained.
+     *
+     * Fail soft: logging must never crash a request (e.g. login) when a
+     * root-owned or ACL-restricted log file blocks writes.
      */
     private function appendLine(string $filePath, string $line): void
     {
         if (@file_put_contents($filePath, $line, FILE_APPEND | LOCK_EX) === false) {
-            throw new \RuntimeException('Nao foi possivel escrever no arquivo de log: ' . $filePath);
+            error_log('LoggerService: nao foi possivel escrever no arquivo de log: ' . $filePath);
+            return;
         }
 
-        @chmod($filePath, 0640);
+        // 0660 preserves ACL mask write for shared users (eskill/root);
+        // 0640 collapses the ACL mask to r-- and blocks the web user.
+        @chmod($filePath, 0660);
     }
 
     /**

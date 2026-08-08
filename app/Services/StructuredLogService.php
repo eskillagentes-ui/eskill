@@ -14,7 +14,7 @@ use Monolog\Processor\MemoryUsageProcessor;
 
 /**
  * Serviço de Logs Estruturados
- * 
+ *
  * Sistema completo de logging com Monolog, formatação JSON,
  * rotação automática e múltiplos níveis de log.
  */
@@ -75,10 +75,10 @@ class StructuredLogService
             // Se falhar em criar o handler de arquivo, usar apenas error_log
             error_log("StructuredLogService: Failed to create rotating file handler: " . $e->getMessage());
         }
-        // Ensure log file permissions are not world-readable
+        // 0660: not world-readable, keeps ACL mask writable for eskill/root
         try {
             if (file_exists($this->logPath)) {
-                @chmod($this->logPath, 0640);
+                @chmod($this->logPath, 0660);
             }
         } catch (\Throwable $e) {
             // ignore
