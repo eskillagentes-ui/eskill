@@ -31,7 +31,13 @@ class SettlementReportService
     {
         $sellerId = $this->getSellerId();
         if (!$sellerId) {
-            return ['error' => 'Seller ID n\u00e3o encontrado', 'results' => []];
+            return [
+                'source' => 'none',
+                'results' => [],
+                'error' => 'Nenhuma conta Mercado Livre ativa — conecte uma conta para liquidações.',
+                'period' => ['start' => $startDate, 'end' => $endDate],
+                'note' => 'Nenhuma conta Mercado Livre ativa — conecte uma conta para liquidações.',
+            ];
         }
 
         $client = $this->getClient();
@@ -46,14 +52,121 @@ class SettlementReportService
         $response = $client->get('/billing/integration/settlement_report', $params);
 
         if (isset($response['error'])) {
-            // Fallback: usar dados locais de settlements
-            return $this->getLocalSettlements($startDate, $endDate);
+            return $this->resolveSettlementFallback($startDate, $endDate);
+        }
+
+        $results = $response['results'] ?? null;
+        if (!is_array($results) || $results === []) {
+            $fallback = $this->resolveSettlementFallback($startDate, $endDate);
+            if (($fallback['results'] ?? []) !== []) {
+                return $fallback;
+            }
         }
 
         return [
             'source' => 'api',
-            'results' => $response['results'] ?? $response,
+            'results' => is_array($results) ? $results : ($response ?? []),
             'period' => ['start' => $startDate, 'end' => $endDate],
+        ];
+    }
+
+    /**
+     * Local → estimado a partir de ml_orders (quando ainda não há settlements sincronizados).
+     *
+     * @return array<string, mixed>
+     */
+    private function resolveSettlementFallback(string $startDate, string $endDate): array
+    {
+        $local = $this->getLocalSettlements($startDate, $endDate);
+        if (($local['results'] ?? []) !== []) {
+            return $local;
+        }
+
+        return $this->getSettlementsFromOrders($startDate, $endDate);
+    }
+
+    /**
+     * Estima liberações a partir das vendas pagas locais (líquido = bruto − comissão − taxa pagamento).
+     *
+     * @return array<string, mixed>
+     */
+    private function getSettlementsFromOrders(string $startDate, string $endDate): array
+    {
+        $where = [
+            'date_created BETWEEN :start AND :end',
+            "status IN ('paid', 'delivered', 'confirmed', 'ready_to_ship', 'shipped', 'handling')",
+        ];
+        $params = [
+            ':start' => $startDate . (strlen($startDate) === 10 ? ' 00:00:00' : ''),
+            ':end' => $endDate . (strlen($endDate) === 10 ? ' 23:59:59' : ''),
+        ];
+        if ($this->accountId) {
+            $where[] = 'ml_account_id = :account_id';
+            $params[':account_id'] = $this->accountId;
+        }
+        $whereSql = implode(' AND ', $where);
+
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT ml_order_id, date_created, total_amount, ml_commission, payment_fee, shipping_cost, status, order_data
+                 FROM ml_orders
+                 WHERE {$whereSql}
+                 ORDER BY date_created DESC
+                 LIMIT 500"
+            );
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (\Throwable $e) {
+            return [
+                'source' => 'orders_estimated',
+                'results' => [],
+                'total' => 0,
+                'period' => ['start' => $startDate, 'end' => $endDate],
+                'note' => 'Não foi possível estimar liquidações a partir de pedidos.',
+            ];
+        }
+
+        $results = [];
+        foreach ($rows as $row) {
+            $orderData = [];
+            if (!empty($row['order_data'])) {
+                $decoded = is_string($row['order_data'])
+                    ? json_decode($row['order_data'], true)
+                    : $row['order_data'];
+                $orderData = is_array($decoded) ? $decoded : [];
+            }
+
+            $gross = (float)($row['total_amount'] ?? 0);
+            $mlFee = (float)($row['ml_commission'] ?? 0);
+            if ($mlFee <= 0) {
+                foreach ($orderData['order_items'] ?? [] as $item) {
+                    $mlFee += (float)($item['sale_fee'] ?? 0);
+                }
+            }
+            $paymentFee = (float)($row['payment_fee'] ?? 0);
+            $fee = round($mlFee + $paymentFee, 2);
+            $net = round($gross - $fee, 2);
+
+            $results[] = [
+                'date_released' => $row['date_created'] ?? null,
+                'description' => 'Venda ML (estimativa de liberação)',
+                'type' => 'sale',
+                'order_id' => $row['ml_order_id'] ?? null,
+                'external_reference' => $row['ml_order_id'] ?? null,
+                'gross_amount' => round($gross, 2),
+                'fee_amount' => $fee,
+                'net_amount' => $net,
+                'status' => 'ESTIMATED',
+                'ml_record_id' => 'ORD-' . ($row['ml_order_id'] ?? ''),
+            ];
+        }
+
+        return [
+            'source' => 'orders_estimated',
+            'results' => $results,
+            'total' => count($results),
+            'period' => ['start' => $startDate, 'end' => $endDate],
+            'note' => 'Sem settlements sincronizados — estimativa a partir das vendas pagas (bruto − taxas ML/pagamento).',
         ];
     }
 
@@ -76,6 +189,14 @@ class SettlementReportService
 
         try {
             $stmt = $this->db->prepare($sql);
+            if (!$stmt instanceof \PDOStatement) {
+                return [
+                    'source' => 'local',
+                    'results' => [],
+                    'error' => 'Tabela de settlements não disponível',
+                ];
+            }
+
             $stmt->execute($params);
             $results = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
@@ -109,14 +230,12 @@ class SettlementReportService
      */
     public function createReleasesReport(string $beginDate, string $endDate): array
     {
-        $client = $this->getClient();
-
         $payload = [
             'begin_date' => $beginDate,
             'end_date' => $endDate,
         ];
 
-        $data = $client->post('/v1/account/release_report', $payload);
+        $data = $this->mpPost('/v1/account/release_report', $payload);
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao criar relat\u00f3rio de libera\u00e7\u00f5es'];
@@ -150,21 +269,19 @@ class SettlementReportService
      */
     public function listReleasesReports(int $limit = 50, int $offset = 0): array
     {
-        $client = $this->getClient();
-
-        $query = http_build_query([
+        $data = $this->mpGet('/v1/account/release_report/list', [
             'limit' => $limit,
             'offset' => $offset,
         ]);
-
-        $data = $client->get("/v1/account/release_report/list?{$query}");
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao listar relat\u00f3rios'];
         }
 
+        $rows = array_is_list($data) ? $data : [];
+
         return [
-            'total' => count($data),
+            'total' => count($rows),
             'reports' => array_map(function (array $report): array {
                 return [
                     'id' => $report['id'] ?? null,
@@ -177,7 +294,7 @@ class SettlementReportService
                     'generation_date' => $report['generation_date'] ?? null,
                     'download_url' => $report['download_url'] ?? null,
                 ];
-            }, $data ?? []),
+            }, $rows),
         ];
     }
 
@@ -190,9 +307,7 @@ class SettlementReportService
      */
     public function getReleasesReportStatus(int $reportId): array
     {
-        $client = $this->getClient();
-
-        $data = $client->get("/v1/account/release_report/{$reportId}");
+        $data = $this->mpGet('/v1/account/release_report/' . $reportId);
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao consultar relat\u00f3rio'];
@@ -220,10 +335,9 @@ class SettlementReportService
      */
     public function downloadReleasesReport(string $fileName): array|string
     {
-        $client = $this->getClient();
 
         // O download retorna CSV raw, n\u00e3o JSON
-        $data = $client->get("/v1/account/release_report/{$fileName}");
+        $data = $this->mpGet('/v1/account/release_report/' . rawurlencode($fileName));
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao baixar relat\u00f3rio'];
@@ -240,9 +354,7 @@ class SettlementReportService
      */
     public function getReleasesReportConfig(): array
     {
-        $client = $this->getClient();
-
-        $data = $client->get('/v1/account/release_report/config');
+        $data = $this->mpGet('/v1/account/release_report/config');
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao obter configura\u00e7\u00f5es'];
@@ -270,7 +382,6 @@ class SettlementReportService
      */
     public function saveReleasesReportConfig(array $config, bool $update = false): array
     {
-        $client = $this->getClient();
 
         $payload = [
             'display_timezone' => $config['display_timezone'] ?? 'GMT-03',
@@ -287,9 +398,9 @@ class SettlementReportService
         }
 
         if ($update) {
-            $data = $client->put('/v1/account/release_report/config', $payload);
+            $data = $this->mpPut('/v1/account/release_report/config', $payload);
         } else {
-            $data = $client->post('/v1/account/release_report/config', $payload);
+            $data = $this->mpPost('/v1/account/release_report/config', $payload);
         }
 
         if (isset($data['error'])) {
@@ -310,9 +421,8 @@ class SettlementReportService
      */
     public function enableReleasesAutoGeneration(): array
     {
-        $client = $this->getClient();
 
-        $data = $client->post('/v1/account/release_report/schedule', []);
+        $data = $this->mpPost('/v1/account/release_report/schedule', []);
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao ativar gera\u00e7\u00e3o autom\u00e1tica'];
@@ -333,9 +443,8 @@ class SettlementReportService
      */
     public function disableReleasesAutoGeneration(): array
     {
-        $client = $this->getClient();
 
-        $data = $client->delete('/v1/account/release_report/schedule');
+        $data = $this->mpDelete('/v1/account/release_report/schedule');
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao desativar gera\u00e7\u00e3o autom\u00e1tica'];
@@ -363,14 +472,13 @@ class SettlementReportService
      */
     public function createSettlementsReport(string $beginDate, string $endDate): array
     {
-        $client = $this->getClient();
 
         $payload = [
             'begin_date' => $beginDate,
             'end_date' => $endDate,
         ];
 
-        $data = $client->post('/v1/account/settlement_report', $payload);
+        $data = $this->mpPost('/v1/account/settlement_report', $payload);
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao criar relat\u00f3rio de settlements'];
@@ -405,21 +513,19 @@ class SettlementReportService
      */
     public function listSettlementsReports(int $limit = 50, int $offset = 0): array
     {
-        $client = $this->getClient();
-
-        $query = http_build_query([
+        $data = $this->mpGet('/v1/account/settlement_report/list', [
             'limit' => $limit,
             'offset' => $offset,
         ]);
-
-        $data = $client->get("/v1/account/settlement_report/list?{$query}");
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao listar relat\u00f3rios'];
         }
 
+        $rows = array_is_list($data) ? $data : [];
+
         return [
-            'total' => count($data),
+            'total' => count($rows),
             'reports' => array_map(function (array $report): array {
                 return [
                     'id' => $report['id'] ?? null,
@@ -433,9 +539,10 @@ class SettlementReportService
                     'download_url' => $report['download_url'] ?? null,
                     'is_reserve' => $report['is_reserve'] ?? false,
                 ];
-            }, $data ?? []),
+            }, $rows),
         ];
     }
+
 
     /**
      * Consulta status de tarefa de cria\u00e7\u00e3o de settlement report
@@ -446,9 +553,8 @@ class SettlementReportService
      */
     public function getSettlementsReportStatus(int $reportId): array
     {
-        $client = $this->getClient();
 
-        $data = $client->get("/v1/account/settlement_report/{$reportId}");
+        $data = $this->mpGet('/v1/account/settlement_report/' . $reportId);
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao consultar relat\u00f3rio'];
@@ -477,9 +583,8 @@ class SettlementReportService
      */
     public function downloadSettlementsReport(string $fileName): array|string
     {
-        $client = $this->getClient();
 
-        $data = $client->get("/v1/account/settlement_report/{$fileName}");
+        $data = $this->mpGet('/v1/account/settlement_report/' . rawurlencode($fileName));
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao baixar relat\u00f3rio'];
@@ -496,9 +601,8 @@ class SettlementReportService
      */
     public function getSettlementsReportConfig(): array
     {
-        $client = $this->getClient();
 
-        $data = $client->get('/v1/account/settlement_report/config');
+        $data = $this->mpGet('/v1/account/settlement_report/config');
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao obter configura\u00e7\u00f5es'];
@@ -525,7 +629,6 @@ class SettlementReportService
      */
     public function saveSettlementsReportConfig(array $config, bool $update = false): array
     {
-        $client = $this->getClient();
 
         $payload = [
             'display_timezone' => $config['display_timezone'] ?? 'GMT-03',
@@ -541,9 +644,9 @@ class SettlementReportService
         }
 
         if ($update) {
-            $data = $client->put('/v1/account/settlement_report/config', $payload);
+            $data = $this->mpPut('/v1/account/settlement_report/config', $payload);
         } else {
-            $data = $client->post('/v1/account/settlement_report/config', $payload);
+            $data = $this->mpPost('/v1/account/settlement_report/config', $payload);
         }
 
         if (isset($data['error'])) {
@@ -564,9 +667,8 @@ class SettlementReportService
      */
     public function enableSettlementsAutoGeneration(): array
     {
-        $client = $this->getClient();
 
-        $data = $client->post('/v1/account/settlement_report/schedule', []);
+        $data = $this->mpPost('/v1/account/settlement_report/schedule', []);
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao ativar gera\u00e7\u00e3o autom\u00e1tica'];
@@ -587,9 +689,8 @@ class SettlementReportService
      */
     public function disableSettlementsAutoGeneration(): array
     {
-        $client = $this->getClient();
 
-        $data = $client->delete('/v1/account/settlement_report/schedule');
+        $data = $this->mpDelete('/v1/account/settlement_report/schedule');
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao desativar gera\u00e7\u00e3o autom\u00e1tica'];

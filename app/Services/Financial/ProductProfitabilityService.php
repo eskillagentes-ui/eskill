@@ -60,22 +60,35 @@ class ProductProfitabilityService
         $worstProducts = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
         return [
-            'top_profitable' => array_map(fn(array $row): array => [
-                'item_id' => $row['item_id'],
-                'title' => $row['title'] ?? 'Sem título',
-                'revenue' => round((float)$row['revenue'], 2),
-                'profit' => round((float)$row['profit'], 2),
-                'sales' => (int)$row['sales'],
-                'avg_margin' => round((float)$row['avg_margin'], 2),
-            ], $topProducts),
-            'least_profitable' => array_map(fn(array $row): array => [
-                'item_id' => $row['item_id'],
-                'title' => $row['title'] ?? 'Sem título',
-                'revenue' => round((float)$row['revenue'], 2),
-                'profit' => round((float)$row['profit'], 2),
-                'sales' => (int)$row['sales'],
-                'avg_margin' => round((float)$row['avg_margin'], 2),
-            ], $worstProducts),
+            'top_profitable' => array_map([$this, 'mapProfitabilityRow'], $topProducts),
+            'least_profitable' => array_map([$this, 'mapProfitabilityRow'], $worstProducts),
+        ];
+    }
+
+    /**
+     * Normaliza linha de lucratividade. gross_margin em ml_orders frequentemente
+     * fica zerado (não calculado no sync); nesse caso deriva margem de lucro/receita.
+     *
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function mapProfitabilityRow(array $row): array
+    {
+        $revenue = round((float)($row['revenue'] ?? 0), 2);
+        $profit = round((float)($row['profit'] ?? 0), 2);
+        $avgMargin = (float)($row['avg_margin'] ?? 0);
+
+        if ($avgMargin == 0.0 && $revenue > 0) {
+            $avgMargin = ($profit / $revenue) * 100;
+        }
+
+        return [
+            'item_id' => $row['item_id'],
+            'title' => $row['title'] ?? 'Sem título',
+            'revenue' => $revenue,
+            'profit' => $profit,
+            'sales' => (int)($row['sales'] ?? 0),
+            'avg_margin' => round($avgMargin, 2),
         ];
     }
 
@@ -157,30 +170,70 @@ class ProductProfitabilityService
             return ['error' => 'Seller ID não encontrado', 'results' => []];
         }
 
-        $client = $this->getClient();
+        $limit = min(50, max(1, $limit));
+        $begin = $startDate . 'T00:00:00.000-03:00';
+        $end = $endDate . 'T23:59:59.999-03:00';
 
-        $params = [
-            'begin_date' => $startDate . 'T00:00:00.000-03:00',
-            'end_date' => $endDate . 'T23:59:59.999-03:00',
-            'limit' => min(50, $limit),
-        ];
+        // 1) MP movements/search (quando disponível no OAuth)
+        $response = $this->mpGet('/v1/account/movements/search', [
+            'begin_date' => $begin,
+            'end_date' => $end,
+            'limit' => $limit,
+        ]);
+        $source = 'mp_movements_search';
 
-        $response = $client->get("/users/{$sellerId}/mercadopago_account/movements", $params);
+        // 2) Fallback comprovado: /v1/payments/search no host MP (ML mercadopago_account/movements → 404)
+        if (isset($response['error']) || (!isset($response['results']) && !array_is_list($response))) {
+            $response = $this->mpGet('/v1/payments/search', [
+                'sort' => 'date_created',
+                'criteria' => 'desc',
+                'limit' => $limit,
+                'offset' => 0,
+                'range' => 'date_created',
+                'begin_date' => $begin,
+                'end_date' => $end,
+            ]);
+            $source = 'mp_payments_search';
+        }
 
         if (isset($response['error'])) {
             return [
                 'error' => $response['message'] ?? 'Erro ao buscar movimentações',
                 'results' => [],
+                'source' => $source,
             ];
         }
 
+        $rows = $response['results'] ?? (array_is_list($response) ? $response : []);
+        if (!is_array($rows)) {
+            $rows = [];
+        }
+
         $movements = [];
-        foreach ($response['results'] ?? $response as $mov) {
+        foreach ($rows as $mov) {
+            if (!is_array($mov)) {
+                continue;
+            }
+            if ($source === 'mp_payments_search') {
+                $net = (float) ($mov['transaction_details']['net_received_amount'] ?? 0);
+                $gross = (float) ($mov['transaction_amount'] ?? 0);
+                $movements[] = [
+                    'id' => $mov['id'] ?? null,
+                    'type' => (string) ($mov['operation_type'] ?? 'payment'),
+                    'amount' => $net !== 0.0 ? $net : $gross,
+                    'balance' => 0.0,
+                    'date_created' => $mov['date_created'] ?? null,
+                    'reference_id' => $mov['order']['id'] ?? $mov['external_reference'] ?? null,
+                    'description' => $mov['description'] ?? ($mov['status'] ?? null),
+                    'status' => $mov['status'] ?? null,
+                ];
+                continue;
+            }
             $movements[] = [
                 'id' => $mov['id'] ?? null,
                 'type' => $mov['type'] ?? 'unknown',
-                'amount' => (float)($mov['amount'] ?? 0),
-                'balance' => (float)($mov['balance'] ?? 0),
+                'amount' => (float) ($mov['amount'] ?? 0),
+                'balance' => (float) ($mov['balance'] ?? 0),
                 'date_created' => $mov['date_created'] ?? null,
                 'reference_id' => $mov['reference_id'] ?? null,
                 'description' => $mov['description'] ?? null,
@@ -189,10 +242,12 @@ class ProductProfitabilityService
 
         return [
             'results' => $movements,
-            'total' => count($movements),
+            'total' => (int) ($response['paging']['total'] ?? count($movements)),
             'period' => ['start' => $startDate, 'end' => $endDate],
+            'source' => $source,
         ];
     }
+
 
     public function getTopProductsFinancialMetrics(
         string $startDate,
@@ -355,27 +410,39 @@ class ProductProfitabilityService
 
     public function calculateABCAnalysis(string $startDate, string $endDate): array
     {
-        // Buscar vendas por produto no período
+        // Fonte: order_data JSON (tabela order_items pode estar vazia neste ambiente).
         $stmt = $this->db->prepare("
             SELECT
-                oi.item_id,
-                COALESCE(NULLIF(oi.title, ''), oi.item_id) as item_title,
-                SUM(quantity) as total_qty,
-                SUM(unit_price * quantity) as total_revenue,
+                jt.item_id,
+                COALESCE(NULLIF(jt.item_title, ''), jt.item_id) as item_title,
+                SUM(jt.quantity) as total_qty,
+                SUM(jt.unit_price * jt.quantity) as total_revenue,
                 COUNT(DISTINCT o.ml_order_id) as order_count
-            FROM order_items oi
-            JOIN ml_orders o ON (oi.order_id = o.id OR oi.order_id = o.ml_order_id)
+            FROM ml_orders o
+            JOIN JSON_TABLE(
+                o.order_data,
+                '$.order_items[*]' COLUMNS (
+                    item_id VARCHAR(50) PATH '$.item.id',
+                    item_title VARCHAR(255) PATH '$.item.title',
+                    quantity INT PATH '$.quantity',
+                    unit_price DECIMAL(12,2) PATH '$.unit_price'
+                )
+            ) AS jt
             WHERE o.ml_account_id = :account_id
             AND o.date_created BETWEEN :start_date AND :end_date
-            AND o.status = 'paid'
-            GROUP BY oi.item_id, item_title
+            AND o.status IN ('paid', 'delivered')
+            AND jt.item_id IS NOT NULL
+            GROUP BY jt.item_id, item_title
             ORDER BY total_revenue DESC
         ");
 
+        $endBound = strlen($endDate) === 10 ? $endDate . ' 23:59:59' : $endDate;
+        $startBound = strlen($startDate) === 10 ? $startDate . ' 00:00:00' : $startDate;
+
         $stmt->execute([
             'account_id' => $this->accountId,
-            'start_date' => $startDate,
-            'end_date' => $endDate,
+            'start_date' => $startBound,
+            'end_date' => $endBound,
         ]);
 
         $products = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -413,6 +480,9 @@ class ProductProfitabilityService
         $revenueB = array_sum(array_column($classB, 'total_revenue'));
         $revenueC = array_sum(array_column($classC, 'total_revenue'));
 
+        // Curva Z: produtos ativos no catálogo (ml_items) sem nenhuma venda no período
+        $classZ = $this->findZeroSalesProducts(array_column($products, 'item_id'));
+
         return [
             'period' => ['start' => $startDate, 'end' => $endDate],
             'total_revenue' => $totalRevenue,
@@ -436,12 +506,64 @@ class ProductProfitabilityService
                     'revenue_share' => $totalRevenue > 0 ? round(($revenueC / $totalRevenue) * 100, 2) : 0,
                     'description' => 'Produtos de baixa relevância - avaliar descontinuação',
                 ],
+                'class_z' => [
+                    'count' => count($classZ),
+                    'revenue_share' => 0,
+                    'description' => 'Produtos ativos no catálogo sem nenhuma venda no período',
+                ],
             ],
             'products' => [
                 'class_a' => array_slice($classA, 0, 20),
                 'class_b' => array_slice($classB, 0, 10),
                 'class_c' => array_slice($classC, 0, 10),
+                'class_z' => array_slice($classZ, 0, 20),
             ],
         ];
+    }
+
+    /**
+     * Busca produtos ativos do catálogo (ml_items) que não tiveram nenhuma venda
+     * no período analisado — Curva Z.
+     *
+     * @param list<string> $excludeItemIds IDs de itens que já tiveram venda no período
+     * @return list<array<string, mixed>>
+     */
+    private function findZeroSalesProducts(array $excludeItemIds): array
+    {
+        if (!$this->accountId) {
+            return [];
+        }
+
+        $params = ['account_id' => $this->accountId];
+        $sql = "SELECT
+                    ml_item_id as item_id,
+                    title as item_title,
+                    available_quantity,
+                    sold_quantity
+                FROM ml_items
+                WHERE account_id = :account_id
+                AND status = 'active'";
+
+        $excludeItemIds = array_values(array_filter(array_map('strval', $excludeItemIds)));
+        if ($excludeItemIds !== []) {
+            $placeholders = [];
+            foreach ($excludeItemIds as $i => $itemId) {
+                $key = "exclude_{$i}";
+                $placeholders[] = ":{$key}";
+                $params[$key] = $itemId;
+            }
+            $sql .= ' AND ml_item_id NOT IN (' . implode(',', $placeholders) . ')';
+        }
+
+        $sql .= ' ORDER BY available_quantity DESC LIMIT 100';
+
+        try {
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute($params);
+            return $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (\PDOException $e) {
+            // Tabela ml_items pode não existir/estar sincronizada para todas as contas ainda.
+            return [];
+        }
     }
 }

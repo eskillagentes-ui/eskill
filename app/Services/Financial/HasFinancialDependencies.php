@@ -108,6 +108,86 @@ trait HasFinancialDependencies
     }
 
     /**
+     * GET na API Mercado Pago com envelope de erro compatível com o cliente ML
+     * (error/message/status) — /v1/account/* e /v1/payments/* não existem em api.mercadolibre.com.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>
+     */
+    protected function mpGet(string $path, array $params = []): array
+    {
+        return $this->mpRequest('GET', $path, $params);
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    protected function mpPost(string $path, array $body = []): array
+    {
+        return $this->mpRequest('POST', $path, [], $body);
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    protected function mpPut(string $path, array $body = []): array
+    {
+        return $this->mpRequest('PUT', $path, [], $body);
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    protected function mpDelete(string $path): array
+    {
+        return $this->mpRequest('DELETE', $path);
+    }
+
+    /**
+     * @param array<string, mixed> $query
+     * @param array<string, mixed> $body
+     * @return array<string, mixed>
+     */
+    private function mpRequest(string $method, string $path, array $query = [], array $body = []): array
+    {
+        try {
+            $client = $this->getMercadoPagoClient();
+            $method = strtoupper($method);
+            $data = match ($method) {
+                'GET' => $client->get($path, $query),
+                'POST' => $client->post($path, $body),
+                'PUT' => $client->put($path, $body),
+                'DELETE' => $client->delete($path),
+                default => throw new \InvalidArgumentException('Unsupported MP method: ' . $method),
+            };
+            return is_array($data) ? $data : [];
+        } catch (\Throwable $e) {
+            $status = null;
+            $decoded = null;
+            if ($e instanceof \GuzzleHttp\Exception\RequestException && $e->hasResponse()) {
+                $response = $e->getResponse();
+                $status = $response->getStatusCode();
+                $decoded = json_decode((string) $response->getBody(), true);
+            }
+            if (is_array($decoded)) {
+                return array_merge($decoded, [
+                    'error' => (string) ($decoded['error'] ?? 'http_error'),
+                    'message' => (string) ($decoded['message'] ?? $e->getMessage()),
+                    'status' => $status,
+                ]);
+            }
+
+            return [
+                'error' => 'http_error',
+                'message' => $e->getMessage(),
+                'status' => $status,
+            ];
+        }
+    }
+
+    /**
      * Obtém o seller ID da conta
      */
     protected function getSellerId(): ?string

@@ -18,6 +18,15 @@ class SettlementController extends BaseController
 
     public function index()
     {
+        // PATCH 7: reusa rota existente (web.php root-owned) via ?view=discrepancies
+        $view = strtolower(trim((string)($_GET['view'] ?? '')));
+        if ($view === 'discrepancies' || $view === 'ledger') {
+            $pageTitle = 'Divergências Financeiras';
+            $activePage = 'financials';
+            require __DIR__ . '/../Views/dashboard/financials/discrepancies.php';
+            return;
+        }
+
         try {
             $summary = $this->service->getSummary();
 

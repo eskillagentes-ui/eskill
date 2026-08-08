@@ -39,11 +39,17 @@ class FinancialReportController extends BaseController
     private function getValidatedDateRange(): ?array
     {
         $startDate = $this->request->get('start', date('Y-m-01'));
-        $endDate = $this->request->get('end', date('Y-m-t'));
+        $endDate = $this->request->get('end', date('Y-m-d'));
 
         if (!$this->validateDate($startDate) || !$this->validateDate($endDate)) {
             http_response_code(400);
             echo json_encode(['error' => 'Formato de data inválido. Use YYYY-MM-DD.']);
+            return null;
+        }
+
+        if ($startDate > $endDate) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Data inicial não pode ser maior que a data final.']);
             return null;
         }
 
@@ -140,7 +146,7 @@ class FinancialReportController extends BaseController
         <body>
             <h1>Demonstrativo de Resultados (DRE)</h1>
             <p>Período: $startDate até $endDate</p>
-            
+
             <table>
                 <tr>
                     <td><strong>Receita Bruta</strong></td>
@@ -155,7 +161,7 @@ class FinancialReportController extends BaseController
                     <td class='amount'><strong>R$ " . number_format($pnl['net_revenue'], 2, ',', '.') . "</strong></td>
                 </tr>
                 <tr><td colspan='2'>&nbsp;</td></tr>
-                
+
                 <tr>
                     <td>(-) Custo das Mercadorias (CMV)</td>
                     <td class='amount'>R$ " . number_format($pnl['cogs'], 2, ',', '.') . "</td>
@@ -176,7 +182,7 @@ class FinancialReportController extends BaseController
                     <td>(-) Descontos</td>
                     <td class='amount'>R$ " . number_format($pnl['discounts'], 2, ',', '.') . "</td>
                 </tr>
-                
+
                 <tr class='total'>
                     <td>Lucro Líquido</td>
                     <td class='amount " . ($pnl['net_profit'] >= 0 ? 'profit' : 'loss') . "'>
@@ -188,7 +194,7 @@ class FinancialReportController extends BaseController
                     <td class='amount'>" . number_format($pnl['avg_margin'], 1, ',', '.') . "%</td>
                 </tr>
             </table>
-            
+
             <p><small>Gerado automaticamente pelo Sistema ML Manager.</small></p>
         </body>
         </html>
@@ -231,8 +237,8 @@ class FinancialReportController extends BaseController
     }
 
     /**
-     * API para obter pedidos com dados financeiros da API ML
-     * GET /api/financials/orders?start=2023-01-01&end=2023-01-31&limit=50&offset=0
+     * API para obter pedidos com dados financeiros (P&L por venda)
+     * GET /api/financials/orders?start=...&end=...&limit=50&offset=0&source=local|api&status=
      */
     public function getOrders(): void
     {
@@ -243,11 +249,25 @@ class FinancialReportController extends BaseController
             return;
         }
         [$startDate, $endDate] = $dates;
-        $limit = $this->request->getIntClamped('limit', 1, 50, 50);
+        $limit = $this->request->getIntClamped('limit', 1, 100, 50);
         $offset = max(0, $this->request->getInt('offset', 0));
+        $source = $this->request->get('source', 'local');
+        $status = $this->request->get('status');
+        $search = $this->request->get('q', $this->request->get('search', ''));
 
         try {
-            $orders = $this->financialService->getOrdersFromApi($startDate, $endDate, $limit, $offset);
+            if ($source === 'api') {
+                $orders = $this->financialService->getOrdersFromApi($startDate, $endDate, $limit, $offset);
+            } else {
+                $orders = $this->financialService->listLocalSalesWithProfitability(
+                    $startDate,
+                    $endDate,
+                    $limit,
+                    $offset,
+                    $status !== '' ? $status : null,
+                    is_string($search) && $search !== '' ? $search : null
+                );
+            }
             echo json_encode([
                 'success' => !isset($orders['error']),
                 'data' => $orders,

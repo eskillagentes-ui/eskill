@@ -238,3 +238,9 @@
 # ============================================================================
 0 9,21 * * * cd /home/eskill/htdocs/eskill.com.br && /usr/bin/php bin/awa-sellers-scan-worker.php >> storage/logs/awa-sellers-scan.log 2>&1
 0 4 * * * cd /home/eskill/htdocs/eskill.com.br && /usr/bin/php bin/awa-sellers-scan-worker.php --verbose >> storage/logs/awa-sellers-scan-daily.log 2>&1
+
+# ============================================================================
+# FINANCIAL LEDGER TICK: Ingestão contínua do livro financeiro (PATCH 5)
+# Frequência: A cada hora (minuto 15)
+# ============================================================================
+15 * * * * cd /home/eskill/htdocs/eskill.com.br && /usr/bin/php bin/financial-ledger-tick.php --once >> storage/logs/financial-ledger-tick.log 2>&1

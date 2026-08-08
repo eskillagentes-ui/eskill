@@ -146,3 +146,16 @@ $router->get('api/ml/observability/summary', MlObservabilityController::class, '
 // ========================================
 $router->get('api/ml/orders/{orderId}/trail', MlOrderAuditController::class, 'trail');
 
+// ========================================
+// 📒 Ledger financeiro — divergências + caixa (PATCH 7/8)
+// ========================================
+$router->get('api/financials/discrepancies', \App\Controllers\FinancialDiscrepancyController::class, 'listDiscrepancies');
+$router->post('api/financials/discrepancies/{id}/resolve', \App\Controllers\FinancialDiscrepancyController::class, 'resolveDiscrepancy');
+$router->get('api/financials/cash-ledger', \App\Controllers\FinancialDiscrepancyController::class, 'getCashLedgerSummary');
+$router->get('api/financials/cash-timeline', \App\Controllers\FinancialDiscrepancyController::class, 'getCashTimeline');
+
+// ========================================
+// 💰 Precificador — shell moderno (layout unificado)
+// ========================================
+$router->get('dashboard/pricing-v2', \App\Controllers\PricingModernController::class, 'index');
+$router->get('dashboard/precificador-v2', \App\Controllers\PricingModernController::class, 'index');

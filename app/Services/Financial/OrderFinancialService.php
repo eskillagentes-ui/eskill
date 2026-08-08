@@ -21,6 +21,12 @@ class OrderFinancialService
     private ?FeeCommissionService $feeCommissionServiceInstance = null;
     private ?PaymentRefundService $paymentRefundServiceInstance = null;
 
+    /** @var array<int|string, float> cache request-scoped de frete do vendedor por shipment_id */
+    private array $sellerShippingCostCache = [];
+
+    private ?FinancialLedgerService $ledgerServiceInstance = null;
+    private ?FinancialReconciliationService $reconciliationServiceInstance = null;
+
     private function pnlReport(): PnlReportService
     {
         return $this->pnlReportServiceInstance ??= new PnlReportService($this->accountId);
@@ -34,6 +40,17 @@ class OrderFinancialService
     private function paymentRefund(): PaymentRefundService
     {
         return $this->paymentRefundServiceInstance ??= new PaymentRefundService($this->accountId);
+    }
+
+    private function ledger(): FinancialLedgerService
+    {
+        return $this->ledgerServiceInstance ??= new FinancialLedgerService($this->db);
+    }
+
+    private function reconciliation(): FinancialReconciliationService
+    {
+        $accountId = (int)($this->accountId ?? 0);
+        return $this->reconciliationServiceInstance ??= new FinancialReconciliationService($accountId, $this->db, $this->ledger());
     }
 
     /**
@@ -112,7 +129,7 @@ class OrderFinancialService
             }
         }
 
-        // Calcular comiss\u00f5es e taxas do pedido
+        // Calcular comissões e taxas do pedido
         $orderItems = $order['order_items'] ?? [];
         $subtotal = 0;
         $mlFee = 0;
@@ -122,35 +139,859 @@ class OrderFinancialService
             $mlFee += (float)($item['sale_fee'] ?? 0);
         }
 
-        // Frete
-        $shippingCost = (float)($order['shipping']['cost'] ?? 0);
+        // Frete do vendedor (não o cost cobrado do comprador)
+        $shippingCost = (float)($order['shipping_cost'] ?? 0);
+        $shipmentId = $order['shipping']['id'] ?? null;
+        if ($shippingCost <= 0.0 && $shipmentId) {
+            $shippingCost = $this->resolveSellerShippingCost($shipmentId);
+        }
+        $totalAmount = (float)($order['total_amount'] ?? 0);
+        $marketplaceNet = round($totalAmount - $mlFee - $paymentFees, 2);
 
-        return [
+        $base = [
             'order_id' => $order['id'] ?? null,
             'status' => $order['status'] ?? 'unknown',
             'date_created' => $order['date_created'] ?? null,
             'date_closed' => $order['date_closed'] ?? null,
-            'total_amount' => (float)($order['total_amount'] ?? 0),
-            'paid_amount' => $totalPaid,
+            'total_amount' => $totalAmount,
+            'paid_amount' => $totalPaid > 0 ? $totalPaid : $totalAmount,
             'subtotal' => $subtotal,
             'ml_fee' => $mlFee,
             'payment_fee' => $paymentFees,
             'shipping_cost' => $shippingCost,
+            'marketplace_net' => $marketplaceNet,
             'payment_method' => $paymentMethod,
             'buyer_id' => $order['buyer']['id'] ?? null,
             'buyer_nickname' => $order['buyer']['nickname'] ?? null,
+            'shipping_label' => $this->resolveShippingLabel($order['shipping'] ?? []),
             'items' => array_map(fn(array $i): array => [
                 'item_id' => $i['item']['id'] ?? null,
                 'title' => $i['item']['title'] ?? null,
+                'sku' => $i['item']['seller_sku'] ?? $i['item']['seller_custom_field'] ?? null,
                 'quantity' => (int)($i['quantity'] ?? 1),
                 'unit_price' => (float)($i['unit_price'] ?? 0),
+                'line_total' => round((float)($i['unit_price'] ?? 0) * (int)($i['quantity'] ?? 1), 2),
                 'sale_fee' => (float)($i['sale_fee'] ?? 0),
+                'thumbnail' => null,
+                'product_cost' => 0.0,
+                'extra_cost' => 0.0,
+                'tax' => 0.0,
+                'profit' => 0.0,
+                'margin_pct' => 0.0,
+                'linked_product' => false,
             ], $orderItems),
+        ];
+
+        return $this->enrichSalesRowsWithCosts([$base], $this->accountId)[0] ?? $base;
+    }
+
+    /**
+     * Lista vendas locais com P&L por item (fonte: ml_orders.order_data + sku_custos/items).
+     *
+     * @return array{results: list<array<string, mixed>>, paging: array<string, mixed>, summary: array<string, mixed>}
+     */
+    public function listLocalSalesWithProfitability(
+        string $startDate,
+        string $endDate,
+        int $limit = 50,
+        int $offset = 0,
+        ?string $status = null,
+        ?string $search = null
+    ): array {
+        $limit = max(1, min(100, $limit));
+        $offset = max(0, $offset);
+
+        $where = [
+            'o.date_created BETWEEN :start AND :end',
+        ];
+        $params = [
+            ':start' => $startDate . (strlen($startDate) === 10 ? ' 00:00:00' : ''),
+            ':end' => $endDate . (strlen($endDate) === 10 ? ' 23:59:59' : ''),
+        ];
+
+        if ($this->accountId) {
+            $where[] = 'o.ml_account_id = :account_id';
+            $params[':account_id'] = $this->accountId;
+        }
+
+        if ($status !== null && $status !== '' && $status !== 'all') {
+            $where[] = 'o.status = :status';
+            $params[':status'] = $status;
+        } else {
+            $where[] = "o.status IN ('paid', 'delivered', 'confirmed', 'ready_to_ship', 'shipped', 'handling')";
+        }
+
+        $search = $search !== null ? trim($search) : '';
+        if ($search !== '') {
+            $where[] = '(CAST(o.ml_order_id AS CHAR) LIKE :q_order
+                OR COALESCE(a.nickname, \'\') LIKE :q_nick
+                OR o.order_data LIKE :q_data)';
+            $like = '%' . $search . '%';
+            $params[':q_order'] = $like;
+            $params[':q_nick'] = $like;
+            $params[':q_data'] = $like;
+        }
+
+        $whereSql = implode(' AND ', $where);
+
+        $countStmt = $this->db->prepare(
+            "SELECT COUNT(*) FROM ml_orders o
+             LEFT JOIN ml_accounts a ON a.id = o.ml_account_id
+             WHERE {$whereSql}"
+        );
+        $countStmt->execute($params);
+        $total = (int)$countStmt->fetchColumn();
+
+        $sql = "SELECT
+                    o.id,
+                    o.ml_order_id,
+                    o.ml_account_id,
+                    o.status,
+                    o.date_created,
+                    o.delivered_at,
+                    o.total_amount,
+                    o.ml_commission,
+                    o.payment_fee,
+                    o.shipping_cost,
+                    o.taxes,
+                    o.product_cost,
+                    o.net_profit,
+                    o.order_data,
+                    a.nickname AS account_nickname
+                FROM ml_orders o
+                LEFT JOIN ml_accounts a ON a.id = o.ml_account_id
+                WHERE {$whereSql}
+                ORDER BY o.date_created DESC
+                LIMIT {$limit} OFFSET {$offset}";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+        $sales = [];
+        foreach ($rows as $row) {
+            $sales[] = $this->mapLocalOrderToSale($row);
+        }
+        $sales = $this->enrichSalesRowsWithCosts($sales, $this->accountId);
+        $sales = $this->applyLedgerToSales($sales);
+
+        $summaryCap = 2000;
+        $summary = [
+            'unlinked_items' => 0,
+            'unlinked_unique_items' => 0,
+            'total_profit' => 0.0,
+            'total_revenue' => 0.0,
+            'avg_margin' => 0.0,
+            'marketplace_net' => 0.0,
+            'total_tax' => 0.0,
+            'tax_configured' => false,
+            'partial' => false,
+        ];
+
+        if ($total <= $limit && $offset === 0) {
+            $summary = $this->summarizeSales($sales);
+        } elseif ($total > 0) {
+            $summaryLimit = min($total, $summaryCap);
+            $summarySql = "SELECT
+                    o.id,
+                    o.ml_order_id,
+                    o.ml_account_id,
+                    o.status,
+                    o.date_created,
+                    o.delivered_at,
+                    o.total_amount,
+                    o.ml_commission,
+                    o.payment_fee,
+                    o.shipping_cost,
+                    o.taxes,
+                    o.product_cost,
+                    o.net_profit,
+                    o.order_data,
+                    a.nickname AS account_nickname
+                FROM ml_orders o
+                LEFT JOIN ml_accounts a ON a.id = o.ml_account_id
+                WHERE {$whereSql}
+                ORDER BY o.date_created DESC
+                LIMIT {$summaryLimit}";
+            $summaryStmt = $this->db->prepare($summarySql);
+            $summaryStmt->execute($params);
+            $summaryRows = $summaryStmt->fetchAll(PDO::FETCH_ASSOC);
+            $summarySales = [];
+            foreach ($summaryRows as $row) {
+                $summarySales[] = $this->mapLocalOrderToSale($row);
+            }
+            $summarySales = $this->enrichSalesRowsWithCosts($summarySales, $this->accountId);
+            $summary = $this->summarizeSales($summarySales);
+            $summary['partial'] = $total > $summaryCap;
+        }
+
+        return [
+            'results' => $sales,
+            'paging' => [
+                'total' => $total,
+                'offset' => $offset,
+                'limit' => $limit,
+            ],
+            'summary' => $summary,
         ];
     }
 
     /**
-     * Obt\u00e9m detalhes de um pedido espec\u00edfico com dados financeiros
+     * @param list<array<string, mixed>> $sales
+     * @return array{unlinked_items: int, total_profit: float, total_revenue: float, avg_margin: float, marketplace_net: float, partial: bool}
+     */
+    private function summarizeSales(array $sales): array
+    {
+        $unlinked = 0;
+        $unlinkedUnique = [];
+        $totalProfit = 0.0;
+        $totalRevenue = 0.0;
+        $totalNet = 0.0;
+        $totalTax = 0.0;
+        foreach ($sales as $sale) {
+            $totalProfit += (float)($sale['profit'] ?? 0);
+            $totalRevenue += (float)($sale['total_amount'] ?? 0);
+            $totalNet += (float)($sale['marketplace_net'] ?? 0);
+            $totalTax += (float)($sale['taxes'] ?? 0);
+            foreach ($sale['items'] as $item) {
+                if (empty($item['linked_product'])) {
+                    $unlinked++;
+                    $itemId = trim((string)($item['item_id'] ?? ''));
+                    $sku = trim((string)($item['sku'] ?? ''));
+                    $key = $itemId !== '' ? $itemId : ($sku !== '' ? 'sku:' . $sku : 'row:' . $unlinked);
+                    $unlinkedUnique[$key] = true;
+                }
+            }
+        }
+
+        return [
+            'unlinked_items' => $unlinked,
+            'unlinked_unique_items' => count($unlinkedUnique),
+            'total_profit' => round($totalProfit, 2),
+            'total_revenue' => round($totalRevenue, 2),
+            'avg_margin' => $totalRevenue > 0 ? round(($totalProfit / $totalRevenue) * 100, 2) : 0.0,
+            'marketplace_net' => round($totalNet, 2),
+            'total_tax' => round($totalTax, 2),
+            'tax_configured' => $totalTax > 0,
+            'partial' => false,
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function mapLocalOrderToSale(array $row): array
+    {
+        $orderData = [];
+        if (!empty($row['order_data'])) {
+            $decoded = is_string($row['order_data'])
+                ? json_decode($row['order_data'], true)
+                : $row['order_data'];
+            $orderData = is_array($decoded) ? $decoded : [];
+        }
+
+        $orderItems = $orderData['order_items'] ?? [];
+        $mlFee = (float)($row['ml_commission'] ?? 0);
+        $paymentFee = (float)($row['payment_fee'] ?? 0);
+        if ($mlFee <= 0) {
+            foreach ($orderItems as $item) {
+                $mlFee += (float)($item['sale_fee'] ?? 0);
+            }
+        }
+
+        $totalAmount = (float)($row['total_amount'] ?? 0);
+        // shipping.cost / payments.shipping_cost = frete do COMPRADOR (muitas vezes 0 no frete grátis).
+        // O custo real do vendedor vem de GET /shipments/{id}/costs → senders[].cost
+        $shippingCost = (float)($row['shipping_cost'] ?? 0);
+        $shipmentId = $orderData['shipping']['id'] ?? null;
+        if ($shippingCost <= 0.0 && $shipmentId) {
+            $resolved = $this->resolveSellerShippingCost($shipmentId);
+            if ($resolved > 0.0) {
+                $shippingCost = $resolved;
+                $localId = (int)($row['id'] ?? 0);
+                if ($localId > 0) {
+                    $this->persistOrderShippingCost($localId, $shippingCost);
+                }
+            }
+        }
+        $taxes = (float)($row['taxes'] ?? ($orderData['taxes']['amount'] ?? 0));
+        $payment = is_array($orderData['payments'][0] ?? null) ? $orderData['payments'][0] : [];
+        if ($taxes <= 0) {
+            $taxes = (float)($payment['taxes_amount'] ?? 0);
+        }
+        $couponAmount = (float)($payment['coupon_amount'] ?? ($orderData['coupon']['amount'] ?? 0));
+        $marketplaceNet = round($totalAmount - $mlFee - $paymentFee, 2);
+
+        $items = [];
+        foreach ($orderItems as $item) {
+            $qty = (int)($item['quantity'] ?? 1);
+            $unit = (float)($item['unit_price'] ?? 0);
+            $items[] = [
+                'item_id' => $item['item']['id'] ?? null,
+                'title' => $item['item']['title'] ?? null,
+                'sku' => $item['item']['seller_sku']
+                    ?? $item['item']['seller_custom_field']
+                    ?? null,
+                'quantity' => $qty,
+                'unit_price' => $unit,
+                'line_total' => round($unit * $qty, 2),
+                'sale_fee' => (float)($item['sale_fee'] ?? 0),
+                'thumbnail' => null,
+                'product_cost' => 0.0,
+                'extra_cost' => 0.0,
+                'tax' => 0.0,
+                'profit' => 0.0,
+                'margin_pct' => 0.0,
+                'linked_product' => false,
+            ];
+        }
+
+        return [
+            'order_id' => $row['ml_order_id'] ?? $row['id'],
+            'local_id' => (int)($row['id'] ?? 0),
+            'account_id' => (int)($row['ml_account_id'] ?? 0),
+            'account_nickname' => $row['account_nickname'] ?? null,
+            'status' => $row['status'] ?? 'unknown',
+            'date_created' => $row['date_created'] ?? null,
+            'date_closed' => $row['delivered_at'] ?? ($orderData['date_closed'] ?? null),
+            'total_amount' => $totalAmount,
+            'paid_amount' => $totalAmount,
+            'subtotal' => array_sum(array_column($items, 'line_total')),
+            'ml_fee' => round($mlFee, 2),
+            'payment_fee' => round($paymentFee, 2),
+            'shipping_cost' => round($shippingCost, 2),
+            'taxes' => round($taxes, 2),
+            'marketplace_net' => $marketplaceNet,
+            'payment_method' => $payment['payment_type'] ?? null,
+            'payment_method_id' => $payment['payment_method_id'] ?? null,
+            'installments' => (int)($payment['installments'] ?? 1),
+            'coupon_amount' => round($couponAmount, 2),
+            'buyer_id' => $orderData['buyer']['id'] ?? null,
+            'buyer_nickname' => $orderData['buyer']['nickname'] ?? null,
+            'shipping_label' => $this->resolveShippingLabel($orderData['shipping'] ?? []),
+            'items' => $items,
+            'profit' => 0.0,
+            'margin_pct' => 0.0,
+            'product_cost' => 0.0,
+            'extra_cost' => 0.0,
+        ];
+    }
+
+    /**
+     * @param list<array<string, mixed>> $sales
+     * @return list<array<string, mixed>>
+     */
+    private function enrichSalesRowsWithCosts(array $sales, ?int $accountId): array
+    {
+        $itemIds = [];
+        $skus = [];
+        foreach ($sales as $sale) {
+            foreach ($sale['items'] as $item) {
+                if (!empty($item['item_id'])) {
+                    $itemIds[] = (string)$item['item_id'];
+                }
+                if (!empty($item['sku'])) {
+                    $skus[] = (string)$item['sku'];
+                }
+            }
+        }
+        $itemIds = array_values(array_unique($itemIds));
+        $skus = array_values(array_unique($skus));
+        $costMap = $this->loadCostMap($itemIds, $accountId);
+        $costBySku = $this->loadCostMapBySku($skus, $accountId);
+        $itemMeta = $this->loadItemMeta($itemIds);
+        $productCosts = $this->loadProductCosts($itemIds, $skus, $accountId);
+        $defaultTaxRate = $this->resolveDefaultTaxRate();
+
+        foreach ($sales as &$sale) {
+            $orderTax = (float)($sale['taxes'] ?? 0);
+            $orderShipping = (float)($sale['shipping_cost'] ?? 0);
+            $orderMlFee = (float)($sale['ml_fee'] ?? 0);
+            $orderPaymentFee = (float)($sale['payment_fee'] ?? 0);
+            $orderTotal = (float)($sale['total_amount'] ?? 0);
+            $itemsTotal = array_sum(array_map(static fn(array $i): float => (float)$i['line_total'], $sale['items']));
+            if ($itemsTotal <= 0) {
+                $itemsTotal = $orderTotal > 0 ? $orderTotal : 1.0;
+            }
+
+            $saleProductCost = 0.0;
+            $saleExtraCost = 0.0;
+            $saleTax = 0.0;
+            $saleProfit = 0.0;
+
+            foreach ($sale['items'] as &$item) {
+                $itemId = (string)($item['item_id'] ?? '');
+                $sku = (string)($item['sku'] ?? '');
+                $qty = max(1, (int)($item['quantity'] ?? 1));
+                $lineTotal = (float)($item['line_total'] ?? 0);
+                $share = $lineTotal / $itemsTotal;
+
+                $meta = $itemMeta[$itemId] ?? null;
+                $cost = $costMap[$itemId] ?? null;
+                $pc = $productCosts['by_item'][$itemId]
+                    ?? ($sku !== '' ? ($productCosts['by_sku'][$sku] ?? null) : null);
+
+                if ($meta) {
+                    if (empty($item['thumbnail']) && !empty($meta['thumbnail'])) {
+                        $item['thumbnail'] = $meta['thumbnail'];
+                    }
+                    if ($sku === '' && !empty($meta['sku'])) {
+                        $sku = (string)$meta['sku'];
+                        $item['sku'] = $sku;
+                    }
+                }
+
+                $unitCost = 0.0;
+                $opsPct = 0.0;
+                $linked = false;
+                $costSource = 'none';
+
+                if ($cost && (float)$cost['custo_produto'] > 0) {
+                    $unitCost = (float)$cost['custo_produto'];
+                    $opsPct = (float)($cost['custos_operacionais_pct'] ?? 0);
+                    $linked = true;
+                    $costSource = 'sku_custos';
+                } elseif ($sku !== '' && isset($costBySku[$sku]) && (float)$costBySku[$sku]['custo_produto'] > 0) {
+                    $unitCost = (float)$costBySku[$sku]['custo_produto'];
+                    $opsPct = (float)($costBySku[$sku]['custos_operacionais_pct'] ?? 0);
+                    $linked = true;
+                    $costSource = 'sku';
+                } elseif ($pc && (float)($pc['custo_producao'] ?? 0) > 0) {
+                    $unitCost = (float)$pc['custo_producao'];
+                    $linked = true;
+                    $costSource = 'product_costs';
+                } elseif ($meta && (float)($meta['cost_price'] ?? 0) > 0) {
+                    $unitCost = (float)$meta['cost_price'];
+                    $linked = true;
+                    $costSource = 'items';
+                }
+
+                $productCost = round($unitCost * $qty, 2);
+                $extraCost = round($lineTotal * ($opsPct / 100), 2);
+
+                $lineTax = 0.0;
+                $taxSource = 'none';
+                if ($orderTax > 0) {
+                    $lineTax = round($orderTax * $share, 2);
+                    $taxSource = 'order';
+                } elseif ($meta && (float)($meta['tax_rate'] ?? 0) > 0) {
+                    $lineTax = round($lineTotal * ((float)$meta['tax_rate'] / 100), 2);
+                    $taxSource = 'items';
+                } elseif ($pc && (float)($pc['taxa_imposto'] ?? 0) > 0) {
+                    $lineTax = round($lineTotal * ((float)$pc['taxa_imposto'] / 100), 2);
+                    $taxSource = 'product_costs';
+                } elseif ($defaultTaxRate > 0) {
+                    $lineTax = round($lineTotal * ($defaultTaxRate / 100), 2);
+                    $taxSource = 'settings';
+                }
+
+                $lineMlFee = (float)($item['sale_fee'] ?? 0);
+                if ($lineMlFee <= 0 && $orderMlFee > 0) {
+                    $lineMlFee = round($orderMlFee * $share, 2);
+                }
+                $linePaymentFee = round($orderPaymentFee * $share, 2);
+                $lineShipping = round($orderShipping * $share, 2);
+                $lineNet = round($lineTotal - $lineMlFee - $linePaymentFee, 2);
+                $lineProfit = round($lineNet - $lineTax - $productCost - $extraCost - $lineShipping, 2);
+                $lineMargin = $lineTotal > 0 ? round(($lineProfit / $lineTotal) * 100, 2) : 0.0;
+
+                $item['product_cost'] = $productCost;
+                $item['extra_cost'] = $extraCost;
+                $item['tax'] = $lineTax;
+                $item['marketplace_net'] = $lineNet;
+                $item['profit'] = $lineProfit;
+                $item['margin_pct'] = $lineMargin;
+                $item['linked_product'] = $linked;
+                $item['cost_source'] = $costSource;
+                $item['tax_source'] = $taxSource;
+
+                $saleProductCost += $productCost;
+                $saleExtraCost += $extraCost;
+                $saleTax += $lineTax;
+                $saleProfit += $lineProfit;
+            }
+            unset($item);
+
+            $sale['product_cost'] = round($saleProductCost, 2);
+            $sale['extra_cost'] = round($saleExtraCost, 2);
+            $sale['taxes'] = round($saleTax > 0 ? $saleTax : $orderTax, 2);
+            $sale['profit'] = round($saleProfit, 2);
+            $sale['margin_pct'] = $orderTotal > 0 ? round(($saleProfit / $orderTotal) * 100, 2) : 0.0;
+            $sale['marketplace_net'] = round($orderTotal - $orderMlFee - $orderPaymentFee, 2);
+        }
+        unset($sale);
+
+        return $sales;
+    }
+
+    /**
+     * Overlay do livro financeiro canônico sobre a venda.
+     * Sem ledger → fallback order_data (ajustado para incluir frete seller no net).
+     *
+     * @param list<array<string, mixed>> $sales
+     * @return list<array<string, mixed>>
+     */
+    private function applyLedgerToSales(array $sales): array
+    {
+        if ($sales === []) {
+            return $sales;
+        }
+
+        $accountId = (int)($this->accountId ?? 0);
+        if ($accountId <= 0) {
+            foreach ($sales as $sale) {
+                $aid = (int)($sale['account_id'] ?? 0);
+                if ($aid > 0) {
+                    $accountId = $aid;
+                    break;
+                }
+            }
+        }
+
+        $orderIds = [];
+        foreach ($sales as $sale) {
+            $oid = (string)($sale['order_id'] ?? '');
+            if ($oid !== '') {
+                $orderIds[] = $oid;
+            }
+        }
+
+        $summaries = $accountId > 0
+            ? $this->ledger()->summarizeOrders($accountId, $orderIds)
+            : [];
+
+        foreach ($sales as &$sale) {
+            $oid = (string)($sale['order_id'] ?? '');
+            $sum = $summaries[$oid] ?? null;
+
+            if ($sum === null || empty($sum['has_ledger']) || (int)$sum['entries_count'] <= 0) {
+                $sale['ledger_source'] = 'fallback_order';
+                $sale['refund_covered'] = 0.0;
+                $sale['refund_net'] = 0.0;
+                $sale['protection_net'] = 0.0;
+                $sale['marketplace_net'] = round(
+                    (float)($sale['total_amount'] ?? 0)
+                    - (float)($sale['ml_fee'] ?? 0)
+                    - (float)($sale['payment_fee'] ?? 0)
+                    - (float)($sale['shipping_cost'] ?? 0)
+                    - (float)($sale['coupon_amount'] ?? 0),
+                    2
+                );
+                $sale['profit'] = round(
+                    (float)$sale['marketplace_net']
+                    - (float)($sale['product_cost'] ?? 0)
+                    - (float)($sale['extra_cost'] ?? 0)
+                    - (float)($sale['taxes'] ?? 0),
+                    2
+                );
+                $rev = (float)($sale['total_amount'] ?? 0);
+                $sale['margin_pct'] = $rev > 0 ? round(((float)$sale['profit'] / $rev) * 100, 2) : 0.0;
+                continue;
+            }
+
+            $byType = $sum['by_type'];
+            $byCat = $sum['by_category'];
+
+            $sale['ledger_source'] = 'ledger';
+            $sale['sale_revenue'] = (float)($byType[FinancialEntryType::SALE_REVENUE] ?? $sale['total_amount'] ?? 0);
+            if (isset($byType[FinancialEntryType::SALE_FEE])) {
+                $sale['ml_fee'] = abs((float)$byType[FinancialEntryType::SALE_FEE]);
+            }
+            if (isset($byType[FinancialEntryType::PAYMENT_FEE])) {
+                $sale['payment_fee'] = abs((float)$byType[FinancialEntryType::PAYMENT_FEE]);
+            }
+            if (isset($byType[FinancialEntryType::SHIPPING_COST])) {
+                $sale['shipping_cost'] = abs((float)$byType[FinancialEntryType::SHIPPING_COST]);
+            }
+            if (isset($byType[FinancialEntryType::COMMERCIAL_DISCOUNT])) {
+                $sale['coupon_amount'] = abs((float)$byType[FinancialEntryType::COMMERCIAL_DISCOUNT]);
+            }
+
+            $sale['refund_covered'] = (float)$sum['refund_covered'];
+            $sale['refund_net'] = (float)($byCat[FinancialEntryCategory::REFUND] ?? 0);
+            $sale['protection_net'] = (float)($byCat[FinancialEntryCategory::PROTECTION] ?? 0);
+            $sale['marketplace_net'] = (float)$sum['marketplace_net'];
+            $sale['ledger_entries_count'] = (int)$sum['entries_count'];
+            $sale['ledger_summary'] = [
+                'marketplace_net' => (float)$sum['marketplace_net'],
+                'settlement_net' => (float)($sum['settlement_net'] ?? 0),
+                'released_amount' => (float)($sum['released_amount'] ?? 0),
+                'pending_release_amount' => (float)($sum['pending_release_amount'] ?? 0),
+                'entries_count' => (int)$sum['entries_count'],
+                'refund_covered' => (float)$sum['refund_covered'],
+            ];
+
+            $sale['profit'] = round(
+                (float)$sale['marketplace_net']
+                - (float)($sale['product_cost'] ?? 0)
+                - (float)($sale['extra_cost'] ?? 0)
+                - (float)($sale['taxes'] ?? 0),
+                2
+            );
+            $rev = (float)($sale['total_amount'] ?? 0);
+            $sale['margin_pct'] = $rev > 0 ? round(((float)$sale['profit'] / $rev) * 100, 2) : 0.0;
+        }
+        unset($sale);
+
+        return $sales;
+    }
+
+    /**
+     * @param list<string> $skus
+     * @return array<string, array<string, mixed>>
+     */
+    private function loadCostMapBySku(array $skus, ?int $accountId): array
+    {
+        if ($skus === [] || !$accountId) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($skus), '?'));
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT i.sku, sc.custo_produto, sc.comissao_pct, sc.frete_medio, sc.custos_operacionais_pct
+                 FROM sku_custos sc
+                 INNER JOIN items i ON i.ml_item_id = sc.mlb_id AND i.account_id = sc.account_id
+                 WHERE sc.account_id = ? AND i.sku IN ({$placeholders})
+                   AND i.sku IS NOT NULL AND i.sku != ''"
+            );
+            $stmt->execute([$accountId, ...$skus]);
+            $map = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $sku = (string)$row['sku'];
+                if ($sku !== '' && !isset($map[$sku])) {
+                    $map[$sku] = $row;
+                }
+            }
+            return $map;
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
+    /**
+     * @param list<string> $itemIds
+     * @param list<string> $skus
+     * @return array{by_item: array<string, array<string, mixed>>, by_sku: array<string, array<string, mixed>>}
+     */
+    private function loadProductCosts(array $itemIds, array $skus, ?int $accountId): array
+    {
+        $empty = ['by_item' => [], 'by_sku' => []];
+        if (!$accountId || ($itemIds === [] && $skus === [])) {
+            return $empty;
+        }
+
+        try {
+            $byItem = [];
+            $bySku = [];
+            if ($itemIds !== []) {
+                $placeholders = implode(',', array_fill(0, count($itemIds), '?'));
+                $stmt = $this->db->prepare(
+                    "SELECT item_id, sku, custo_producao, taxa_imposto
+                     FROM product_costs
+                     WHERE account_id = ? AND item_id IN ({$placeholders})"
+                );
+                $stmt->execute([$accountId, ...$itemIds]);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    $byItem[(string)$row['item_id']] = $row;
+                    if (!empty($row['sku'])) {
+                        $bySku[(string)$row['sku']] = $row;
+                    }
+                }
+            }
+            if ($skus !== []) {
+                $placeholders = implode(',', array_fill(0, count($skus), '?'));
+                $stmt = $this->db->prepare(
+                    "SELECT item_id, sku, custo_producao, taxa_imposto
+                     FROM product_costs
+                     WHERE account_id = ? AND sku IN ({$placeholders})"
+                );
+                $stmt->execute([$accountId, ...$skus]);
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                    if (!empty($row['sku']) && !isset($bySku[(string)$row['sku']])) {
+                        $bySku[(string)$row['sku']] = $row;
+                    }
+                }
+            }
+            return ['by_item' => $byItem, 'by_sku' => $bySku];
+        } catch (\Throwable $e) {
+            return $empty;
+        }
+    }
+
+    private function resolveDefaultTaxRate(): float
+    {
+        if (!$this->accountId) {
+            return self::DEFAULT_TAX_RATE > 0 ? self::DEFAULT_TAX_RATE * 100 : 0.0;
+        }
+
+        try {
+            $settings = new \App\Services\SettingsService($this->accountId, $this->db);
+            $rate = $settings->getDefaultTaxRate();
+            if ($rate > 0) {
+                return $rate;
+            }
+        } catch (\Throwable $e) {
+            // fall through
+        }
+
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT AVG(taxa_imposto) FROM product_costs WHERE account_id = ? AND taxa_imposto > 0'
+            );
+            $stmt->execute([$this->accountId]);
+            $avg = $stmt->fetchColumn();
+            if ($avg !== false && (float)$avg > 0) {
+                return (float)$avg;
+            }
+        } catch (\Throwable $e) {
+            // fall through
+        }
+
+        return self::DEFAULT_TAX_RATE > 0 ? self::DEFAULT_TAX_RATE * 100 : 0.0;
+    }
+
+    private function loadCostMap(array $itemIds, ?int $accountId): array
+    {
+        if ($itemIds === [] || !$accountId) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($itemIds), '?'));
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT mlb_id, custo_produto, comissao_pct, frete_medio, custos_operacionais_pct
+                 FROM sku_custos
+                 WHERE account_id = ? AND mlb_id IN ({$placeholders})"
+            );
+            $stmt->execute([$accountId, ...$itemIds]);
+            $map = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $map[(string)$row['mlb_id']] = $row;
+            }
+            return $map;
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
+    /**
+     * @param list<string> $itemIds
+     * @return array<string, array<string, mixed>>
+     */
+    private function loadItemMeta(array $itemIds): array
+    {
+        if ($itemIds === []) {
+            return [];
+        }
+
+        $placeholders = implode(',', array_fill(0, count($itemIds), '?'));
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT ml_item_id, sku, thumbnail, cost_price, tax_rate
+                 FROM items
+                 WHERE ml_item_id IN ({$placeholders})"
+            );
+            $stmt->execute($itemIds);
+            $map = [];
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $map[(string)$row['ml_item_id']] = $row;
+            }
+            return $map;
+        } catch (\Throwable $e) {
+            return [];
+        }
+    }
+
+    /**
+     * Frete pago pelo vendedor (senders[].cost em /shipments/{id}/costs).
+     * Diferente de shipping.cost / payments.shipping_cost (valor do comprador).
+     */
+    private function resolveSellerShippingCost(int|string $shipmentId): float
+    {
+        $cacheKey = (string)$shipmentId;
+        if (array_key_exists($cacheKey, $this->sellerShippingCostCache)) {
+            return $this->sellerShippingCostCache[$cacheKey];
+        }
+
+        $cost = 0.0;
+        try {
+            if (!$this->accountId) {
+                $this->sellerShippingCostCache[$cacheKey] = 0.0;
+                return 0.0;
+            }
+
+            $client = $this->getClient();
+            $response = $client->get('/shipments/' . $cacheKey . '/costs');
+            if (isset($response['body']) && is_array($response['body'])) {
+                $response = $response['body'];
+            }
+            if (isset($response['data']) && is_array($response['data']) && isset($response['data']['senders'])) {
+                $response = $response['data'];
+            }
+
+            $senders = $response['senders'] ?? [];
+            if (is_array($senders)) {
+                foreach ($senders as $sender) {
+                    if (!is_array($sender)) {
+                        continue;
+                    }
+                    $cost += (float)($sender['cost'] ?? 0);
+                }
+            }
+        } catch (\Throwable $e) {
+            $cost = 0.0;
+        }
+
+        $cost = round($cost, 2);
+        $this->sellerShippingCostCache[$cacheKey] = $cost;
+        return $cost;
+    }
+
+    private function persistOrderShippingCost(int $localOrderId, float $shippingCost): void
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'UPDATE ml_orders SET shipping_cost = :cost WHERE id = :id AND (shipping_cost IS NULL OR shipping_cost <= 0)'
+            );
+            $stmt->execute([
+                ':cost' => $shippingCost,
+                ':id' => $localOrderId,
+            ]);
+        } catch (\Throwable $e) {
+            // best-effort: não bloquear listagem
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $shipping
+     */
+    private function resolveShippingLabel(array $shipping): string
+    {
+        $logistic = (string)($shipping['logistic_type'] ?? $shipping['mode'] ?? '');
+        $map = [
+            'fulfillment' => 'Full / Fulfillment',
+            'xd_drop_off' => 'Coleta / Drop-off',
+            'drop_off' => 'Agência ML',
+            'self_service' => 'Flex',
+            'cross_docking' => 'Cross docking',
+            'me2' => 'Mercado Envios',
+            'custom' => 'Envio a combinar',
+            'not_specified' => 'Não especificado',
+        ];
+
+        if ($logistic !== '' && isset($map[$logistic])) {
+            return $map[$logistic];
+        }
+        if ($logistic !== '') {
+            return ucwords(str_replace('_', ' ', $logistic));
+        }
+        return 'Logística ML';
+    }
+
+    /**
+     * Obtém detalhes de um pedido específico com dados financeiros
      * Endpoint: GET /orders/{order_id}
      *
      * @param string $orderId ID do pedido
@@ -158,11 +999,50 @@ class OrderFinancialService
      */
     public function getOrderDetails(string $orderId): array
     {
+        // Preferir enriquecimento local (custos reais) quando o pedido já estiver sincronizado
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT o.id, o.ml_order_id, o.ml_account_id, o.status, o.date_created, o.delivered_at,
+                        o.total_amount, o.ml_commission, o.payment_fee, o.shipping_cost, o.taxes,
+                        o.product_cost, o.net_profit, o.order_data, a.nickname AS account_nickname
+                 FROM ml_orders o
+                 LEFT JOIN ml_accounts a ON a.id = o.ml_account_id
+                 WHERE o.ml_order_id = :oid OR o.id = :oid2
+                 LIMIT 1"
+            );
+            $stmt->execute([':oid' => $orderId, ':oid2' => $orderId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row) {
+                $sale = $this->mapLocalOrderToSale($row);
+                $sale = $this->enrichSalesRowsWithCosts([$sale], (int)($row['ml_account_id'] ?? $this->accountId))[0];
+                $sale = $this->applyLedgerToSales([$sale])[0];
+                $accountId = (int)($row['ml_account_id'] ?? $this->accountId ?? 0);
+                $orderKey = (string)($sale['order_id'] ?? $orderId);
+                if ($accountId > 0) {
+                    $sale['ledger_entries'] = $this->sanitizeLedgerEntriesForUi(
+                        $this->ledger()->listByOrder($accountId, $orderKey)
+                    );
+                    $sale['ledger_summary'] = $this->ledger()->summarizeOrder($accountId, $orderKey);
+                    try {
+                        $this->accountId = $accountId;
+                        $sale['discrepancies'] = $this->reconciliation()->listByOrder($orderKey, 'open');
+                        $sale['reconciliation'] = $this->reconciliation()->getOrderReconciliationView($orderKey);
+                    } catch (\Throwable $e) {
+                        $sale['discrepancies'] = [];
+                        $sale['reconciliation'] = null;
+                    }
+                }
+                return $sale;
+            }
+        } catch (\Throwable $e) {
+            // fallback API
+        }
+
         $client = $this->getClient();
         $response = $client->get("/orders/{$orderId}");
 
         if (isset($response['error'])) {
-            return ['error' => $response['message'] ?? 'Pedido n\u00e3o encontrado'];
+            return ['error' => $response['message'] ?? 'Pedido não encontrado'];
         }
 
         return $this->extractOrderFinancials($response);
@@ -930,5 +1810,71 @@ class OrderFinancialService
             && $response['error'] === 'merchant_orders_unavailable'
             && ($response['feature'] ?? null) === 'merchant_orders'
             && ($response['optional_feature'] ?? false) === true;
+    }
+
+    /**
+     * Remove campos sensíveis de raw_data antes de expor na UI (PATCH 9).
+     *
+     * @param list<array<string, mixed>> $entries
+     * @return list<array<string, mixed>>
+     */
+    private function sanitizeLedgerEntriesForUi(array $entries): array
+    {
+        $out = [];
+        foreach ($entries as $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            if (array_key_exists('raw_data', $entry)) {
+                $raw = $entry['raw_data'];
+                if (is_string($raw)) {
+                    $decoded = json_decode($raw, true);
+                    $raw = is_array($decoded) ? $decoded : [];
+                }
+                $entry['raw_data'] = is_array($raw)
+                    ? $this->sanitizeRawFinancialPayload($raw)
+                    : null;
+                $entry['raw_data_redacted'] = true;
+            }
+            $out[] = $entry;
+        }
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    private function sanitizeRawFinancialPayload(array $payload): array
+    {
+        $sensitiveKeys = [
+            'access_token', 'refresh_token', 'password', 'secret', 'authorization',
+            'card_number', 'security_code', 'cvv', 'first_six_digits', 'last_four_digits',
+            'email', 'phone', 'phone_number', 'doc_number', 'identification',
+            'payer', 'collector', 'bank_info', 'account_number', 'routing_number',
+            'tax_id', 'cpf', 'cnpj',
+        ];
+
+        $clean = [];
+        foreach ($payload as $key => $value) {
+            $keyLower = strtolower((string)$key);
+            $blocked = false;
+            foreach ($sensitiveKeys as $sensitive) {
+                if ($keyLower === $sensitive || str_contains($keyLower, $sensitive)) {
+                    $blocked = true;
+                    break;
+                }
+            }
+            if ($blocked) {
+                $clean[$key] = '[REDACTED]';
+                continue;
+            }
+            if (is_array($value)) {
+                $clean[$key] = $this->sanitizeRawFinancialPayload($value);
+                continue;
+            }
+            $clean[$key] = $value;
+        }
+        return $clean;
     }
 }

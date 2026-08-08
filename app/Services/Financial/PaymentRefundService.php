@@ -113,10 +113,8 @@ class PaymentRefundService
      */
     public function getChargebackDetails(string $chargebackId): array
     {
-        $client = $this->getClient();
-
         try {
-            $data = $client->get("/v1/chargebacks/{$chargebackId}");
+            $data = $this->mpGet('/v1/chargebacks/' . rawurlencode($chargebackId));
         } catch (\Exception $e) {
             log_error('Falha ao buscar detalhes da contestação', [
                 'service' => 'PaymentRefundService',
@@ -190,8 +188,6 @@ class PaymentRefundService
      */
     public function searchMPPayments(array $filters = []): array
     {
-        $client = $this->getClient();
-
         $params = [
             'sort' => $filters['sort'] ?? 'date_created',
             'criteria' => $filters['criteria'] ?? 'desc',
@@ -213,8 +209,8 @@ class PaymentRefundService
             $params['end_date'] = $filters['end_date'] ?? 'NOW';
         }
 
-        $query = http_build_query($params);
-        $data = $client->get("/v1/payments/search?{$query}");
+        // /v1/payments/search é Mercado Pago — via ML client/CF proxy retorna 404.
+        $data = $this->mpGet('/v1/payments/search', $params);
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao buscar pagamentos'];
@@ -257,9 +253,7 @@ class PaymentRefundService
      */
     public function getMPPaymentDetails(string $paymentId): array
     {
-        $client = $this->getClient();
-
-        $data = $client->get("/v1/payments/{$paymentId}");
+        $data = $this->mpGet('/v1/payments/' . rawurlencode($paymentId));
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao buscar pagamento'];
@@ -305,9 +299,7 @@ class PaymentRefundService
      */
     public function getPaymentRefunds(string $paymentId): array
     {
-        $client = $this->getClient();
-
-        $data = $client->get("/v1/payments/{$paymentId}/refunds");
+        $data = $this->mpGet('/v1/payments/' . rawurlencode($paymentId) . '/refunds');
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao buscar reembolsos'];
@@ -324,7 +316,7 @@ class PaymentRefundService
                 'reason' => $refund['reason'] ?? null,
                 'source' => $refund['source'] ?? [],
             ];
-        }, is_array($data) ? $data : []);
+        }, is_array($data) && array_is_list($data) ? $data : []);
     }
 
     /**
@@ -337,14 +329,12 @@ class PaymentRefundService
      */
     public function createRefund(string $paymentId, ?float $amount = null): array
     {
-        $client = $this->getClient();
-
         $body = [];
         if ($amount !== null) {
             $body['amount'] = $amount;
         }
 
-        $data = $client->post("/v1/payments/{$paymentId}/refunds", $body);
+        $data = $this->mpPost('/v1/payments/' . rawurlencode($paymentId) . '/refunds', $body);
 
         if (isset($data['error'])) {
             return ['error' => $data['message'] ?? 'Erro ao criar reembolso'];
@@ -458,20 +448,22 @@ class PaymentRefundService
      */
     public function getWithdrawalHistory(int $limit = 20, int $offset = 0): array
     {
-        $client = $this->getClient();
         $sellerId = $this->getSellerId();
-
-        // Buscar movimentações de saque
-        $query = http_build_query([
-            'user_id' => $sellerId,
+        $params = [
             'limit' => $limit,
             'offset' => $offset,
-        ]);
+        ];
+        if ($sellerId) {
+            $params['user_id'] = $sellerId;
+        }
 
-        $data = $client->get("/v1/account/bank_report/list?{$query}");
+        // /v1/account/* é Mercado Pago (api.mercadopago.com), não ML.
+        $data = $this->mpGet('/v1/account/bank_report/list', $params);
 
         if (isset($data['error'])) {
-            // Tentar endpoint alternativo
+            // Legacy ML (geralmente 403/404) — só como último recurso
+            $client = $this->getClient();
+            $query = http_build_query($params);
             $data = $client->get("/users/{$sellerId}/mercadopago_account/movements?{$query}");
         }
 
@@ -479,21 +471,30 @@ class PaymentRefundService
             return ['error' => $data['message'] ?? 'Erro ao obter histórico de saques'];
         }
 
+        $rows = $data['results'] ?? $data;
+        if (!is_array($rows)) {
+            $rows = [];
+        }
+        if (!array_is_list($rows)) {
+            $rows = array_values(array_filter($rows, 'is_array'));
+        }
+
         return [
-            'total' => $data['paging']['total'] ?? count($data),
+            'total' => $data['paging']['total'] ?? count($rows),
             'withdrawals' => array_map(function (array $w): array {
                 return [
                     'id' => $w['id'] ?? null,
-                    'type' => $w['type'] ?? null,
+                    'type' => $w['type'] ?? $w['subtype'] ?? null,
                     'amount' => (float)($w['amount'] ?? 0),
                     'currency_id' => $w['currency_id'] ?? 'BRL',
                     'status' => $w['status'] ?? null,
                     'date_created' => $w['date_created'] ?? null,
                     'bank_info' => $w['bank_info'] ?? null,
                 ];
-            }, $data['results'] ?? $data ?? []),
+            }, $rows),
         ];
     }
+
 
     /**
      * Busca pagamentos via Mercado Pago client
