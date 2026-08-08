@@ -1,3 +1,11 @@
+## 2026-08-08 (2ª parte) — Logs de teste isolados + project-status.json restaurado
+
+- `LogService` respeita `LOG_DIR`; `tests/bootstrap.php` aponta `LOG_DIR`/`LOG_PATH` → `storage/logs/tests/` (gitignored). Produção sem poluição (delta zero em app.log/llm_error.log).
+- `LogTest::testErrorLogsToErrorFile` derivava path hardcoded de prod → agora usa `Log::channel('app')->getLogDirectory()`.
+- `project-status.json` restaurado (ausente desde mai/2026): 25 features, 23 passando; falhando = `repricing-automatico` (OFF) e `apply-ml-1335-tech-sheet` (aguarda aprovação).
+- Lixo (~800KB) em `.tmp/quarantine-2026-08-08/` (reversível).
+- Suíte Unit: 4417 testes, 10.441 assertions, 0 falhas, 27 skips. Commit `455b23eb`.
+
 ## 2026-08-08 — Inspeção geral + commits do backlog + fixes de infra
 
 - **Backlog commitado**: 18 commits (7a3fb346..678bdb0c), 223 arquivos, ~37,7k inserções. Grupos: auth/TOTP+QR, token refresh, financial ledger, central de Vendas, Hidden SEO/MODEL/GTIN, Pregão QA, pricing-v2, webhook hardening, ads/claims/brand-search/items/seo-killer, dashboard, TestSprite. Lint `php -l` OK em 171 PHPs. Lixo excluído (.cursor, .codacy/generated, __pycache__).
