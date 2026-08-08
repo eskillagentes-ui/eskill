@@ -47,7 +47,7 @@
                 <button class="btn btn-primary w-100" onclick="scanOpportunities()">Aplicar Filtros</button>
             </div>
         </div>
-        
+
         <div class="card">
             <div class="card-header">
                 <h6 class="mb-0"><i class="bi bi-lightbulb me-2"></i>Dicas</h6>
@@ -69,14 +69,23 @@
 async function scanOpportunities() {
     const container = document.getElementById('opportunitiesList');
     container.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-primary"></div><p class="mt-2 mb-0">Buscando oportunidades...</p></div>';
-    
+
     try {
         const category = document.getElementById('categoryFilter').value;
         const minMargin = document.getElementById('minMargin').value;
         const minSales = document.getElementById('minSales').value;
-        
-        const data = await requestJson(`/api/opportunities/scan?category=${category}&min_margin=${minMargin}&min_sales=${minSales}`);
-        
+
+        if (!category) {
+            container.innerHTML = '<div class="text-center py-5 text-muted" data-opportunities-state="empty">'
+                + '<i class="bi bi-funnel fs-1"></i>'
+                + '<p class="mt-2 mb-1 fw-semibold">Selecione uma categoria</p>'
+                + '<p class="mb-0 small">Escolha uma categoria no filtro à direita para buscar oportunidades.</p>'
+                + '</div>';
+            return;
+        }
+
+        const data = await requestJson(`/api/opportunities/scan?category=${encodeURIComponent(category)}&min_margin=${encodeURIComponent(minMargin)}&min_sales=${encodeURIComponent(minSales)}`);
+
         if (data.opportunities && data.opportunities.length > 0) {
             container.innerHTML = data.opportunities.map(opp => `
                 <div class="border rounded p-3 mb-3">
@@ -112,11 +121,20 @@ async function scanOpportunities() {
     }
 }
 
-// Load categories (empty-state explícito quando API não retorna categorias)
+// Load categories (envelope {categories:[]} — fallback local se ML PolicyAgent bloquear)
 requestJson('/api/categories').then(data => {
     const select = document.getElementById('categoryFilter');
-    const cats = data.categories || data.data || [];
     if (!select) return;
+    let cats = [];
+    if (Array.isArray(data)) {
+        cats = data;
+    } else if (Array.isArray(data?.categories)) {
+        cats = data.categories;
+    } else if (Array.isArray(data?.data?.categories)) {
+        cats = data.data.categories;
+    } else if (Array.isArray(data?.data)) {
+        cats = data.data;
+    }
     if (!cats.length) {
         const option = document.createElement('option');
         option.value = '';
@@ -125,10 +143,12 @@ requestJson('/api/categories').then(data => {
         select.appendChild(option);
         return;
     }
+    select.innerHTML = '<option value="">Selecione uma categoria</option>';
     cats.forEach(cat => {
+        if (!cat || cat.id == null) return;
         const option = document.createElement('option');
         option.value = cat.id;
-        option.textContent = cat.name;
+        option.textContent = cat.name || cat.id;
         select.appendChild(option);
     });
 }).catch(() => {

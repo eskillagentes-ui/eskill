@@ -441,13 +441,16 @@ class CacheService
 
         $regex = '/^' . str_replace('\*', '.*', preg_quote($pattern, '/')) . '$/';
         foreach ($files as $file) {
-            $raw = file_get_contents($file);
+            if (!is_file($file)) {
+                continue;
+            }
+            $raw = @file_get_contents($file);
             if ($raw === false) {
                 continue;
             }
             $data = json_decode($raw, true);
             if (isset($data['key']) && preg_match($regex, $data['key'])) {
-                unlink($file);
+                @unlink($file);
             }
         }
 

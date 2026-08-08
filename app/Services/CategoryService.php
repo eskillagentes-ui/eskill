@@ -24,16 +24,109 @@ class CategoryService
     }
 
     /**
-     * Lista todas as categorias do site
+     * Lista todas as categorias do site.
+     * Nunca cacheia payload de erro ML (PolicyAgent/token) — isso envenenava
+     * /api/categories por até 24h e quebrava Oportunidades/SEO Killer (TC011).
+     *
+     * @return list<array{id:string,name:string}>
      */
     public function getAllCategories(): array
     {
         $cacheKey = "categories_{$this->siteId}";
+        $cached = $this->cache->get($cacheKey);
+        if (is_array($cached) && self::isCategoryList($cached)) {
+            return $cached;
+        }
+        if (is_array($cached) && self::isFailurePayload($cached)) {
+            $this->cache->forget($cacheKey);
+        }
 
-        return $this->cache->remember($cacheKey, function () {
-            // Try public access if no auth available (will use token if present)
-            return $this->client->get("/sites/{$this->siteId}/categories", [], true);
-        }, 86400); // 24 horas
+        try {
+            $result = $this->client->get("/sites/{$this->siteId}/categories", [], true);
+        } catch (\Throwable $e) {
+            log_warning('CategoryService: falha ao listar categorias', [
+                'site' => $this->siteId,
+                'error' => $e->getMessage(),
+            ]);
+            return $this->getFallbackRootCategories();
+        }
+
+        if (self::isCategoryList($result)) {
+            $this->cache->set($cacheKey, $result, 86400);
+            return $result;
+        }
+
+        if (self::isFailurePayload($result)) {
+            log_warning('CategoryService: ML bloqueou/listou categorias com erro — fallback local', [
+                'site' => $this->siteId,
+                'code' => $result['code'] ?? null,
+                'error' => $result['error'] ?? null,
+            ]);
+        }
+
+        return $this->getFallbackRootCategories();
+    }
+
+    /**
+     * Payload de falha da API ML (PolicyAgent, http_error, etc.).
+     */
+    public static function isFailurePayload(mixed $payload): bool
+    {
+        if (!is_array($payload)) {
+            return true;
+        }
+        if ($payload === []) {
+            return false;
+        }
+        if (($payload['success'] ?? null) === false) {
+            return true;
+        }
+        if (isset($payload['error']) || isset($payload['blocked_by']) || isset($payload['code'])) {
+            // Lista válida de categorias não carrega essas chaves no root.
+            if (!isset($payload[0]) && !isset($payload['id'])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * @param mixed $payload
+     */
+    public static function isCategoryList(mixed $payload): bool
+    {
+        if (!is_array($payload) || $payload === []) {
+            return false;
+        }
+        if (!array_is_list($payload)) {
+            return false;
+        }
+        $first = $payload[0];
+
+        return is_array($first) && isset($first['id'], $first['name']);
+    }
+
+    /**
+     * Categorias raiz/populares offline (AWA / MLB) quando a API pública falha.
+     *
+     * @return list<array{id:string,name:string}>
+     */
+    private function getFallbackRootCategories(): array
+    {
+        $popular = $this->getPopularCategories('');
+        $out = [];
+        foreach ($popular as $cat) {
+            if (!is_array($cat) || empty($cat['id']) || empty($cat['name'])) {
+                continue;
+            }
+            $out[] = [
+                'id' => (string) $cat['id'],
+                'name' => (string) $cat['name'],
+            ];
+        }
+
+        return $out;
     }
 
     /**

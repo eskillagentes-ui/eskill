@@ -115,6 +115,7 @@ $router->get('api/competitors/analyze', CompetitorController::class, 'analyze');
 $router->get('api/competitors/opportunities', CompetitorController::class, 'opportunities');
 
 // Rotas de oportunidades
+$router->get('api/opportunities/scan', OpportunityController::class, 'scan');
 $router->get('api/opportunities/products-without-catalog', OpportunityController::class, 'productsWithoutCatalog');
 $router->get('api/opportunities/low-competition', OpportunityController::class, 'lowCompetitionCategories');
 $router->get('api/opportunities/best-sellers', OpportunityController::class, 'bestSellersWithoutListing');

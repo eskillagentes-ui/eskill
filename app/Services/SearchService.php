@@ -374,9 +374,26 @@ class SearchService
             'condition' => 'new'
         ], 200); // Analisar top 200
 
-        $opportunities = [];
+        // PolicyAgent / token / rede: searchAll devolve {error,...} sem items.
+        if (!is_array($results) || isset($results['error']) || ($results['success'] ?? true) === false) {
+            return [
+                'success' => false,
+                'opportunities' => [],
+                'error' => $results['error'] ?? 'search_unavailable',
+                'message' => $results['message'] ?? 'Busca de oportunidades indisponível',
+            ];
+        }
 
-        foreach ($results['items'] as $item) {
+        $opportunities = [];
+        $items = $results['items'] ?? [];
+        if (!is_array($items)) {
+            return ['success' => true, 'opportunities' => []];
+        }
+
+        foreach ($items as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
             $score = 0;
             $reasons = [];
 
@@ -443,6 +460,9 @@ class SearchService
         // Ordenar por oportunidade
         usort($opportunities, fn($a, $b) => $b['opportunity_score'] <=> $a['opportunity_score']);
 
-        return array_slice($opportunities, 0, 50);
+        return [
+            'success' => true,
+            'opportunities' => array_slice($opportunities, 0, 50),
+        ];
     }
 }

@@ -159,6 +159,12 @@ class CacheMiddleware
             return false;
         }
 
+        // Never poison the page/API cache with ML PolicyAgent / success:false bodies
+        // (was serving X-Cache:HIT of PA_UNAUTHORIZED for /api/categories).
+        if ($this->isUncacheablePayload($content)) {
+            return false;
+        }
+
         $cacheKey = $this->generateCacheKey($uri, 'GET');
         $ttl = $this->getCacheTtl($uri);
 
@@ -181,6 +187,25 @@ class CacheMiddleware
     }
 
     /**
+     * True when response body must not be stored (errors / auth failures).
+     */
+    private function isUncacheablePayload(string $content): bool
+    {
+        $trim = ltrim($content);
+        if ($trim === '' || ($trim[0] !== '{' && $trim[0] !== '[')) {
+            return false;
+        }
+        if (str_contains($content, 'PA_UNAUTHORIZED') || str_contains($content, '"blocked_by"')) {
+            return true;
+        }
+        if (str_contains($content, '"success":false') || str_contains($content, '"success": false')) {
+            return true;
+        }
+
+        return false;
+    }
+
+    /**
      * True when caching must be bypassed for the URI.
      */
     private function shouldSkipCaching(string $uri): bool
@@ -195,6 +220,11 @@ class CacheMiddleware
             // Account-bound HTML embeds CSRF/CSP/session state and must never be reused.
             // Caching /dashboard/* also masks deploys (stale X-Cache HIT) and breaks empty-states.
             '/dashboard',
+            // QA responses carry per-request CSP nonces, authoritative state
+            // and account-bound private media that must never be replayed.
+            '/api/pregao/',
+            '/qa/live/',
+            '/qa/frame/',
         ];
 
         foreach ($neverCache as $pattern) {
