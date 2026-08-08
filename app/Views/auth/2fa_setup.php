@@ -48,14 +48,14 @@ if (isset($_SESSION['error'])): ?>
                     <div class="row mb-4">
                         <div class="col-12 text-center">
                             <p>1. Escaneie o QR Code abaixo com seu aplicativo autenticador (Google Authenticator, Authy, etc.)</p>
-                            <img src="<?= $qrCodeUrl ?>" alt="QR Code 2FA" class="img-fluid border p-2 rounded mb-3">
-                            <p class="small text-muted">Ou digite o código manualmente: <strong><?= $secret ?></strong></p>
+                            <img src="<?= htmlspecialchars($qrCodeUrl, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>" alt="QR Code 2FA" class="img-fluid border p-2 rounded mb-3">
+                            <p class="small text-muted">Ou digite o código manualmente: <strong><?= htmlspecialchars($secret, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?></strong></p>
                         </div>
                     </div>
 
                     <form action="/auth/2fa/setup" method="POST">
                         <input type="hidden" name="_token" value="<?= $_SESSION['csrf_token'] ?? '' ?>">
-                        <input type="hidden" name="secret" value="<?= $secret ?>">
+                        <input type="hidden" name="secret" value="<?= htmlspecialchars($secret, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">
 
                         <div class="mb-3">
                             <label for="code" class="form-label">2. Digite o código gerado pelo aplicativo</label>

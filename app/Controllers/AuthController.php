@@ -11,6 +11,7 @@ use App\Services\SecurityService;
 use App\Services\AuditLogService;
 use App\Services\TwoFactorService;
 use App\Helpers\Log;
+use App\Helpers\SessionHelper;
 use App\Database;
 
 class AuthController extends BaseController
@@ -104,6 +105,7 @@ class AuthController extends BaseController
             $_SESSION['user_name'] = $result['user']['name'];
             $_SESSION['user_email'] = $result['user']['email'];
             $_SESSION['user_role'] = $this->normalizeUserRole($result['user']['role'] ?? null);
+            $this->hydrateActiveMlAccountSession();
 
             // Log de segurança
             Log::security('User login successful', [
@@ -720,6 +722,7 @@ class AuthController extends BaseController
             $_SESSION['user_name'] = $user['name'];
             $_SESSION['user_email'] = $user['email'];
             $_SESSION['user_role'] = $this->normalizeUserRole($user['role'] ?? null);
+            $this->hydrateActiveMlAccountSession();
 
             unset($_SESSION['2fa_user_id']);
 
@@ -1386,6 +1389,21 @@ class AuthController extends BaseController
             sprintf("[%s] %s %s %s\n", date('c'), strtoupper($level), $message, $encoded),
             FILE_APPEND
         );
+    }
+
+    /**
+     * Após login, hidrata $_SESSION['active_ml_account_id'] a partir da preferência DB /
+     * primeira conta do usuário — evita APIs que só leem a sessão (BaseController).
+     */
+    private function hydrateActiveMlAccountSession(): void
+    {
+        try {
+            SessionHelper::getActiveAccountId();
+        } catch (\Throwable $e) {
+            log_warning('Falha ao hidratar active_ml_account_id no login', [
+                'error' => $e->getMessage(),
+            ]);
+        }
     }
 
     private function normalizeUserRole(?string $role): string

@@ -4,6 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use Endroid\QrCode\ErrorCorrectionLevel\ErrorCorrectionLevelMedium;
+use Endroid\QrCode\QrCode;
+use Endroid\QrCode\Writer\PngWriter;
+
 class TwoFactorService
 {
     private const VALID_CHARACTERS = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
@@ -22,15 +26,20 @@ class TwoFactorService
     }
 
     /**
-     * Get the QR Code URL (using a public API for now, or just the otpauth URL)
+     * Gera o QR Code TOTP localmente para que o segredo nunca saia do servidor.
      */
     public function getQrCodeUrl(string $companyName, string $holder, string $secret): string
     {
         $otpauth = "otpauth://totp/" . rawurlencode($companyName) . ":" . rawurlencode($holder) . "?secret=" . $secret . "&issuer=" . rawurlencode($companyName);
 
-        // Using a public QR code API for simplicity in this environment
-        // In production, use a local library like endroid/qr-code
-        return "https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=" . urlencode($otpauth);
+        $qrCode = new QrCode(
+            data: $otpauth,
+            errorCorrectionLevel: new ErrorCorrectionLevelMedium(),
+            size: 200,
+            margin: 10
+        );
+
+        return (new PngWriter())->write($qrCode)->getDataUri();
     }
 
     /**

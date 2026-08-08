@@ -108,41 +108,23 @@ class TwoFactorServiceTest extends TestCase
         $this->assertIsString($url);
     }
 
-    public function testGetQrCodeUrlContainsOtpAuth(): void
+    public function testGetQrCodeUrlReturnsLocalPngDataUri(): void
     {
         $url = $this->service->getQrCodeUrl('MyApp', 'user@test.com', 'JBSWY3DPEHPK3PXP');
-        $this->assertStringContainsString('otpauth', $url, 'URL deve conter esquema otpauth');
+        $this->assertStringStartsWith('data:image/png;base64,', $url);
+
+        $png = base64_decode(substr($url, strlen('data:image/png;base64,')), true);
+        $this->assertIsString($png);
+        $this->assertStringStartsWith("\x89PNG\r\n\x1a\n", $png);
     }
 
-    public function testGetQrCodeUrlContainsSecret(): void
+    public function testGetQrCodeUrlDoesNotExposeSecretOutsideImageData(): void
     {
         $secret = 'JBSWY3DPEHPK3PXP';
         $url = $this->service->getQrCodeUrl('MyApp', 'user@test.com', $secret);
-        $this->assertStringContainsString($secret, $url, 'URL deve conter o secret');
-    }
 
-    public function testGetQrCodeUrlContainsCompanyName(): void
-    {
-        $url = $this->service->getQrCodeUrl('AWA Motos', 'user@test.com', 'JBSWY3DPEHPK3PXP');
-        $this->assertStringContainsString('AWA', $url, 'URL deve conter o nome da empresa');
-    }
-
-    public function testGetQrCodeUrlContainsIssuer(): void
-    {
-        $url = $this->service->getQrCodeUrl('MyApp', 'user@test.com', 'JBSWY3DPEHPK3PXP');
-        $this->assertStringContainsString('issuer', $url, 'URL deve conter parâmetro issuer');
-    }
-
-    public function testGetQrCodeUrlContainsTotp(): void
-    {
-        $url = $this->service->getQrCodeUrl('MyApp', 'user@test.com', 'JBSWY3DPEHPK3PXP');
-        $this->assertStringContainsString('totp', $url, 'URL deve usar esquema TOTP');
-    }
-
-    public function testGetQrCodeUrlUsesQrApi(): void
-    {
-        $url = $this->service->getQrCodeUrl('MyApp', 'user@test.com', 'JBSWY3DPEHPK3PXP');
-        $this->assertStringContainsString('qrserver.com', $url, 'URL deve usar API de QR code');
+        $this->assertStringNotContainsString($secret, $url);
+        $this->assertStringNotContainsString('qrserver.com', $url);
     }
 
     // =============================
