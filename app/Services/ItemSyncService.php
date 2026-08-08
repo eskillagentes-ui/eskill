@@ -52,6 +52,7 @@ class ItemSyncService
             $this->logger->info('ITEM_SYNC_FETCH_IDS', "Found {$stats['total_found']} items for user {$mlUserId}");
 
             if (empty($itemIds)) {
+                $this->touchAccountLastSyncedAt($accountId);
                 $this->logger->info('ITEM_SYNC_COMPLETE', "No items to sync for account {$accountId}");
                 return $stats;
             }
@@ -78,6 +79,13 @@ class ItemSyncService
                 }
             }
 
+            // Closed/inactive saem do /items/search; sem refresh o status local fica stale.
+            $staleSynced = $this->refreshItemsMissingFromRemoteCatalog($accountId, $itemIds);
+            $stats['stale_refreshed'] = $staleSynced;
+
+            // Badge DESINCRONIZADA usa ml_accounts.last_synced_at — items-sync deve atualizar.
+            $this->touchAccountLastSyncedAt($accountId);
+
             $this->logger->info('ITEM_SYNC_COMPLETE', "Item sync completed for account {$accountId}", $stats);
             return $stats;
         } catch (\Throwable $e) {
@@ -95,26 +103,148 @@ class ItemSyncService
 
     private function fetchAllItemIds(string $mlUserId): array
     {
+        // Doc ML: offset simples trunca ~1000 resultados; search_type=scan + scroll_id
+        // é o contrato para enumeração completa do catálogo do seller.
+        $scanned = $this->fetchAllItemIdsViaScan($mlUserId);
+        if ($scanned !== null) {
+            return $scanned;
+        }
+
+        $this->logger->warning(
+            'ITEM_SYNC_SCAN_FALLBACK',
+            'Scan indisponível; usando paginação por offset (máx ~1000)',
+            ['ml_user_id' => $mlUserId]
+        );
+
+        return $this->fetchAllItemIdsViaOffset($mlUserId);
+    }
+
+    /**
+     * Enumera IDs via search_type=scan (scroll_id).
+     *
+     * @return list<string>|null null = scan indisponível (fallback offset)
+     */
+    private function fetchAllItemIdsViaScan(string $mlUserId): ?array
+    {
+        if ($this->mlClient === null) {
+            return null;
+        }
+
+        $itemIds = [];
+        $scrollId = null;
+        $maxPages = 500; // 500 * 50 = 25k itens (trava de segurança)
+
+        for ($page = 0; $page < $maxPages; $page++) {
+            $params = [
+                'search_type' => 'scan',
+                'limit' => 50,
+                'status' => 'active,paused,closed',
+            ];
+            if (is_string($scrollId) && $scrollId !== '') {
+                $params['scroll_id'] = $scrollId;
+            }
+
+            $response = $this->mlClient->get("/users/{$mlUserId}/items/search", $params);
+
+            if (isset($response['error'])) {
+                // Primeira página falhou → deixa o caller cair no offset.
+                if ($page === 0) {
+                    return null;
+                }
+
+                throw new \RuntimeException(
+                    'Falha no scan de itens ML após página ' . $page . ': '
+                    . (string)($response['message'] ?? $response['error'])
+                );
+            }
+
+            $batch = $response['results'] ?? [];
+            if (!is_array($batch)) {
+                return $page === 0 ? null : $itemIds;
+            }
+
+            foreach ($batch as $id) {
+                if (is_string($id) && $id !== '') {
+                    $itemIds[] = $id;
+                } elseif (is_int($id) || is_float($id)) {
+                    $itemIds[] = (string)$id;
+                }
+            }
+
+            $nextScroll = $response['scroll_id'] ?? null;
+            if (!is_string($nextScroll) || $nextScroll === '' || $batch === []) {
+                break;
+            }
+
+            $scrollId = $nextScroll;
+            usleep(100_000);
+        }
+
+        return array_values(array_unique($itemIds));
+    }
+
+    /**
+     * Fallback legado por offset (limitação conhecida da API ~1000).
+     *
+     * @return list<string>
+     */
+    private function fetchAllItemIdsViaOffset(string $mlUserId): array
+    {
+        if ($this->mlClient === null) {
+            return [];
+        }
+
         $itemIds = [];
         $offset = 0;
         $limit = 50;
+        $maxOffset = 1000; // hard-limit tipico da API sem scan
 
         do {
             $response = $this->mlClient->get("/users/{$mlUserId}/items/search", [
                 'offset' => $offset,
                 'limit' => $limit,
-                'status' => 'active,paused,closed'
+                'status' => 'active,paused,closed',
             ]);
 
-            if (isset($response['results']) && !empty($response['results'])) {
-                $itemIds = array_merge($itemIds, $response['results']);
+            if (isset($response['error'])) {
+                throw new \RuntimeException(
+                    'Falha ao listar itens ML (offset=' . $offset . '): '
+                    . (string)($response['message'] ?? $response['error'])
+                );
+            }
+
+            $batch = $response['results'] ?? [];
+            if (!is_array($batch) || $batch === []) {
+                break;
+            }
+
+            foreach ($batch as $id) {
+                if (is_string($id) && $id !== '') {
+                    $itemIds[] = $id;
+                } elseif (is_int($id) || is_float($id)) {
+                    $itemIds[] = (string)$id;
+                }
             }
 
             $offset += $limit;
-            $total = $response['paging']['total'] ?? 0;
+            $total = (int)($response['paging']['total'] ?? 0);
+
+            if ($total > $maxOffset && $offset >= $maxOffset) {
+                $this->logger->warning(
+                    'ITEM_SYNC_OFFSET_TRUNCATED',
+                    'Catálogo maior que o limite de offset sem scan; sync incompleto',
+                    [
+                        'ml_user_id' => $mlUserId,
+                        'total' => $total,
+                        'collected' => count($itemIds),
+                        'max_offset' => $maxOffset,
+                    ]
+                );
+                break;
+            }
         } while ($offset < $total);
 
-        return $itemIds;
+        return array_values(array_unique($itemIds));
     }
 
     private function fetchItemDetails(array $itemIds): array
@@ -342,5 +472,95 @@ class ItemSyncService
         }
 
         return $count;
+    }
+
+    /**
+     * Atualiza itens locais ainda "vivos" que não vieram no catálogo remoto (search/scan).
+     * Multiget somente leitura — não altera dados no ML.
+     *
+     * @param list<string> $remoteIds
+     */
+
+    /**
+     * Atualiza ml_accounts.last_synced_at (fonte do badge Sincronizada/Desincronizada).
+     */
+    private function touchAccountLastSyncedAt(int $accountId): void
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'UPDATE ml_accounts SET last_synced_at = NOW(), updated_at = NOW() WHERE id = ?'
+            );
+            $stmt->execute([$accountId]);
+        } catch (\Throwable $e) {
+            $this->logger->warning('ITEM_SYNC_TOUCH_LAST_SYNCED_FAILED', 'Falha ao atualizar last_synced_at da conta', [
+                'account_id' => $accountId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function refreshItemsMissingFromRemoteCatalog(int $accountId, array $remoteIds): int
+    {
+        $remoteSet = [];
+        foreach ($remoteIds as $id) {
+            if (is_string($id) && $id !== '') {
+                $remoteSet[$id] = true;
+            } elseif (is_int($id) || is_float($id)) {
+                $remoteSet[(string) $id] = true;
+            }
+        }
+
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT ml_item_id FROM items
+                 WHERE account_id = ?
+                   AND status IN ('active', 'paused', 'under_review', 'inactive')"
+            );
+            $stmt->execute([$accountId]);
+            $localIds = $stmt->fetchAll(PDO::FETCH_COLUMN);
+        } catch (\Throwable $e) {
+            $this->logger->warning('ITEM_SYNC_STALE_LOOKUP_FAILED', 'Falha ao listar itens locais para reconcile', [
+                'account_id' => $accountId,
+                'error' => $e->getMessage(),
+            ]);
+            return 0;
+        }
+
+        $missing = [];
+        foreach ($localIds as $id) {
+            $id = (string) $id;
+            if ($id !== '' && !isset($remoteSet[$id])) {
+                $missing[] = $id;
+            }
+        }
+
+        if ($missing === []) {
+            return 0;
+        }
+
+        $maxPerRun = max(20, min(200, (int)($_ENV['ITEM_SYNC_STALE_REFRESH_LIMIT'] ?? 100)));
+        $missing = array_slice($missing, 0, $maxPerRun);
+
+        $this->logger->info(
+            'ITEM_SYNC_STALE_REFRESH',
+            'Refreshing local items missing from remote catalog',
+            ['account_id' => $accountId, 'missing' => count($missing)]
+        );
+
+        $synced = 0;
+        foreach (array_chunk($missing, 20) as $batch) {
+            try {
+                $details = $this->fetchItemDetails($batch);
+                $synced += $this->syncToItemsTable($details, $accountId);
+            } catch (\Throwable $e) {
+                $this->logger->error('ITEM_SYNC_STALE_BATCH_ERROR', 'Falha ao refrescar itens stale', [
+                    'batch_ids' => $batch,
+                    'error' => $e->getMessage(),
+                ]);
+            }
+            usleep(100_000);
+        }
+
+        return $synced;
     }
 }

@@ -1121,7 +1121,6 @@ class ItemService
     {
         $synced = 0;
         $errors = 0;
-        $offset = 0;
         $allItemIds = [];
 
         // Obter ml_user_id da conta (necessário para CLI sem sessão)
@@ -1135,28 +1134,93 @@ class ItemService
             ];
         }
 
-        // Buscar todos os IDs de itens do usuário
-        do {
-            $response = $this->client->get("/users/{$mlUserId}/items/search", [
-                'limit' => min($limit, 50), // ML limita a 50
-                'offset' => $offset,
-            ]);
+        // Buscar todos os IDs de itens do usuário.
+        // Preferir scan+scroll_id (completo); offset trunca ~1000 na API ML.
+        $scrollId = null;
+        $usedScan = false;
+        $maxPages = 500;
+
+        for ($page = 0; $page < $maxPages; $page++) {
+            $params = [
+                'limit' => min($limit, 50),
+            ];
+
+            if ($page === 0) {
+                $params['search_type'] = 'scan';
+            } elseif (is_string($scrollId) && $scrollId !== '') {
+                $params['search_type'] = 'scan';
+                $params['scroll_id'] = $scrollId;
+                $usedScan = true;
+            } else {
+                // Scan encerrado ou indisponível → fallback offset
+                break;
+            }
+
+            $response = $this->client->get("/users/{$mlUserId}/items/search", $params);
 
             if (isset($response['error'])) {
+                if ($page === 0) {
+                    // Scan falhou na 1ª página: fallback offset completo abaixo
+                    break;
+                }
+
                 return [
                     'success' => false,
-                    'error' => $response['message'] ?? 'Erro ao buscar itens',
+                    'error' => $response['message'] ?? 'Erro ao buscar itens (scan)',
                     'synced' => $synced,
-                    'errors' => $errors,
+                    'errors' => $errors + 1,
                 ];
             }
 
             $itemIds = $response['results'] ?? [];
+            if (!is_array($itemIds)) {
+                $itemIds = [];
+            }
             $allItemIds = array_merge($allItemIds, $itemIds);
+            $usedScan = true;
 
-            $offset += count($itemIds);
-            $total = $response['paging']['total'] ?? 0;
-        } while ($offset < $total && count($itemIds) > 0);
+            $scrollId = $response['scroll_id'] ?? null;
+            if (!is_string($scrollId) || $scrollId === '' || $itemIds === []) {
+                break;
+            }
+
+            usleep(100_000);
+        }
+
+        if (!$usedScan) {
+            $offset = 0;
+            $maxOffset = 1000;
+            do {
+                $response = $this->client->get("/users/{$mlUserId}/items/search", [
+                    'limit' => min($limit, 50),
+                    'offset' => $offset,
+                ]);
+
+                if (isset($response['error'])) {
+                    return [
+                        'success' => false,
+                        'error' => $response['message'] ?? 'Erro ao buscar itens',
+                        'synced' => $synced,
+                        'errors' => $errors + 1,
+                    ];
+                }
+
+                $itemIds = $response['results'] ?? [];
+                if (!is_array($itemIds) || $itemIds === []) {
+                    break;
+                }
+                $allItemIds = array_merge($allItemIds, $itemIds);
+
+                $offset += count($itemIds);
+                $total = (int)($response['paging']['total'] ?? 0);
+
+                if ($total > $maxOffset && $offset >= $maxOffset) {
+                    break;
+                }
+            } while ($offset < $total && count($itemIds) > 0);
+        }
+
+        $allItemIds = array_values(array_unique(array_map('strval', $allItemIds)));
 
         // Buscar detalhes e salvar cada item
         // Processar em lotes de 20 para evitar sobrecarga
@@ -1193,12 +1257,137 @@ class ItemService
             usleep(100000); // 100ms
         }
 
+        // Closed/inactive saem do search; refresca itens locais "vivos" ausentes do catálogo remoto.
+        $staleSynced = $this->refreshItemsMissingFromRemoteCatalog($allItemIds);
+        $synced += $staleSynced;
+
+        // Badge do dashboard depende de ml_accounts.last_synced_at.
+        $this->touchAccountLastSyncedAt();
+
         return [
             'success' => true,
             'synced' => $synced,
             'errors' => $errors,
             'total_found' => count($allItemIds),
+            'stale_refreshed' => $staleSynced,
         ];
+    }
+
+
+    /**
+     * Atualiza itens locais ainda "vivos" ausentes do catálogo retornado pelo search/scan.
+     * Apenas GET na API ML (sem mutação remota).
+     *
+     * @param list<string> $remoteIds
+     */
+
+    private function touchAccountLastSyncedAt(): void
+    {
+        if ($this->db === null || $this->accountId === null || $this->accountId <= 0) {
+            return;
+        }
+
+        try {
+            $stmt = $this->db->prepare(
+                'UPDATE ml_accounts SET last_synced_at = NOW(), updated_at = NOW() WHERE id = :id'
+            );
+            $stmt->execute([':id' => $this->accountId]);
+        } catch (\Throwable $e) {
+            log_warning('ItemService: falha ao atualizar last_synced_at', [
+                'account_id' => $this->accountId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function refreshItemsMissingFromRemoteCatalog(array $remoteIds): int
+    {
+        if ($this->db === null || $this->accountId === null || $this->accountId <= 0) {
+            return 0;
+        }
+
+        $remoteSet = [];
+        foreach ($remoteIds as $id) {
+            $id = (string) $id;
+            if ($id !== '') {
+                $remoteSet[$id] = true;
+            }
+        }
+
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT ml_item_id FROM items
+                 WHERE account_id = :account_id
+                   AND status IN ('active', 'paused', 'under_review', 'inactive')"
+            );
+            $stmt->execute([':account_id' => $this->accountId]);
+            $localIds = $stmt->fetchAll(\PDO::FETCH_COLUMN);
+        } catch (\Throwable $e) {
+            log_warning('ItemService: falha ao listar itens locais para reconcile stale', [
+                'account_id' => $this->accountId,
+                'error' => $e->getMessage(),
+            ]);
+            return 0;
+        }
+
+        $missing = [];
+        foreach ($localIds as $id) {
+            $id = (string) $id;
+            if ($id !== '' && !isset($remoteSet[$id])) {
+                $missing[] = $id;
+            }
+        }
+
+        if ($missing === []) {
+            return 0;
+        }
+
+        $maxPerRun = max(20, min(200, (int)($_ENV['ITEM_SYNC_STALE_REFRESH_LIMIT'] ?? 100)));
+        $missing = array_slice($missing, 0, $maxPerRun);
+
+        log_info('ItemService: refreshing stale local items missing from remote catalog', [
+            'account_id' => $this->accountId,
+            'missing' => count($missing),
+        ]);
+
+        $synced = 0;
+        $errors = 0;
+        foreach (array_chunk($missing, 20) as $chunk) {
+            $ids = implode(',', $chunk);
+            $items = $this->client->get("/items?ids={$ids}");
+            if (!is_array($items)) {
+                $errors += count($chunk);
+                continue;
+            }
+
+            foreach ($items as $itemData) {
+                if (isset($itemData['body']) && !isset($itemData['body']['error'])) {
+                    try {
+                        $this->saveItemToDatabase($itemData['body']);
+                        $synced++;
+                    } catch (\Exception $e) {
+                        log_error('Erro ao sincronizar item stale', [
+                            'item_id' => $itemData['body']['id'] ?? 'unknown',
+                            'error' => $e->getMessage(),
+                        ]);
+                        $errors++;
+                    }
+                } else {
+                    $errors++;
+                }
+            }
+            usleep(100000);
+        }
+
+        if ($errors > 0) {
+            log_warning('ItemService: erros ao refrescar itens stale', [
+                'account_id' => $this->accountId,
+                'errors' => $errors,
+                'synced' => $synced,
+            ]);
+        }
+
+        return $synced;
     }
 
     /**
