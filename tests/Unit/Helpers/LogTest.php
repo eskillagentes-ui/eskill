@@ -48,7 +48,9 @@ class LogTest extends TestCase
         $message = "Test error message {$this->uniqueId}";
         Log::error($message);
 
-        $logFile = $this->testLogPath . '/error-' . date('Y-m-d') . '.log';
+        // Deriva o diretório real do logger (respeita LOG_PATH/LOG_DIR do ambiente de teste)
+        $logDir = Log::channel('app')->getLogDirectory();
+        $logFile = $logDir . '/error-' . date('Y-m-d') . '.log';
         $this->assertFileExists($logFile);
 
         $content = file_get_contents($logFile);

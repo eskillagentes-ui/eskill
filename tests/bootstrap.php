@@ -45,6 +45,18 @@ if (!isset($_ENV['REDIS_DB']) || trim((string)$_ENV['REDIS_DB']) === '') {
 }
 putenv('REDIS_DB=' . (string)$_ENV['REDIS_DB']);
 
+// Isolar logs de teste dos logs de produção: LogService respeita LOG_DIR e
+// StructuredLogService respeita LOG_PATH. Sem isso, testes poluem
+// storage/logs/app.log e storage/logs/llm_error.log de produção.
+$testLogDir = dirname(__DIR__) . '/storage/logs/tests';
+if (!is_dir($testLogDir)) {
+    @mkdir($testLogDir, 0775, true);
+}
+$_ENV['LOG_DIR'] = $testLogDir;
+putenv('LOG_DIR=' . $testLogDir);
+$_ENV['LOG_PATH'] = $testLogDir . '/app.log';
+putenv('LOG_PATH=' . $testLogDir . '/app.log');
+
 // AIProviderManager/*Provider consideram um provider "disponível" apenas se a
 // respectiva API key estiver não-vazia (ver App\Services\AI\Providers\*::isAvailable()).
 // Os testes unitários de AIProviderManagerTest nunca chamam chat()/complete() —

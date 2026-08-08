@@ -10,7 +10,10 @@ class LogService
 
     public function __construct()
     {
-        $this->logDir = __DIR__ . '/../../storage/logs';
+        $this->logDir = rtrim((string)(getenv('LOG_DIR') ?: ''), '/');
+        if ($this->logDir === '') {
+            $this->logDir = __DIR__ . '/../../storage/logs';
+        }
     }
 
     /**
