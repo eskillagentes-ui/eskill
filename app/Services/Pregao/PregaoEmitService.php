@@ -174,6 +174,73 @@ final class PregaoEmitService
     }
 
     /**
+     * Persiste uma prova uma única vez e devolve a identidade candidata do evento.
+     * Confirmação autoritativa e publicação atômica ficam a cargo do produtor QA.
+     * Se o processo caiu depois da persistência, o replay reutiliza a linha existente.
+     *
+     * @param array<string, mixed> $payload
+     * @return array{event:array{v:int,type:string,ts:string,payload:array<string,mixed>,source:string,account_id:int},event_id:int,replayed:bool}
+     */
+    public function persistTrustedQaStatus(array $payload, int $accountId, PregaoQaProof $proof): array
+    {
+        if ($accountId <= 0 || !$proof->verifyStatus($payload, $accountId)) {
+            throw new \InvalidArgumentException('Prova qa.status inválida');
+        }
+        $persisted = $this->findPersistedQaStatus($payload, $accountId);
+        if ($persisted !== null) {
+            return ['event' => $persisted['event'], 'event_id' => $persisted['event_id'], 'replayed' => true];
+        }
+        $event = [
+            'v' => self::VERSION,
+            'type' => 'qa.status',
+            'ts' => $this->nowIso(),
+            'payload' => $payload,
+            'source' => 'live',
+            'account_id' => $accountId,
+        ];
+        $eventId = $this->persistWithId($event);
+        if ($eventId === null) {
+            throw new \RuntimeException('Falha ao persistir qa.status');
+        }
+        return ['event' => $event, 'event_id' => $eventId, 'replayed' => false];
+    }
+
+    /**
+     * @param array<string,mixed> $payload
+     * @return array{event:array{v:int,type:string,ts:string,payload:array<string,mixed>,source:string,account_id:int},event_id:int}|null
+     */
+    private function findPersistedQaStatus(array $payload, int $accountId): ?array
+    {
+        try {
+            $payloadJson = json_encode($payload, JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            $source = $this->hasSourceColumn() ? ', source' : '';
+            $stmt = $this->pdo()->prepare(
+                "SELECT id, ts{$source} FROM pregao_events"
+                . " WHERE account_id = ? AND type = 'qa.status' AND payload = ? ORDER BY id ASC LIMIT 1"
+            );
+            $stmt->execute([$accountId, $payloadJson]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!is_array($row) || (int) ($row['id'] ?? 0) <= 0 || !is_string($row['ts'] ?? null)) {
+                return null;
+            }
+            $ts = (new \DateTimeImmutable($row['ts'], new \DateTimeZone('America/Sao_Paulo')))->format(DATE_ATOM);
+            return [
+                'event_id' => (int) $row['id'],
+                'event' => [
+                    'v' => self::VERSION,
+                    'type' => 'qa.status',
+                    'ts' => $ts,
+                    'payload' => $payload,
+                    'source' => isset($row['source']) && $row['source'] === 'seed' ? 'seed' : 'live',
+                    'account_id' => $accountId,
+                ],
+            ];
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * @param array<string, mixed>|string|null $raw
      * @return array{running:bool,suite:string,test:string,result:string,video_url:?string,stream_url:?string}|null
      */
@@ -608,6 +675,39 @@ final class PregaoEmitService
                 'reason' => 'persist_exception',
             ]);
             return false;
+        }
+    }
+
+    /**
+     * @param array{v:int,type:string,ts:string,payload:array<string,mixed>,source?:string,account_id?:int} $event
+     */
+    private function persistWithId(array $event): ?int
+    {
+        try {
+            $pdo = $this->pdo();
+            $tsMysql = $this->isoToMysql($event['ts']);
+            $payloadJson = json_encode(
+                $event['payload'],
+                JSON_THROW_ON_ERROR | JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES
+            );
+            $values = [$event['account_id'] ?? null, $event['type'], $tsMysql, $payloadJson];
+            if ($this->hasSourceColumn()) {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO pregao_events (account_id, type, ts, payload, source) VALUES (?, ?, ?, ?, ?)'
+                );
+                $values[] = (string) ($event['source'] ?? 'live');
+            } else {
+                $stmt = $pdo->prepare(
+                    'INSERT INTO pregao_events (account_id, type, ts, payload) VALUES (?, ?, ?, ?)'
+                );
+            }
+            if (!$stmt->execute($values)) {
+                return null;
+            }
+            $eventId = (int) $pdo->lastInsertId();
+            return $eventId > 0 ? $eventId : null;
+        } catch (Throwable) {
+            return null;
         }
     }
 

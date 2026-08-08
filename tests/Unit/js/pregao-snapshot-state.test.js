@@ -833,7 +833,9 @@ test('mantém o cache-busting do cliente corrigido', () => {
     const deploy = fs.readFileSync(path.resolve(__dirname, '../../../.github/workflows/deploy.yml'), 'utf8');
     assert.match(source, /iconNode\.textContent = String\(icon\)/, 'ícone do feed deve usar textContent');
     assert.doesNotMatch(source, /el\.innerHTML = tp \+ tp/, 'fita de ranks não deve usar HTML dinâmico');
-    assert.match(view, /\/js\/pregao\.js\?v=45/, 'view deve invalidar o cache do cliente corrigido');
+    const pregaoScriptVersion = view.match(/\/js\/pregao\.js\?v=(\d+)/);
+    assert.ok(pregaoScriptVersion, 'view deve incluir cache-busting no pregao.js');
+    assert.ok(Number(pregaoScriptVersion[1]) >= 45, 'view deve invalidar o cache do cliente corrigido');
     assert.match(pkg.scripts['test:unit:js'], /pregao-chart-layout\.test\.js/, 'runner deve descobrir layout');
     assert.strictEqual(
         pkg.scripts.test,

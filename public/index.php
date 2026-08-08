@@ -51,6 +51,9 @@ if (file_exists(ROOT_PATH . '/' . $envFile)) {
     }
 }
 
+// Fuso do negócio (APP_TIMEZONE); alinha date() com SET time_zone no Database
+\App\Helpers\TimezoneHelper::applyFromEnv();
+
 // Registrar handler global de exceções
 \App\Core\ExceptionHandler::register();
 
@@ -177,6 +180,14 @@ if (session_status() === PHP_SESSION_NONE) {
     }
 
     session_start();
+}
+
+// Sessões efêmeras criadas pelo worker não podem alcançar nenhuma capability mutante.
+if (!empty($_SESSION['qa_read_only'])) {
+    \App\Security\PregaoQaReadOnlyGuard::enforce(
+        (string) ($_SERVER['REQUEST_METHOD'] ?? 'GET'),
+        (string) ($_SERVER['REQUEST_URI'] ?? '/')
+    );
 }
 
 // Garantir que token CSRF existe na sessão e não está expirado (1 hora)

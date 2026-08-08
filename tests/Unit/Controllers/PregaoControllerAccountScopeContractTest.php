@@ -32,8 +32,14 @@ final class PregaoControllerAccountScopeContractTest extends TestCase
         self::assertIsInt($indexStart);
         self::assertIsInt($snapshotStart);
         $indexSource = substr($source, $indexStart, $snapshotStart - $indexStart);
-        self::assertStringContainsString('if ($accountId === null)', $indexSource);
-        self::assertStringContainsString('http_response_code(403)', $indexSource);
+        self::assertStringContainsString('$pregaoAccountId = $accountId ?? 0;', $indexSource);
+        self::assertStringNotContainsString('http_response_code(403)', $indexSource);
+
+        $snapshotEnd = strpos($source, 'public function events(): void', $snapshotStart);
+        self::assertIsInt($snapshotEnd);
+        $snapshotSource = substr($source, $snapshotStart, $snapshotEnd - $snapshotStart);
+        self::assertStringContainsString('if ($accountId === null)', $snapshotSource);
+        self::assertStringContainsString('http_response_code(403)', $snapshotSource);
 
         $streamStart = strpos($source, 'public function stream(): void');
         $streamEnd = strpos($source, 'public function ticket(): void');

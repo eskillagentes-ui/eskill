@@ -18,6 +18,8 @@ final class PregaoSnapshotService
     private AccountIndexCalculator $calculator;
     private PregaoAgentStatusService $agentStatusService;
     private PregaoDataSourceStatusService $dataSourceStatusService;
+    private ?PregaoQaProof $qaProof;
+    private ?PregaoQaRunService $qaRuns;
 
     /** @var array<string, mixed> */
     private array $config;
@@ -27,13 +29,24 @@ final class PregaoSnapshotService
         ?AccountIndexCalculator $calculator = null,
         ?array $config = null,
         ?PregaoAgentStatusService $agentStatusService = null,
-        ?PregaoDataSourceStatusService $dataSourceStatusService = null
+        ?PregaoDataSourceStatusService $dataSourceStatusService = null,
+        ?PregaoQaProof $qaProof = null,
+        ?PregaoQaRunService $qaRuns = null
     ) {
         $this->db = $db ?? Database::getInstance();
         $this->calculator = $calculator ?? new AccountIndexCalculator();
         $this->config = $config ?? (require dirname(__DIR__, 3) . '/config/pregao.php');
         $this->agentStatusService = $agentStatusService ?? new PregaoAgentStatusService($this->db);
         $this->dataSourceStatusService = $dataSourceStatusService ?? new PregaoDataSourceStatusService();
+        $this->qaProof = $qaProof ?? PregaoQaProof::fromEnvironment();
+        $this->qaRuns = $qaRuns;
+        if ($this->qaRuns === null && $this->qaProof !== null) {
+            try {
+                $this->qaRuns = new PregaoQaRunService(PregaoQaRunService::connectRedis(), $this->qaProof);
+            } catch (Throwable) {
+                $this->qaRuns = null;
+            }
+        }
     }
 
     /**
@@ -423,12 +436,35 @@ final class PregaoSnapshotService
      */
     private function loadLatestQa(int $accountId): array
     {
-        // Uma linha qa.status isolada não comprova que um comando foi executado.
-        // Até existir produtor autenticado com evidência verificável, falha fechado.
-        return $this->emptyQaState();
+        if ($accountId <= 0 || $this->qaProof === null || $this->qaRuns === null) {
+            return $this->emptyQaState();
+        }
+        try {
+            $receipt = $this->qaRuns->loadLatestReceipt($accountId);
+            if ($receipt === null || !is_int($receipt['event_id'] ?? null)) {
+                return $this->emptyQaState();
+            }
+            $stmt = $this->db->prepare(
+                "SELECT payload FROM pregao_events
+                 WHERE id = ? AND account_id = ? AND type = 'qa.status' AND source = 'live'
+                 LIMIT 1"
+            );
+            $stmt->execute([$receipt['event_id'], $accountId]);
+            $raw = $stmt->fetchColumn();
+            $payload = is_string($raw) ? json_decode($raw, true) : null;
+            if (!is_array($payload)) {
+                return $this->emptyQaState();
+            }
+            if (!$this->qaRuns->isStatusAuthoritative($payload, $accountId)) {
+                return $this->emptyQaState();
+            }
+            return $this->qaProof->projectStatus($payload, $accountId) ?? $this->emptyQaState();
+        } catch (Throwable) {
+            return $this->emptyQaState();
+        }
     }
 
-    /** @return array{executed:false,running:false,suite:null,test:null,result:null,video_url:null,stream_url:null,log:array{}} */
+    /** @return array<string,mixed> */
     private function emptyQaState(): array
     {
         return [
@@ -439,6 +475,10 @@ final class PregaoSnapshotService
             'result' => null,
             'video_url' => null,
             'stream_url' => null,
+            'run_id' => null,
+            'sequence' => null,
+            'step' => null,
+            'observed_at' => null,
             'log' => [],
         ];
     }

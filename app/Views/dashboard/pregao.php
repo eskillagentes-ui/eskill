@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/css/pregao.css?v=7">
+<link rel="stylesheet" href="/css/pregao.css?v=8">
 
 <div id="pregao-root" data-account-id="<?= (int)($pregaoAccountId ?? 0) ?>" data-read-only="1">
     <header class="pg-header">
@@ -18,7 +18,32 @@
         </div>
         <div class="clock" id="clock">--:--:--</div>
         <div class="conn" id="conn" title="transporte">●</div>
+        <button type="button" class="wall-mode-toggle" id="wallModeToggle" aria-pressed="false">TELA 24H</button>
     </header>
+
+    <section class="wall-anchor" aria-live="polite" aria-label="Âncora operacional do modo parede">
+        <div class="wall-state" data-wall-state="unknown">
+            <span class="wall-state-dot" aria-hidden="true"></span>
+            <span><small>ESTADO OPERACIONAL</small><strong id="wallState">AGUARDANDO DADOS</strong></span>
+            <span class="wall-state-detail" id="wallHealthDetail">Saúde da conta indisponível</span>
+        </div>
+        <div class="wall-anchor-item wall-index">
+            <small>ESKL11</small><strong id="wallIndex">—</strong>
+        </div>
+        <div class="wall-anchor-item">
+            <small>AGENTES</small><strong id="wallAgents">0/5</strong>
+        </div>
+        <div class="wall-anchor-item">
+            <small>QA READ-ONLY</small><strong id="wallQa">NÃO EXECUTADO</strong>
+        </div>
+        <div class="wall-anchor-item">
+            <small>FRESHNESS</small><strong id="wallFreshness">AGUARDANDO</strong>
+        </div>
+        <div class="wall-anchor-clock">
+            <strong id="wallClock">--:--:--</strong>
+            <button type="button" class="wall-mode-exit" id="wallModeExit">SAIR DA TELA 24H</button>
+        </div>
+    </section>
 
     <div class="tape">
         <div class="tape-in" id="tape"></div>
@@ -194,15 +219,23 @@
                 </ul>
             </div>
 
-            <div class="panel">
-                <div class="p-head">🖱️ QA PLAYWRIGHT — HERMES TESTANDO O ESKILL <span class="live" id="qaLive">STANDBY</span></div>
+            <div class="panel qa-panel" id="qaPanel">
+                <div class="p-head">🖱️ QA PLAYWRIGHT — SOMENTE LEITURA <span class="live" id="qaLive">NÃO EXECUTADO</span></div>
+                <div class="qa-controls">
+                    <button type="button" class="qa-run-button" id="qaRunButton">Executar QA read-only</button>
+                    <dl class="qa-summary" aria-label="Estado do QA">
+                        <div><dt>Status</dt><dd id="qaStatus">NÃO EXECUTADO</dd></div>
+                        <div><dt>Etapa</dt><dd id="qaStep">—</dd></div>
+                        <div><dt>Tempo</dt><dd id="qaElapsed">—</dd></div>
+                    </dl>
+                </div>
+                <div class="qa-feedback" id="qaFeedback" role="alert" aria-live="assertive">Nenhuma execução real registrada.</div>
                 <div class="qa-stage" id="stage">
                     <div id="qaMedia">
-                        <div class="qa-idle" id="qaIdle">Aguardando eventos <code>qa.status</code>…</div>
-                        <iframe id="qaStream" class="qa-frame" hidden title="QA live stream"></iframe>
-                        <video id="qaVideo" class="qa-frame" controls playsinline hidden></video>
+                        <div class="qa-idle" id="qaIdle">Aguardando uma execução QA read-only confiável…</div>
+                        <iframe id="qaStream" class="qa-frame" hidden sandbox="allow-scripts" referrerpolicy="no-referrer" title="QA read-only ao vivo"></iframe>
                     </div>
-                    <div class="qa-log" id="qalog">▶ standby</div>
+                    <div class="qa-log" id="qalog">▶ não executado</div>
                 </div>
             </div>
         </div>
@@ -211,16 +244,20 @@
     <footer class="pg-foot">ESKILL PREGÃO · read-only · sem escrita no Mercado Livre · ML_WRITE_AUTOMATION intocado</footer>
 </div>
 
-<script>
+<script nonce="<?= htmlspecialchars((string) (defined('CSP_NONCE') ? CSP_NONCE : ''), ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8') ?>">
     window.PREGAO_BOOT = {
         accountId: <?= (int)($pregaoAccountId ?? 0) ?>,
         snapshotUrl: '/api/pregao/snapshot',
         eventsUrl: '/api/pregao/events',
         streamUrl: '/api/pregao/stream',
         ticketUrl: '/api/pregao/ticket',
-        wsPath: '/ws/pregao'
+        wsPath: '/ws/pregao',
+        qaRunUrl: '/api/pregao/qa/run',
+        csrfToken: <?= json_encode((string)($_SESSION['csrf_token'] ?? ''), JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>
     };
 </script>
 <script src="/js/pregao-chart-layout.js?v=1"></script>
-<script src="/js/pregao.js?v=44" defer></script>
+<script src="/js/pregao-qa.js?v=1" defer></script>
+<script src="/js/pregao.js?v=46" defer></script>
+<script src="/js/pregao-wall.js?v=1" defer></script>
 <script src="/js/pregao-events.js?v=1" defer></script>

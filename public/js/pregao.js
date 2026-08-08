@@ -477,76 +477,10 @@
         while (feed.children.length > 50) feed.lastChild.remove();
     }
 
-    function safeQaMediaPath(value) {
-        if (typeof value !== 'string' || value.includes('..')) return null;
-        return /^\/(?:qa|storage\/qa)\/[A-Za-z0-9_./-]+$/.test(value) ? value : null;
-    }
-
-    function clearQaMedia(stream, video) {
-        if (stream) {
-            stream.hidden = true;
-            stream.removeAttribute('src');
-        }
-        if (video) {
-            video.hidden = true;
-            video.removeAttribute('src');
-            video.load();
-        }
-    }
-
     function applyQa(qa) {
-        const idle = $('qaIdle');
-        const stream = $('qaStream');
-        const video = $('qaVideo');
-        const live = $('qaLive');
-
-        if (!qa || typeof qa !== 'object' || Array.isArray(qa) || qa.executed !== true) {
-            // Nenhum qa.status real registrado — nada de resultado/mídia artificial.
-            live.textContent = 'NÃO EXECUTADO';
-            if (idle) {
-                idle.hidden = false;
-                idle.textContent = 'QA não executado — nenhum resultado real registrado.';
-            }
-            clearQaMedia(stream, video);
-            $('qalog').textContent = '▶ não executado';
-            return;
-        }
-
-        if (qa.running) live.textContent = 'AO VIVO';
-        else live.textContent = qa.result ? String(qa.result).toUpperCase() : 'STANDBY';
-
-        const streamUrl = safeQaMediaPath(qa.stream_url);
-        const videoUrl = safeQaMediaPath(qa.video_url);
-        if (streamUrl) {
-            idle.hidden = true;
-            if (video) {
-                video.hidden = true;
-                video.removeAttribute('src');
-                video.load();
-            }
-            stream.hidden = false;
-            if (stream.getAttribute('src') !== streamUrl) stream.src = streamUrl;
-        } else if (videoUrl) {
-            idle.hidden = true;
-            if (stream) {
-                stream.hidden = true;
-                stream.removeAttribute('src');
-            }
-            video.hidden = false;
-            if (video.getAttribute('src') !== videoUrl) {
-                video.src = videoUrl;
-                video.load();
-            }
-        } else {
-            idle.hidden = false;
-            idle.textContent = 'QA executado sem mídia segura disponível.';
-            clearQaMedia(stream, video);
-        }
-
-        const logLine = qa.test
-            ? `▶ ${qa.suite || 'suite'} · ${qa.test}… ${(qa.result || '').toUpperCase()}`
-            : '▶ standby';
-        $('qalog').textContent = logLine;
+        const qaUi = window.PregaoQaUi || null;
+        if (!qaUi || typeof qaUi.applyQa !== 'function') return false;
+        return qaUi.applyQa(qa);
     }
 
     function eventWatermark(timestamp) {
@@ -969,7 +903,11 @@
                 );
         }
         if (type === 'keyword.rank') return isValidKeywordRankPayload(payload);
-        if (type === 'qa.status') return false;
+        if (type === 'qa.status') {
+            const qaUi = window.PregaoQaUi || null;
+            return Boolean(qaUi && typeof qaUi.isTrustedQaPayload === 'function'
+                && qaUi.isTrustedQaPayload(payload));
+        }
         return true;
     }
 
@@ -1351,7 +1289,21 @@
             cur = { o: null, c: null, h: null, l: null, date: currentDate, change_pct: null };
             updateHeader();
             draw();
-            $('semaText').textContent = 'FALHA NO SNAPSHOT';
+            const empty = $('chartEmpty');
+            if (empty) {
+                empty.hidden = false;
+                empty.textContent = accountId
+                    ? 'aguardando primeiro fechamento'
+                    : 'sem conta ML — conecte uma conta para o índice live';
+            }
+            if ($('semaText')) {
+                $('semaText').textContent = accountId
+                    ? 'FALHA NO SNAPSHOT'
+                    : 'SEM CONTA ML';
+            }
+            if ($('wallState')) {
+                $('wallState').textContent = accountId ? 'SNAPSHOT INDISPONÍVEL' : 'SEM CONTA ML';
+            }
             connectSse();
         });
 })();
