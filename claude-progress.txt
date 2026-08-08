@@ -1,3 +1,9 @@
+## 2026-08-08 (3ª parte) — Stash recuperado + harness 0 avisos
+
+- Stash `wip-pre-recovery` (05/08) recuperado e commitado (`595d7aa3`): logging fail-soft (sem 500 em request quando log bloqueado) + chmod 0660 (ACL eskill/root). Stash dropado após commit.
+- `.hermes/` (artefatos de agente) → quarentena. Duplicidade scheduler.php root×eskill é inofensiva (lock em /tmp).
+- Validação final: Unit 4417 testes 0 falhas; `bin/init.sh` → **"Sistema pronto — 0 avisos"**, project-status 23/25 (92%).
+
 ## 2026-08-08 (2ª parte) — Logs de teste isolados + project-status.json restaurado
 
 - `LogService` respeita `LOG_DIR`; `tests/bootstrap.php` aponta `LOG_DIR`/`LOG_PATH` → `storage/logs/tests/` (gitignored). Produção sem poluição (delta zero em app.log/llm_error.log).
