@@ -21,12 +21,12 @@ class OrdersController
     public function index(): void
     {
         $currentUser = $this->userService->getCurrentUser();
-        $pageTitle = 'Pedidos';
-        $title = 'Central de Pedidos';
-        $subtitle = 'Gerencie todos os pedidos de suas contas em um só lugar';
+        $pageTitle = 'Vendas';
+        $title = 'Vendas';
+        $subtitle = 'Lucro, margem e custos por pedido';
         $breadcrumbs = [
             ['label' => 'Dashboard', 'url' => '/dashboard'],
-            ['label' => 'Pedidos']
+            ['label' => 'Vendas']
         ];
         $activePage = 'orders';
 

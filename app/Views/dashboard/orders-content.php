@@ -1,166 +1,87 @@
 <style>
-    .kpi-card {
-        border: none;
-        border-radius: 12px;
-        box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08);
-        transition: transform 0.2s, box-shadow 0.2s;
-    }
-    .kpi-card:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.12);
-    }
-    .kpi-icon {
-        width: 50px;
-        height: 50px;
-        border-radius: 12px;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.5rem;
-    }
-    .kpi-icon.revenue { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
-    .kpi-icon.orders { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
-    .kpi-icon.shipped { background: linear-gradient(135deg, #3483fa 0%, #2196f3 100%); }
-    .kpi-icon.delivered { background: linear-gradient(135deg, #00a650 0%, #4caf50 100%); }
-    .kpi-icon.pending { background: linear-gradient(135deg, #f7dc6f 0%, #f39c12 100%); }
-    .kpi-icon.cancelled { background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); }
-    .kpi-value { font-size: 1.5rem; font-weight: bold; }
-    .kpi-label { color: #666; font-size: 0.85rem; }
-    .status-badge { padding: 4px 12px; border-radius: 20px; font-size: 0.75rem; font-weight: 600; text-transform: uppercase; }
-    .status-paid { background: #d4edda; color: #155724; }
-    .status-confirmed { background: #cce5ff; color: #004085; }
-    .status-ready-to-ship { background: #fff3cd; color: #856404; }
-    .status-shipped { background: #d1ecf1; color: #0c5460; }
-    .status-delivered { background: #c3e6cb; color: #155724; }
-    .status-cancelled { background: #f8d7da; color: #721c24; }
-    .order-row:hover { background-color: #f8f9fa; }
-    .order-id { font-weight: 600; color: var(--ml-blue, #3483FA); }
-    .chart-container { position: relative; height: 200px; }
-    .filters-card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0, 0, 0, 0.08); }
-    .filter-btn.active { background-color: var(--ml-blue, #3483FA); color: white; }
-    .export-btn { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; color: white; }
-    .export-btn:hover { background: linear-gradient(135deg, #5a6fd6 0%, #6a4190 100%); color: white; }
-    .modal-order-header { background: linear-gradient(135deg, #3483fa 0%, #2d3748 100%); color: white; }
-    .order-detail-section { background: #f8f9fa; border-radius: 8px; padding: 15px; margin-bottom: 15px; }
-    .order-detail-section h6 { font-weight: 600; margin-bottom: 12px; display: flex; align-items: center; gap: 8px; }
-    .product-thumb { width: 60px; height: 60px; object-fit: cover; border-radius: 8px; background: #e9ecef; }
+    .kpi-card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+    .kpi-value { font-size: 1.35rem; font-weight: 700; }
+    .kpi-label { color: #64748b; font-size: .8rem; }
+    .filters-card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.08); }
+    .filter-btn.active { background: #3483FA; color: #fff; border-color: #3483FA; }
+    .sale-card { border: none; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,.06); margin-bottom: 1rem; }
+    .sale-card-header { display: flex; flex-wrap: wrap; gap: .75rem 1.25rem; align-items: center; padding: .85rem 1.1rem; border-bottom: 1px solid #f1f5f9; }
+    .sale-status-dot { width: 10px; height: 10px; border-radius: 50%; background: #22c55e; display: inline-block; }
+    .sale-status-dot.warn { background: #f59e0b; }
+    .sale-status-dot.danger { background: #ef4444; }
+    .sale-thumb { width: 48px; height: 48px; object-fit: cover; border-radius: 8px; background: #e2e8f0; }
+    .sale-table { width: 100%; font-size: .82rem; margin: 0; }
+    .sale-table th { color: #64748b; font-weight: 600; font-size: .7rem; text-transform: uppercase; letter-spacing: .03em; border: 0; padding: .55rem .75rem; white-space: nowrap; }
+    .sale-table td { vertical-align: middle; border-color: #f1f5f9; padding: .7rem .75rem; }
+    .margin-pill { display: inline-block; padding: .2rem .65rem; border-radius: 999px; font-weight: 700; font-size: .78rem; }
+    .margin-good { background: #dcfce7; color: #166534; }
+    .margin-mid { background: #fef3c7; color: #92400e; }
+    .margin-low { background: #fee2e2; color: #991b1b; }
+    .unlinked-banner { background: #fff7ed; color: #9a3412; border-radius: 10px; padding: .75rem 1rem; }
+    .sale-expand { border: 0; background: transparent; color: #64748b; width: 100%; padding: .35rem; }
+    .sale-detail { background: #f8fafc; border-top: 1px solid #f1f5f9; padding: 1rem 1.1rem; display: none; }
+    .sale-detail.open { display: block; }
+    .product-title { font-weight: 600; color: #0f172a; }
+    .product-sku { color: #64748b; font-size: .75rem; }
 </style>
 
-<!-- Page Header -->
 <?php
-
-
-include __DIR__ . '/../layouts/modern/partials/page-header.php'; ?>
-
-<!-- Export Actions -->
-<div class="d-flex justify-content-end mb-4">
-    <div class="dropdown">
-        <button class="btn export-btn dropdown-toggle" type="button" data-bs-toggle="dropdown">
-            <i class="bi bi-download me-1"></i>Exportar
-        </button>
-        <ul class="dropdown-menu dropdown-menu-end">
-            <li><a class="dropdown-item" href="#" onclick="exportOrders('csv')"><i class="bi bi-file-earmark-spreadsheet me-2"></i>Excel (CSV)</a></li>
-            <li><a class="dropdown-item" href="#" onclick="exportOrders('pdf')"><i class="bi bi-file-earmark-pdf me-2"></i>PDF</a></li>
-        </ul>
-    </div>
-</div>
+$title = 'Vendas';
+$subtitle = 'Lucro, margem e custos por pedido — estilo operacional de marketplace';
+include __DIR__ . '/../layouts/modern/partials/page-header.php';
+?>
 
 <!-- KPIs -->
-<div class="row g-3 mb-4">
+<div class="row g-3 mb-3">
     <div class="col-6 col-md-4 col-xl-2">
-        <div class="card kpi-card h-100">
-            <div class="card-body p-3">
-                <div class="d-flex align-items-center">
-                    <div class="kpi-icon revenue text-white me-3"><i class="bi bi-currency-dollar"></i></div>
-                    <div>
-                        <div class="kpi-value" id="kpi-revenue">R$ 0</div>
-                        <div class="kpi-label">Faturamento</div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <div class="card kpi-card h-100"><div class="card-body py-3">
+            <div class="kpi-label">Faturamento</div>
+            <div class="kpi-value" id="kpi-revenue">R$ 0</div>
+        </div></div>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
-        <div class="card kpi-card h-100">
-            <div class="card-body p-3">
-                <div class="d-flex align-items-center">
-                    <div class="kpi-icon orders text-white me-3"><i class="bi bi-bag-check"></i></div>
-                    <div>
-                        <div class="kpi-value" id="kpi-total">0</div>
-                        <div class="kpi-label">Total</div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <div class="card kpi-card h-100"><div class="card-body py-3">
+            <div class="kpi-label">Lucro</div>
+            <div class="kpi-value text-success" id="kpi-profit">R$ 0</div>
+        </div></div>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
-        <div class="card kpi-card h-100">
-            <div class="card-body p-3">
-                <div class="d-flex align-items-center">
-                    <div class="kpi-icon pending text-white me-3"><i class="bi bi-hourglass-split"></i></div>
-                    <div>
-                        <div class="kpi-value" id="kpi-pending">0</div>
-                        <div class="kpi-label">Pendentes</div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <div class="card kpi-card h-100"><div class="card-body py-3">
+            <div class="kpi-label">Margem média</div>
+            <div class="kpi-value" id="kpi-margin">0%</div>
+        </div></div>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
-        <div class="card kpi-card h-100">
-            <div class="card-body p-3">
-                <div class="d-flex align-items-center">
-                    <div class="kpi-icon shipped text-white me-3"><i class="bi bi-truck"></i></div>
-                    <div>
-                        <div class="kpi-value" id="kpi-shipped">0</div>
-                        <div class="kpi-label">Enviados</div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <div class="card kpi-card h-100"><div class="card-body py-3">
+            <div class="kpi-label">Vendas</div>
+            <div class="kpi-value" id="kpi-total">0</div>
+        </div></div>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
-        <div class="card kpi-card h-100">
-            <div class="card-body p-3">
-                <div class="d-flex align-items-center">
-                    <div class="kpi-icon delivered text-white me-3"><i class="bi bi-check-circle"></i></div>
-                    <div>
-                        <div class="kpi-value" id="kpi-delivered">0</div>
-                        <div class="kpi-label">Entregues</div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <div class="card kpi-card h-100"><div class="card-body py-3">
+            <div class="kpi-label">Líquido marketplace</div>
+            <div class="kpi-value" id="kpi-net">R$ 0</div>
+        </div></div>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
-        <div class="card kpi-card h-100">
-            <div class="card-body p-3">
-                <div class="d-flex align-items-center">
-                    <div class="kpi-icon cancelled text-white me-3"><i class="bi bi-x-circle"></i></div>
-                    <div>
-                        <div class="kpi-value" id="kpi-cancelled">0</div>
-                        <div class="kpi-label">Cancelados</div>
-                    </div>
-                </div>
-            </div>
-        </div>
+        <div class="card kpi-card h-100"><div class="card-body py-3">
+            <div class="kpi-label">Anúncios sem CMV</div>
+            <div class="kpi-value text-warning" id="kpi-unlinked">0</div>
+        </div></div>
     </div>
 </div>
 
-<!-- Charts -->
-<div class="row g-4 mb-4">
-    <div class="col-lg-8">
-        <div class="card filters-card h-100">
-            <div class="card-header bg-transparent"><h6 class="mb-0"><i class="bi bi-graph-up me-2"></i>Vendas (7 dias)</h6></div>
-            <div class="card-body"><div class="chart-container"><canvas id="salesChart"></canvas></div></div>
-        </div>
-    </div>
-    <div class="col-lg-4">
-        <div class="card filters-card h-100">
-            <div class="card-header bg-transparent"><h6 class="mb-0"><i class="bi bi-pie-chart me-2"></i>Status</h6></div>
-            <div class="card-body"><div class="chart-container"><canvas id="statusChart"></canvas></div></div>
-        </div>
-    </div>
+<div id="unlinked-alert" class="unlinked-banner mb-3" style="display:none;">
+    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+    <strong id="unlinked-alert-text">0</strong> linhas de venda sem CMV
+    (<span id="unlinked-alert-unique">0</span> anúncios) — o lucro dessas linhas ignora custo do produto.
+    <a href="/dashboard/pricing" class="ms-2 fw-semibold">Cadastrar custos</a>
+</div>
+<div id="tax-alert" class="unlinked-banner mb-3" style="display:none; background:#eff6ff; color:#1e40af;">
+    <i class="bi bi-info-circle-fill me-2"></i>
+    Imposto zerado no período — a API do ML retorna taxes_amount=0, então lucro/margem ficam inflados.
+    Impacto estimado do Simples 9% neste período: ~<strong id="tax-impact-estimate">—</strong> a menos no lucro.
+    <button type="button" class="btn btn-sm btn-outline-primary ms-2" id="btn-set-tax-9">Aplicar 9%</button>
 </div>
 
 <!-- Filters -->
@@ -168,18 +89,12 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php'; ?>
     <div class="card-body">
         <div class="row align-items-end g-2">
             <div class="col-md-2">
-                <label class="form-label small">Conta</label>
-                <select class="form-select form-select-sm" id="filter-account"><option value="">Todas</option></select>
-            </div>
-            <div class="col-md-2">
                 <label class="form-label small">Status</label>
                 <select class="form-select form-select-sm" id="filter-status">
-                    <option value="">Todos</option>
+                    <option value="">Todos (ativos)</option>
                     <option value="paid">Pago</option>
-                    <option value="confirmed">Confirmado</option>
-                    <option value="ready_to_ship">Pronto p/ Enviar</option>
-                    <option value="shipped">Enviado</option>
                     <option value="delivered">Entregue</option>
+                    <option value="shipped">Enviado</option>
                     <option value="cancelled">Cancelado</option>
                 </select>
             </div>
@@ -191,377 +106,509 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php'; ?>
                 <label class="form-label small">Data Final</label>
                 <input type="date" class="form-control form-control-sm" id="filter-date-to">
             </div>
-            <div class="col-md-2">
+            <div class="col-md-3">
                 <label class="form-label small">Buscar</label>
-                <input type="text" class="form-control form-control-sm" id="filter-search" placeholder="ID ou comprador...">
+                <input type="text" class="form-control form-control-sm" id="filter-search" placeholder="ID, SKU, título ou comprador...">
             </div>
-            <div class="col-md-2">
-                <button class="btn btn-primary btn-sm w-100" onclick="loadOrders()"><i class="bi bi-search me-1"></i>Filtrar</button>
+            <div class="col-md-3">
+                <button type="button" class="btn btn-primary btn-sm w-100" id="btn-filter-sales">
+                    <i class="bi bi-funnel me-1"></i>Filtrar
+                </button>
             </div>
         </div>
         <div class="mt-2">
-            <span class="me-2 small text-muted">Filtros rápidos:</span>
-            <button class="btn btn-sm btn-outline-secondary me-1 filter-btn" data-days="7">7 dias</button>
-            <button class="btn btn-sm btn-outline-secondary me-1 filter-btn active" data-days="30">30 dias</button>
-            <button class="btn btn-sm btn-outline-secondary me-1 filter-btn" data-days="90">90 dias</button>
-            <button class="btn btn-sm btn-outline-secondary filter-btn" data-days="365">1 ano</button>
+            <span class="me-2 small text-muted">Período:</span>
+            <button type="button" class="btn btn-sm btn-outline-secondary me-1 filter-btn" data-days="7">7 dias</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary me-1 filter-btn active" data-days="30">30 dias</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary me-1 filter-btn" data-days="90">90 dias</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary filter-btn" data-days="365">1 ano</button>
         </div>
     </div>
 </div>
 
-<!-- Orders Table -->
-<div class="card filters-card">
-    <div class="card-header bg-transparent d-flex justify-content-between align-items-center">
-        <h6 class="mb-0"><i class="bi bi-list-ul me-2"></i>Lista de Pedidos</h6>
-        <span class="badge bg-primary" id="orders-count">0 pedidos</span>
-    </div>
-    <div class="card-body p-0">
-        <div class="table-responsive">
-            <table class="table table-hover mb-0">
-                <thead class="table-light">
-                    <tr>
-                        <th>ID</th>
-                        <th>Data</th>
-                        <th>Comprador</th>
-                        <th>Itens</th>
-                        <th>Total</th>
-                        <th>Status</th>
-                        <th>Conta</th>
-                        <th>Ações</th>
-                    </tr>
-                </thead>
-                <tbody id="orders-tbody">
-                    <tr><td colspan="8" class="text-center py-5"><div class="spinner-border text-primary"></div></td></tr>
-                </tbody>
-            </table>
-        </div>
-    </div>
-    <div class="card-footer bg-transparent">
-        <div class="d-flex justify-content-between align-items-center">
-            <div class="text-muted small">Mostrando <span id="showing-from">0</span>-<span id="showing-to">0</span> de <span id="total-orders">0</span></div>
-            <nav><ul class="pagination pagination-sm mb-0" id="pagination"></ul></nav>
-        </div>
+<div class="d-flex justify-content-between align-items-center mb-2">
+    <h6 class="mb-0">Listagem de vendas</h6>
+    <div class="d-flex align-items-center gap-2">
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="btn-export-sales" title="Exportar CSV do período">
+            <i class="bi bi-download me-1"></i>CSV
+        </button>
+        <span class="badge bg-primary" id="orders-count">0 vendas</span>
     </div>
 </div>
 
-<!-- Order Detail Modal -->
-<div class="modal fade" id="orderModal" tabindex="-1">
-    <div class="modal-dialog modal-lg modal-dialog-scrollable">
-        <div class="modal-content">
-            <div class="modal-header modal-order-header">
-                <h5 class="modal-title"><i class="bi bi-receipt me-2"></i>Pedido <span id="modal-order-id"></span></h5>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
-            </div>
-            <div class="modal-body" id="modal-order-body">
-                <div class="text-center py-4"><div class="spinner-border text-primary"></div></div>
-            </div>
-            <div class="modal-footer">
-                <button type="button" class="btn btn-outline-secondary" onclick="printOrder()"><i class="bi bi-printer me-1"></i>Imprimir</button>
-                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Fechar</button>
-            </div>
-        </div>
-    </div>
+<div id="sales-cards">
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+</div>
+
+<div class="d-flex justify-content-between align-items-center mt-2 mb-4">
+    <div class="text-muted small">Mostrando <span id="showing-from">0</span>-<span id="showing-to">0</span> de <span id="total-orders">0</span></div>
+    <nav><ul class="pagination pagination-sm mb-0" id="pagination"></ul></nav>
 </div>
 
 <script nonce="<?= CSP_NONCE ?>">
+(() => {
+    let pageSales = [];
+    let summary = { unlinked_items: 0, unlinked_unique_items: 0, total_profit: 0, total_revenue: 0, avg_margin: 0, marketplace_net: 0 };
+    let paging = { total: 0, offset: 0, limit: 20 };
+    let currentPage = 1;
+    const perPage = 20;
 
-function normalizeExternalUrl(url) {
-    if (!url || typeof url !== 'string') return '';
-    const trimmed = url.trim();
-    if (!trimmed) return '';
-    if (/^(data:|blob:)/i.test(trimmed)) return trimmed;
-    if (trimmed.startsWith('//')) return window.location.protocol + trimmed;
-    if (/^http:\/\//i.test(trimmed)) return trimmed.replace(/^http:\/\//i, 'https://');
-    return trimmed;
-}
+    const money = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
+    const escapeHtml = (str) => String(str ?? '').replace(/[&<>"']/g, (c) => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+    }[c]));
+    const marginClass = (pct) => {
+        const n = Number(pct || 0);
+        if (n >= 30) return 'margin-good';
+        if (n >= 15) return 'margin-mid';
+        return 'margin-low';
+    };
+    const statusDot = (status) => {
+        const s = String(status || '').toLowerCase();
+        if (['cancelled', 'canceled'].includes(s)) return 'danger';
+        if (['pending', 'payment_required'].includes(s)) return 'warn';
+        return '';
+    };
+    const fmtDate = (val) => {
+        if (!val) return '—';
+        const d = new Date(val);
+        if (Number.isNaN(d.getTime())) return escapeHtml(val);
+        return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    };
 
-let allOrders = [], currentPage = 1, ordersPerPage = 20, salesChart = null, statusChart = null;
-
-document.addEventListener('DOMContentLoaded', function() {
-    initializeDateFilters();
-    loadAccounts();
-    loadOrders();
-    
-    document.querySelectorAll('.filter-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
-            document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
-            this.classList.add('active');
-            const days = parseInt(this.dataset.days);
-            const dateFrom = new Date();
-            dateFrom.setDate(dateFrom.getDate() - days);
-            document.getElementById('filter-date-from').value = dateFrom.toISOString().split('T')[0];
-            document.getElementById('filter-date-to').value = new Date().toISOString().split('T')[0];
-            loadOrders();
-        });
-    });
-    
-    document.getElementById('filter-search').addEventListener('keypress', e => { if (e.key === 'Enter') loadOrders(); });
-});
-
-function initializeDateFilters() {
-    const today = new Date(), thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(today.getDate() - 30);
-    document.getElementById('filter-date-from').value = thirtyDaysAgo.toISOString().split('T')[0];
-    document.getElementById('filter-date-to').value = today.toISOString().split('T')[0];
-}
-
-function loadAccounts() {
-    requestJson('/api/auth/accounts').then(data => {
-        // API retorna { accounts: [...], total: N }
-        const accounts = Array.isArray(data) ? data : (data.accounts || []);
-        const select = document.getElementById('filter-account');
-        accounts.forEach(acc => {
-            if (acc.status === 'active') select.innerHTML += `<option value="${acc.id}">${acc.nickname || 'Conta ' + acc.id}</option>`;
-        });
-    }).catch(() => {});
-}
-
-function loadOrders() {
-    const params = new URLSearchParams({ limit: 200 });
-    ['account_id:filter-account', 'status:filter-status', 'date_from:filter-date-from', 'date_to:filter-date-to'].forEach(p => {
-        const [key, id] = p.split(':');
-        const val = document.getElementById(id)?.value;
-        if (val) params.append(key, val);
-    });
-    const search = document.getElementById('filter-search')?.value || '';
-    
-    const tbody = document.getElementById('orders-tbody');
-    if (!tbody) {
-        console.error('Elemento orders-tbody não encontrado');
-        return;
+    function initDates(days = 30) {
+        const end = new Date();
+        const start = new Date();
+        start.setDate(end.getDate() - days);
+        document.getElementById('filter-date-from').value = start.toISOString().slice(0, 10);
+        document.getElementById('filter-date-to').value = end.toISOString().slice(0, 10);
     }
-    
-    tbody.innerHTML = '<tr><td colspan="8" class="text-center py-5"><div class="spinner-border text-primary"></div><div class="mt-2">Carregando pedidos...</div></td></tr>';
-    
-    requestJson(`/api/orders/all?${params.toString()}`)
-        .then(data => {
-            console.log('Orders data:', data); // Debug
-            
-            if (data.error) {
-                tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4">
-                    <div class="alert alert-warning mb-0">
-                        <i class="bi bi-exclamation-triangle me-2"></i>
-                        ${data.error}
-                        ${data.debug ? '<div class="small mt-2">Debug: ' + JSON.stringify(data.debug) + '</div>' : ''}
-                    </div>
-                </td></tr>`;
+
+    async function loadSales(page = 1) {
+        currentPage = Math.max(1, page);
+        const start = document.getElementById('filter-date-from').value;
+        const end = document.getElementById('filter-date-to').value;
+        const status = document.getElementById('filter-status').value;
+        const search = (document.getElementById('filter-search').value || '').trim().toLowerCase();
+        const cards = document.getElementById('sales-cards');
+        cards.innerHTML = '<div class="text-center py-5"><div class="spinner-border text-primary"></div><div class="mt-2 text-muted">Carregando vendas...</div></div>';
+
+        try {
+            const qs = new URLSearchParams({
+                start,
+                end,
+                limit: String(perPage),
+                offset: String((currentPage - 1) * perPage),
+                source: 'local',
+            });
+            if (status) qs.set('status', status);
+            if (search) qs.set('q', search);
+
+            const result = await requestJson(`/api/financials/orders?${qs}`);
+            const payload = result.data || result;
+            if (!result.success && result.error) {
+                cards.innerHTML = `<div class="alert alert-warning">${escapeHtml(result.error || payload.error || 'Falha ao carregar')}</div>`;
                 return;
             }
-            
-            allOrders = data.results || [];
-            console.log('Total orders loaded:', allOrders.length); // Debug
-            
-            if (search) {
-                const s = search.toLowerCase();
-                allOrders = allOrders.filter(o => String(o.id).includes(s) || (o.buyer?.nickname || '').toLowerCase().includes(s));
+
+            pageSales = payload.results || [];
+            summary = payload.summary || summary;
+            paging = payload.paging || { total: pageSales.length, offset: 0, limit: perPage };
+
+            updateKpis();
+            renderPage();
+        } catch (e) {
+            console.error(e);
+            cards.innerHTML = '<div class="alert alert-danger">Erro ao carregar vendas.</div>';
+        }
+    }
+
+    function updateKpis() {
+        const revenue = Number(summary.total_revenue || 0);
+        const profit = Number(summary.total_profit || 0);
+        const net = Number(summary.marketplace_net || 0);
+        const margin = Number(summary.avg_margin || 0);
+        const unlinked = Number(summary.unlinked_items || 0);
+        const hasUnique = Object.prototype.hasOwnProperty.call(summary, 'unlinked_unique_items');
+        const unlinkedUnique = hasUnique ? Number(summary.unlinked_unique_items || 0) : null;
+        const total = Number(paging.total || pageSales.length);
+
+        document.getElementById('kpi-revenue').textContent = money(revenue);
+        document.getElementById('kpi-profit').textContent = money(profit);
+        document.getElementById('kpi-margin').textContent = `${margin.toFixed(1)}%`;
+        document.getElementById('kpi-total').textContent = String(total);
+        document.getElementById('kpi-net').textContent = money(net);
+        document.getElementById('kpi-unlinked').textContent = String(unlinkedUnique !== null ? unlinkedUnique : unlinked);
+
+        const alert = document.getElementById('unlinked-alert');
+        if (unlinked > 0) {
+            alert.style.display = '';
+            document.getElementById('unlinked-alert-text').textContent = String(unlinked);
+            const uniqueEl = document.getElementById('unlinked-alert-unique');
+            if (uniqueEl) uniqueEl.textContent = String(unlinkedUnique > 0 ? unlinkedUnique : unlinked);
+        } else {
+            alert.style.display = 'none';
+        }
+        document.getElementById('orders-count').textContent = `${total} vendas`;
+
+        const taxAlert = document.getElementById('tax-alert');
+        if (taxAlert) {
+            const showTax = total > 0 && summary.tax_configured === false;
+            taxAlert.style.display = showTax ? '' : 'none';
+            if (showTax) {
+                const impactEl = document.getElementById('tax-impact-estimate');
+                if (impactEl) impactEl.textContent = money(revenue > 0 ? revenue * 0.09 : 0);
             }
-            
-            updateKPIs();
-            updateCharts();
-            renderOrders();
-        })
-        .catch(error => {
-            console.error('Erro ao carregar pedidos:', error);
-            tbody.innerHTML = `<tr><td colspan="8" class="text-center py-4">
-                <div class="alert alert-danger mb-0">
-                    <i class="bi bi-exclamation-circle me-2"></i>
-                    Erro ao carregar pedidos. Tente novamente.
-                    <div class="small mt-2">${error.message}</div>
+        }
+    }
+
+    function renderPage() {
+        const cards = document.getElementById('sales-cards');
+        const total = Number(paging.total || 0);
+        const offset = Number(paging.offset || 0);
+
+        if (!pageSales.length) {
+            cards.innerHTML = '<div class="text-center py-5 text-muted"><i class="bi bi-inbox" style="font-size:2.5rem"></i><p class="mt-2 mb-0">Nenhuma venda no período</p></div>';
+            document.getElementById('showing-from').textContent = '0';
+            document.getElementById('showing-to').textContent = '0';
+            document.getElementById('total-orders').textContent = '0';
+            document.getElementById('pagination').innerHTML = '';
+            return;
+        }
+
+        cards.innerHTML = pageSales.map((sale, idx) => renderSaleCard(sale, offset + idx)).join('');
+        document.getElementById('showing-from').textContent = String(offset + 1);
+        document.getElementById('showing-to').textContent = String(offset + pageSales.length);
+        document.getElementById('total-orders').textContent = String(total);
+        renderPagination();
+    }
+
+    function renderSaleCard(sale, globalIdx) {
+        const items = sale.items || [];
+        const rows = items.map((item) => {
+            const thumb = item.thumbnail
+                ? `<img src="${escapeHtml(item.thumbnail)}" class="sale-thumb me-2" alt="">`
+                : `<div class="sale-thumb me-2 d-inline-flex align-items-center justify-content-center"><i class="bi bi-image text-muted"></i></div>`;
+            return `<tr>
+                <td>
+                    <div class="d-flex align-items-center">
+                        ${thumb}
+                        <div>
+                            <div class="product-title">${escapeHtml(item.title || item.item_id || 'Item')}</div>
+                            <div class="product-sku">SKU Externo: ${escapeHtml(item.sku || '—')}${item.linked_product ? '' : ' · <span class="text-warning">sem custo</span>'}</div>
+                        </div>
+                    </div>
+                </td>
+                <td class="text-end">${item.quantity ?? 1}</td>
+                <td class="text-end">${money(item.line_total)}</td>
+                <td class="text-end">${money(item.unit_price)}</td>
+                <td class="text-end">${money(item.marketplace_net)}</td>
+                <td class="text-end">${money(item.tax)}</td>
+                <td class="text-end">${money(item.product_cost)}</td>
+                <td class="text-end">${money(item.extra_cost)}</td>
+                <td class="text-end fw-semibold ${Number(item.profit || 0) >= 0 ? 'text-success' : 'text-danger'}">${money(item.profit)}</td>
+                <td class="text-end"><span class="margin-pill ${marginClass(item.margin_pct)}">${Number(item.margin_pct || 0).toFixed(2).replace('.', ',')}%</span></td>
+            </tr>`;
+        }).join('');
+
+        const detailId = `sale-detail-${globalIdx}`;
+        return `<div class="card sale-card">
+            <div class="sale-card-header">
+                <span class="sale-status-dot ${statusDot(sale.status)}"></span>
+                <span class="fw-semibold">${fmtDate(sale.date_created)}</span>
+                <span class="text-muted"><i class="bi bi-truck me-1"></i>${escapeHtml(sale.shipping_label || 'Logística ML')}</span>
+                <span class="ms-auto text-muted"><i class="bi bi-shop me-1"></i>${escapeHtml(sale.account_nickname || 'Conta ML')}</span>
+                <span class="badge bg-light text-dark">#${escapeHtml(sale.order_id)}</span>
+            </div>
+            <div class="table-responsive">
+                <table class="sale-table table mb-0">
+                    <thead>
+                        <tr>
+                            <th>Item</th>
+                            <th class="text-end">Qtd</th>
+                            <th class="text-end">Total</th>
+                            <th class="text-end">Preço unit.</th>
+                            <th class="text-end">Líquido marketplace</th>
+                            <th class="text-end">Imposto</th>
+                            <th class="text-end">Custo produto</th>
+                            <th class="text-end">Custo extra</th>
+                            <th class="text-end">Lucro</th>
+                            <th class="text-end">Margem</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows || '<tr><td colspan="10" class="text-center text-muted py-3">Sem itens</td></tr>'}</tbody>
+                </table>
+            </div>
+            <button type="button" class="sale-expand" data-detail="${detailId}" data-order-id="${escapeHtml(sale.order_id)}" aria-expanded="false">
+                <i class="bi bi-chevron-down"></i>
+            </button>
+            <div class="sale-detail" id="${detailId}">
+                <div class="row g-3 small">
+                    <div class="col-md-3"><div class="text-muted">Receita bruta</div><div class="fw-semibold">${money(sale.sale_revenue ?? sale.total_amount)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Comissão ML</div><div class="fw-semibold">${money(sale.ml_fee)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Taxa pagamento</div><div class="fw-semibold">${money(sale.payment_fee)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Frete seller</div><div class="fw-semibold">${money(sale.shipping_cost)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Cupom / desconto</div><div class="fw-semibold">${money(sale.coupon_amount)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Reembolso debitado</div><div class="fw-semibold">${money(sale.refund_net || 0)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Reembolso coberto (BPP)</div><div class="fw-semibold text-info">${money(sale.refund_covered || 0)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Proteção / ressarcimento</div><div class="fw-semibold">${money(sale.protection_net || 0)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Imposto</div><div class="fw-semibold">${money(sale.taxes)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Líquido marketplace</div><div class="fw-semibold">${money(sale.marketplace_net)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Liberado (caixa)</div><div class="fw-semibold text-success">${money((sale.ledger_summary && sale.ledger_summary.released_amount) || 0)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Pendente liberação</div><div class="fw-semibold text-warning">${money((sale.ledger_summary && sale.ledger_summary.pending_release_amount) || 0)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Custo produto (CMV)</div><div class="fw-semibold">${money(sale.product_cost)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Custo operacional</div><div class="fw-semibold">${money(sale.extra_cost)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Lucro operacional</div><div class="fw-semibold ${Number(sale.profit||0)>=0?'text-success':'text-danger'}">${money(sale.profit)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Margem</div><div class="fw-semibold">${Number(sale.margin_pct||0).toFixed(2)}%</div></div>
+                    <div class="col-md-3"><div class="text-muted">Fonte</div><div class="fw-semibold">${escapeHtml(sale.ledger_source === 'ledger' ? 'Livro financeiro' : 'Pedido (fallback)')}${sale.ledger_entries_count ? ` · ${sale.ledger_entries_count} lanç.` : ''}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Pagamento</div><div class="fw-semibold">${escapeHtml(sale.payment_method_id || sale.payment_method || '—')}${sale.installments > 1 ? ` · ${sale.installments}x` : ''}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Comprador</div><div class="fw-semibold">${escapeHtml(sale.buyer_nickname || '—')}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Status</div><div class="fw-semibold">${escapeHtml(sale.status)}</div></div>
                 </div>
-            </td></tr>`;
+                ${renderLedgerEntries(sale)}
+                ${renderDiscrepancies(sale)}
+                <div class="ledger-mount"></div>
+            </div>
+        </div>`;
+    }
+
+    function renderLedgerEntries(sale) {
+        const entries = Array.isArray(sale.ledger_entries) ? sale.ledger_entries : [];
+        if (!entries.length) return '';
+        // Linha do tempo: ordena por occurred_at ASC (evento financeiro cronológico)
+        const sorted = entries.slice().sort((a, b) => {
+            const ta = Date.parse(a.occurred_at || a.created_at || '') || 0;
+            const tb = Date.parse(b.occurred_at || b.created_at || '') || 0;
+            return ta - tb;
         });
-}
-
-function updateKPIs() {
-    let revenue = 0, pending = 0, shipped = 0, delivered = 0, cancelled = 0;
-    allOrders.forEach(o => {
-        revenue += parseFloat(o.total_amount || 0);
-        const s = (o.status || '').toLowerCase();
-        if (['paid', 'confirmed', 'ready_to_ship'].includes(s)) pending++;
-        else if (s === 'shipped') shipped++;
-        else if (s === 'delivered') delivered++;
-        else if (s === 'cancelled') cancelled++;
-    });
-    document.getElementById('kpi-revenue').textContent = formatCurrency(revenue);
-    document.getElementById('kpi-total').textContent = allOrders.length;
-    document.getElementById('kpi-pending').textContent = pending;
-    document.getElementById('kpi-shipped').textContent = shipped;
-    document.getElementById('kpi-delivered').textContent = delivered;
-    document.getElementById('kpi-cancelled').textContent = cancelled;
-}
-
-function updateCharts() {
-    const salesByDay = {}, today = new Date();
-    for (let i = 6; i >= 0; i--) {
-        const d = new Date(today); d.setDate(d.getDate() - i);
-        salesByDay[d.toISOString().split('T')[0]] = { orders: 0, revenue: 0 };
-    }
-    allOrders.forEach(o => {
-        const od = new Date(o.date_created).toISOString().split('T')[0];
-        if (salesByDay[od]) { salesByDay[od].orders++; salesByDay[od].revenue += parseFloat(o.total_amount || 0); }
-    });
-    
-    const labels = Object.keys(salesByDay).map(d => new Date(d).toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' }));
-    const ordersData = Object.values(salesByDay).map(d => d.orders);
-    const revenueData = Object.values(salesByDay).map(d => d.revenue);
-    
-    if (salesChart) salesChart.destroy();
-    salesChart = new Chart(document.getElementById('salesChart').getContext('2d'), {
-        type: 'line',
-        data: { labels, datasets: [
-            { label: 'Pedidos', data: ordersData, borderColor: '#3483fa', backgroundColor: 'rgba(52,131,250,0.1)', fill: true, tension: 0.4, yAxisID: 'y' },
-            { label: 'Faturamento', data: revenueData, borderColor: '#00a650', borderDash: [5, 5], tension: 0.4, yAxisID: 'y1' }
-        ]},
-        options: { responsive: true, maintainAspectRatio: false, scales: { y: { beginAtZero: true }, y1: { position: 'right', beginAtZero: true, grid: { drawOnChartArea: false } } } }
-    });
-    
-    const statusCounts = {};
-    allOrders.forEach(o => { const s = o.status || 'unknown'; statusCounts[s] = (statusCounts[s] || 0) + 1; });
-    
-    if (statusChart) statusChart.destroy();
-    statusChart = new Chart(document.getElementById('statusChart').getContext('2d'), {
-        type: 'doughnut',
-        data: { labels: Object.keys(statusCounts).map(getStatusLabel), datasets: [{ data: Object.values(statusCounts), backgroundColor: Object.keys(statusCounts).map(getStatusColor), borderWidth: 0 }] },
-        options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } } }
-    });
-}
-
-function renderOrders() {
-    const start = (currentPage - 1) * ordersPerPage, end = start + ordersPerPage;
-    const page = allOrders.slice(start, end);
-    
-    if (page.length === 0) {
-        document.getElementById('orders-tbody').innerHTML = '<tr><td colspan="8" class="text-center py-5"><i class="bi bi-inbox text-muted" style="font-size:3rem"></i><p class="text-muted mt-2 mb-0">Nenhum pedido</p></td></tr>';
-        return;
-    }
-    
-    document.getElementById('orders-tbody').innerHTML = page.map(o => {
-        const date = o.date_created ? new Date(o.date_created).toLocaleDateString('pt-BR') : '-';
-        const time = o.date_created ? new Date(o.date_created).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) : '';
-        const buyer = o.buyer?.nickname || o.buyer?.first_name || 'Comprador';
-        const status = o.status || 'unknown';
-        return `<tr class="order-row">
-            <td><span class="order-id">#${o.id}</span></td>
-            <td><div>${date}</div><small class="text-muted">${time}</small></td>
-            <td><span>${escapeHtml(buyer)}</span></td>
-            <td><span class="badge bg-light text-dark">${o.order_items?.length || 0}</span></td>
-            <td><strong>${formatCurrency(o.total_amount || 0)}</strong></td>
-            <td><span class="status-badge status-${status.toLowerCase().replace('_', '-')}">${getStatusLabel(status)}</span></td>
-            <td><small class="text-muted">${escapeHtml(o.account_nickname || '')}</small></td>
-            <td><button class="btn btn-sm btn-outline-primary" onclick="viewOrder(${o.id})"><i class="bi bi-eye"></i></button></td>
-        </tr>`;
-    }).join('');
-    
-    document.getElementById('showing-from').textContent = start + 1;
-    document.getElementById('showing-to').textContent = Math.min(end, allOrders.length);
-    document.getElementById('total-orders').textContent = allOrders.length;
-    document.getElementById('orders-count').textContent = `${allOrders.length} pedidos`;
-    renderPagination();
-}
-
-function renderPagination() {
-    const totalPages = Math.ceil(allOrders.length / ordersPerPage);
-    if (totalPages <= 1) { document.getElementById('pagination').innerHTML = ''; return; }
-    
-    let html = `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}"><a class="page-link" href="#" onclick="goToPage(${currentPage - 1})"><i class="bi bi-chevron-left"></i></a></li>`;
-    for (let i = 1; i <= Math.min(totalPages, 5); i++) html += `<li class="page-item ${currentPage === i ? 'active' : ''}"><a class="page-link" href="#" onclick="goToPage(${i})">${i}</a></li>`;
-    if (totalPages > 5) html += `<li class="page-item disabled"><span class="page-link">...</span></li><li class="page-item"><a class="page-link" href="#" onclick="goToPage(${totalPages})">${totalPages}</a></li>`;
-    html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}"><a class="page-link" href="#" onclick="goToPage(${currentPage + 1})"><i class="bi bi-chevron-right"></i></a></li>`;
-    document.getElementById('pagination').innerHTML = html;
-}
-
-function goToPage(page) {
-    const totalPages = Math.ceil(allOrders.length / ordersPerPage);
-    if (page < 1 || page > totalPages) return;
-    currentPage = page;
-    renderOrders();
-}
-
-function viewOrder(orderId) {
-    document.getElementById('modal-order-id').textContent = '#' + orderId;
-    document.getElementById('modal-order-body').innerHTML = '<div class="text-center py-4"><div class="spinner-border text-primary"></div></div>';
-    new bootstrap.Modal(document.getElementById('orderModal')).show();
-    
-    requestJson(`/api/orders/${orderId}`).then(order => {
-        const buyer = order.buyer || {}, shipping = order.shipping || {}, items = order.order_items || [];
-        document.getElementById('modal-order-body').innerHTML = `
-            <div class="row mb-3">
-                <div class="col-md-6">
-                    <div class="order-detail-section">
-                        <h6><i class="bi bi-info-circle"></i>Informações</h6>
-                        <table class="table table-sm mb-0">
-                            <tr><td class="text-muted">Status:</td><td><span class="status-badge status-${(order.status || 'unknown').toLowerCase()}">${getStatusLabel(order.status)}</span></td></tr>
-                            <tr><td class="text-muted">Data:</td><td>${order.date_created ? new Date(order.date_created).toLocaleString('pt-BR') : '-'}</td></tr>
-                            <tr><td class="text-muted">Total:</td><td><strong class="text-primary">${formatCurrency(order.total_amount || 0)}</strong></td></tr>
-                        </table>
-                    </div>
+        const rows = sorted.map((e, idx) => {
+            const rawId = `ledger-raw-${escapeHtml(sale.order_id || 'x')}-${idx}`;
+            const hasRaw = e.raw_data && typeof e.raw_data === 'object';
+            const rawBtn = hasRaw
+                ? `<button type="button" class="btn btn-link btn-sm p-0" data-bs-toggle="collapse" data-bs-target="#${rawId}">JSON</button>`
+                : '<span class="text-muted">—</span>';
+            const rawBlock = hasRaw
+                ? `<tr class="collapse" id="${rawId}"><td colspan="8"><pre class="small bg-light border rounded p-2 mb-0" style="max-height:220px;overflow:auto">${escapeHtml(JSON.stringify(e.raw_data, null, 2))}${e.raw_data_redacted ? '\n\n/* campos sensíveis redigidos */' : ''}</pre></td></tr>`
+                : '';
+            const when = escapeHtml((e.occurred_at || e.released_at || e.created_at || '').toString().replace('T', ' ').slice(0, 19));
+            return `
+            <tr>
+                <td class="small text-muted text-nowrap">${when}</td>
+                <td><code class="small">${escapeHtml(e.entry_type || '')}</code></td>
+                <td>${escapeHtml(e.direction || '')}</td>
+                <td class="text-end">${money(e.signed_amount)}</td>
+                <td><span class="badge bg-${e.status === 'covered' ? 'info' : (e.status === 'posted' ? 'success' : (e.status === 'pending' ? 'warning' : 'secondary'))}">${escapeHtml(e.status || '')}</span></td>
+                <td class="small text-muted">${escapeHtml(e.description || '')}</td>
+                <td class="small"><span class="text-muted">${escapeHtml(e.source_system || '')}/${escapeHtml(e.source_type || '')}</span><br><code class="small">${escapeHtml(e.source_id || '')}${e.source_detail_id ? ':' + escapeHtml(e.source_detail_id) : ''}</code></td>
+                <td>${rawBtn}</td>
+            </tr>${rawBlock}`;
+        }).join('');
+        const summary = sale.ledger_summary || {};
+        const cashLine = (summary.released_amount || summary.pending_release_amount)
+            ? `<div class="small text-muted mb-2">Caixa: liberado ${money(summary.released_amount || 0)} · pendente ${money(summary.pending_release_amount || 0)}</div>`
+            : '';
+        return `
+            <div class="mt-3">
+                <div class="fw-semibold mb-1">Linha do tempo financeira (ledger)</div>
+                ${cashLine}
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0">
+                        <thead><tr>
+                            <th>Quando</th><th>Tipo</th><th>Dir.</th><th class="text-end">Valor</th><th>Status</th><th>Descrição</th><th>Origem</th><th>Raw</th>
+                        </tr></thead>
+                        <tbody>${rows}</tbody>
+                    </table>
                 </div>
-                <div class="col-md-6">
-                    <div class="order-detail-section">
-                        <h6><i class="bi bi-person"></i>Comprador</h6>
-                        <table class="table table-sm mb-0">
-                            <tr><td class="text-muted">Nome:</td><td>${escapeHtml(buyer.first_name || '')} ${escapeHtml(buyer.last_name || '')}</td></tr>
-                            <tr><td class="text-muted">Nickname:</td><td>${escapeHtml(buyer.nickname || '-')}</td></tr>
-                        </table>
-                    </div>
-                </div>
-            </div>
-            <div class="order-detail-section">
-                <h6><i class="bi bi-box"></i>Itens (${items.length})</h6>
-                <table class="table table-sm">
-                    <thead><tr><th></th><th>Produto</th><th>Qtd</th><th>Preço</th><th>Total</th></tr></thead>
-                    <tbody>${items.map(i => `<tr>
-                        <td><img src="${normalizeExternalUrl(i.item?.thumbnail) || ''}" class="product-thumb" onerror="this.style.display='none'"></td>
-                        <td><div class="fw-semibold">${escapeHtml(i.item?.title || 'Produto')}</div><small class="text-muted">${i.item?.id || ''}</small></td>
-                        <td>${i.quantity || 1}</td>
-                        <td>${formatCurrency(i.unit_price || 0)}</td>
-                        <td><strong>${formatCurrency((i.unit_price || 0) * (i.quantity || 1))}</strong></td>
-                    </tr>`).join('')}</tbody>
-                </table>
-            </div>
-            <div class="order-detail-section">
-                <h6><i class="bi bi-truck"></i>Envio</h6>
-                <table class="table table-sm mb-0">
-                    <tr><td class="text-muted">Status:</td><td>${shipping.status || '-'}</td></tr>
-                    <tr><td class="text-muted">Tipo:</td><td>${shipping.shipment_type || '-'}</td></tr>
-                </table>
-            </div>
-        `;
-    }).catch(() => {
-        document.getElementById('modal-order-body').innerHTML = '<div class="alert alert-danger">Erro ao carregar</div>';
-    });
-}
-
-function exportOrders(format) {
-    const params = new URLSearchParams({
-        account_id: document.getElementById('filter-account').value,
-        status: document.getElementById('filter-status').value,
-        date_from: document.getElementById('filter-date-from').value,
-        date_to: document.getElementById('filter-date-to').value
-    });
-    
-    if (format === 'pdf') {
-        window.open(`/api/pdf/orders?${params}`, '_blank');
-    } else {
-        const csv = 'ID;Data;Comprador;Itens;Total;Status;Conta\n' + allOrders.map(o => [o.id, o.date_created ? new Date(o.date_created).toLocaleString('pt-BR') : '', o.buyer?.nickname || '', o.order_items?.length || 0, (o.total_amount || 0).toFixed(2).replace('.', ','), getStatusLabel(o.status), o.account_nickname || ''].map(c => `"${String(c).replace(/"/g, '""')}"`).join(';')).join('\n');
-        const blob = new Blob(['\ufeff' + csv], { type: 'text/csv;charset=utf-8;' });
-        const link = document.createElement('a');
-        link.href = URL.createObjectURL(blob);
-        link.download = `pedidos_${new Date().toISOString().split('T')[0]}.csv`;
-        link.click();
+            </div>`;
     }
-}
 
-function printOrder() {
-    const w = window.open('', '_blank');
-    const orderId = document.getElementById('modal-order-id').textContent;
-    const orderBody = document.getElementById('modal-order-body').innerHTML;
-    w.document.write('<html><head><title>Pedido ' + orderId + '</title><link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet"><style>body{padding:20px}.order-detail-section{background:#f8f9fa;border-radius:8px;padding:15px;margin-bottom:15px}</style></head><body><h2>Pedido ' + orderId + '</h2>' + orderBody + '<script>window.onload=function(){window.print()}<\/script></body></html>');
-    w.document.close();
-}
+    function renderDiscrepancies(sale) {
+        const discs = Array.isArray(sale.discrepancies) ? sale.discrepancies : [];
+        if (!discs.length) return '';
+        const items = discs.map((d) => {
+            const sev = d.severity || 'info';
+            const cls = sev === 'critical' ? 'danger' : (sev === 'warning' ? 'warning' : 'info');
+            return `<div class="alert alert-${cls} py-2 px-3 mb-2 small mb-1">
+                <strong>${escapeHtml(d.discrepancy_type || '')}</strong>
+                <span class="text-muted"> · ${escapeHtml(sev)}</span><br>${escapeHtml(d.explanation || '')}
+            </div>`;
+        }).join('');
+        return `<div class="mt-3"><div class="fw-semibold mb-1">Divergências</div>${items}</div>`;
+    }
 
-function formatCurrency(v) { return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(v); }
-function getStatusLabel(s) { return { paid: 'Pago', confirmed: 'Confirmado', ready_to_ship: 'Pronto p/ Enviar', shipped: 'Enviado', delivered: 'Entregue', cancelled: 'Cancelado' }[(s || '').toLowerCase()] || s; }
-function getStatusColor(s) { return { paid: '#28a745', confirmed: '#17a2b8', ready_to_ship: '#ffc107', shipped: '#007bff', delivered: '#28a745', cancelled: '#dc3545' }[(s || '').toLowerCase()] || '#6c757d'; }
-function escapeHtml(t) { const d = document.createElement('div'); d.textContent = t || ''; return d.innerHTML; }
+    function renderPagination() {
+        const total = Number(paging.total || 0);
+        const totalPages = Math.max(1, Math.ceil(total / perPage));
+        const el = document.getElementById('pagination');
+        if (totalPages <= 1) { el.innerHTML = ''; return; }
+        let html = `<li class="page-item ${currentPage === 1 ? 'disabled' : ''}"><a class="page-link" href="#" data-page="${currentPage - 1}">‹</a></li>`;
+        const maxButtons = 7;
+        let from = Math.max(1, currentPage - Math.floor(maxButtons / 2));
+        let to = Math.min(totalPages, from + maxButtons - 1);
+        from = Math.max(1, to - maxButtons + 1);
+        for (let i = from; i <= to; i++) {
+            html += `<li class="page-item ${currentPage === i ? 'active' : ''}"><a class="page-link" href="#" data-page="${i}">${i}</a></li>`;
+        }
+        html += `<li class="page-item ${currentPage === totalPages ? 'disabled' : ''}"><a class="page-link" href="#" data-page="${currentPage + 1}">›</a></li>`;
+        el.innerHTML = html;
+    }
+
+    async function fetchAllSalesForExport() {
+        const start = document.getElementById('filter-date-from').value;
+        const end = document.getElementById('filter-date-to').value;
+        const status = document.getElementById('filter-status').value;
+        const search = (document.getElementById('filter-search').value || '').trim();
+        const limit = 100;
+        let offset = 0;
+        let total = Infinity;
+        const rows = [];
+        while (offset < total && rows.length < 2000) {
+            const qs = new URLSearchParams({
+                start, end, limit: String(limit), offset: String(offset), source: 'local',
+            });
+            if (status) qs.set('status', status);
+            if (search) qs.set('q', search);
+            const result = await requestJson(`/api/financials/orders?${qs}`);
+            const payload = result.data || result;
+            const batch = payload.results || [];
+            total = Number(payload.paging?.total ?? batch.length);
+            rows.push(...batch);
+            if (!batch.length) break;
+            offset += limit;
+        }
+        return rows;
+    }
+
+    function csvEscape(val) {
+        const s = String(val ?? '');
+        if (/[;"\n]/.test(s)) return `"${s.replace(/"/g, '""')}"`;
+        return s;
+    }
+
+    async function exportSalesCsv() {
+        const btn = document.getElementById('btn-export-sales');
+        btn.disabled = true;
+        btn.innerHTML = '<span class="spinner-border spinner-border-sm"></span>';
+        try {
+            const sales = await fetchAllSalesForExport();
+            const headers = [
+                'order_id', 'date', 'status', 'shipping', 'buyer', 'item_id', 'title', 'sku',
+                'qty', 'unit_price', 'line_total', 'marketplace_net', 'tax', 'product_cost',
+                'extra_cost', 'profit', 'margin_pct', 'linked_product', 'ml_fee', 'payment_fee',
+            ];
+            const lines = [headers.join(';')];
+            sales.forEach((sale) => {
+                (sale.items || [{}]).forEach((item) => {
+                    lines.push([
+                        sale.order_id, sale.date_created, sale.status, sale.shipping_label, sale.buyer_nickname,
+                        item.item_id, item.title, item.sku, item.quantity, item.unit_price, item.line_total,
+                        item.marketplace_net, item.tax, item.product_cost, item.extra_cost, item.profit,
+                        item.margin_pct, item.linked_product ? 1 : 0, sale.ml_fee, sale.payment_fee,
+                    ].map(csvEscape).join(';'));
+                });
+            });
+            const blob = new Blob(['\uFEFF' + lines.join('\n')], { type: 'text/csv;charset=utf-8' });
+            const a = document.createElement('a');
+            a.href = URL.createObjectURL(blob);
+            a.download = `vendas_${document.getElementById('filter-date-from').value}_${document.getElementById('filter-date-to').value}.csv`;
+            a.click();
+            URL.revokeObjectURL(a.href);
+        } catch (e) {
+            console.error(e);
+            alert('Falha ao exportar CSV');
+        } finally {
+            btn.disabled = false;
+            btn.innerHTML = '<i class="bi bi-download me-1"></i>CSV';
+        }
+    }
+
+    async function applyDefaultTax9() {
+        const btn = document.getElementById('btn-set-tax-9');
+        btn.disabled = true;
+        try {
+            const result = await requestJson('/api/settings/global', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ default_tax_rate: 9 }),
+            });
+            if (!result.success) {
+                alert(result.error || 'Não foi possível salvar a alíquota');
+                return;
+            }
+            await loadSales(1);
+        } catch (e) {
+            console.error(e);
+            alert('Erro ao salvar alíquota');
+        } finally {
+            btn.disabled = false;
+        }
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+        initDates(30);
+        document.getElementById('btn-filter-sales')?.addEventListener('click', () => loadSales(1));
+        document.getElementById('btn-export-sales')?.addEventListener('click', exportSalesCsv);
+        document.getElementById('btn-set-tax-9')?.addEventListener('click', applyDefaultTax9);
+        document.getElementById('filter-search')?.addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') loadSales(1);
+        });
+        document.querySelectorAll('.filter-btn').forEach((btn) => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.filter-btn').forEach((b) => b.classList.remove('active'));
+                btn.classList.add('active');
+                initDates(Number(btn.dataset.days || 30));
+                loadSales(1);
+            });
+        });
+        document.getElementById('sales-cards')?.addEventListener('click', async (e) => {
+            const btn = e.target.closest('.sale-expand');
+            if (!btn) return;
+            const detail = document.getElementById(btn.dataset.detail);
+            if (!detail) return;
+            const opening = !detail.classList.contains('open');
+            detail.classList.toggle('open');
+            btn.setAttribute('aria-expanded', detail.classList.contains('open') ? 'true' : 'false');
+            btn.querySelector('i')?.classList.toggle('bi-chevron-up', detail.classList.contains('open'));
+            btn.querySelector('i')?.classList.toggle('bi-chevron-down', !detail.classList.contains('open'));
+            if (opening && !detail.dataset.ledgerLoaded && btn.dataset.orderId) {
+                detail.dataset.ledgerLoaded = '1';
+                try {
+                    const result = await requestJson(`/api/financials/orders/${encodeURIComponent(btn.dataset.orderId)}`);
+                    const sale = result.data || result;
+                    if (sale && !sale.error) {
+                        const ledgerHtml = renderLedgerEntries(sale);
+                        const discHtml = renderDiscrepancies(sale);
+                        const mount = detail.querySelector('.ledger-mount') || detail;
+                        if (!detail.querySelector('.ledger-mount')) {
+                            const wrap = document.createElement('div');
+                            wrap.className = 'ledger-mount';
+                            detail.appendChild(wrap);
+                            wrap.innerHTML = ledgerHtml + discHtml;
+                        } else {
+                            detail.querySelector('.ledger-mount').innerHTML = ledgerHtml + discHtml;
+                        }
+                        // Atualiza KPIs do detalhe se o ledger trouxe valores
+                        if (sale.ledger_source === 'ledger') {
+                            const cells = detail.querySelectorAll('.row.g-3.small .col-md-3');
+                            // best-effort: não reescreve layout inteiro
+                        }
+                    }
+                } catch (err) {
+                    console.warn('ledger detail load failed', err);
+                }
+            }
+        });
+        document.getElementById('pagination')?.addEventListener('click', (e) => {
+            const a = e.target.closest('a[data-page]');
+            if (!a) return;
+            e.preventDefault();
+            const page = Number(a.dataset.page);
+            const totalPages = Math.max(1, Math.ceil(Number(paging.total || 0) / perPage));
+            if (page < 1 || page > totalPages) return;
+            loadSales(page);
+            window.scrollTo({ top: document.getElementById('sales-cards').offsetTop - 80, behavior: 'smooth' });
+        });
+        loadSales(1);
+    });
+})();
 </script>

@@ -387,6 +387,39 @@ class MarginCalculatorService
                 'margem_alvo' => $custos['margem_alvo'] ?? 20
             ]);
 
+            // Espelha em sku_custos para a tela Vendas / Ads usarem o mesmo CMV
+            try {
+                $custoProduto = (float)($custos['custo_producao'] ?? 0);
+                if ($custoProduto > 0 && preg_match('/^MLB\d+$/i', $itemId)) {
+                    $skuUpsert = $this->db->prepare("
+                        INSERT INTO sku_custos (
+                            account_id, mlb_id, custo_produto, comissao_pct, frete_medio,
+                            custos_operacionais_pct, preco_minimo
+                        ) VALUES (
+                            :account_id, :mlb_id, :custo_produto, :comissao_pct, :frete_medio,
+                            :ops_pct, :preco_minimo
+                        )
+                        ON DUPLICATE KEY UPDATE
+                            custo_produto = VALUES(custo_produto),
+                            comissao_pct = VALUES(comissao_pct),
+                            frete_medio = VALUES(frete_medio),
+                            custos_operacionais_pct = VALUES(custos_operacionais_pct),
+                            preco_minimo = VALUES(preco_minimo)
+                    ");
+                    $skuUpsert->execute([
+                        'account_id' => $this->accountId,
+                        'mlb_id' => strtoupper($itemId),
+                        'custo_produto' => $custoProduto,
+                        'comissao_pct' => (float)($custos['taxa_comissao_ml'] ?? 16),
+                        'frete_medio' => (float)($custos['custo_frete_gratis'] ?? 0),
+                        'ops_pct' => (float)($custos['custos_operacionais_pct'] ?? 0),
+                        'preco_minimo' => $custoProduto,
+                    ]);
+                }
+            } catch (\Throwable $e) {
+                // product_costs já salvo — espelho sku_custos é best-effort
+            }
+
             return ['success' => true, 'message' => 'Custos salvos com sucesso'];
         } catch (\Throwable $e) {
             return $this->errorResponse('Erro ao salvar: ' . $e->getMessage());
@@ -412,7 +445,44 @@ class MarginCalculatorService
                 'item_id' => $itemId
             ]);
 
-            return $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if ($row) {
+                return $row;
+            }
+
+            // Fallback: custos cadastrados via Ads/sku_custos (mesma fonte da tela Vendas)
+            $skuStmt = $this->db->prepare("
+                SELECT mlb_id, custo_produto, comissao_pct, frete_medio, custos_operacionais_pct
+                FROM sku_custos
+                WHERE account_id = :account_id AND mlb_id = :item_id
+                LIMIT 1
+            ");
+            $skuStmt->execute([
+                'account_id' => $this->accountId,
+                'item_id' => $itemId,
+            ]);
+            $sku = $skuStmt->fetch(PDO::FETCH_ASSOC);
+            if (!$sku || (float)($sku['custo_produto'] ?? 0) <= 0) {
+                return null;
+            }
+
+            return [
+                'account_id' => $this->accountId,
+                'item_id' => $itemId,
+                'sku' => null,
+                'custo_producao' => (float)$sku['custo_produto'],
+                'custo_embalagem' => 0.0,
+                'custo_etiqueta' => 0.0,
+                'custo_frete_entrada' => 0.0,
+                'taxa_comissao_ml' => (float)($sku['comissao_pct'] ?? 16),
+                'taxa_imposto' => 0.0,
+                'acos_medio' => 0.0,
+                'custo_frete_gratis' => (float)($sku['frete_medio'] ?? 0),
+                'margem_minima' => 10.0,
+                'margem_alvo' => 20.0,
+                'custos_operacionais_pct' => (float)($sku['custos_operacionais_pct'] ?? 0),
+                'source' => 'sku_custos',
+            ];
         } catch (\Throwable $e) {
             return null;
         }

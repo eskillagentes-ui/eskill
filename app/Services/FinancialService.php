@@ -275,6 +275,24 @@ class FinancialService
         return $this->orderFinancial()->getOrdersFromApi($startDate, $endDate, $limit, $offset);
     }
 
+    public function listLocalSalesWithProfitability(
+        string $startDate,
+        string $endDate,
+        int $limit = 50,
+        int $offset = 0,
+        ?string $status = null,
+        ?string $search = null
+    ): array {
+        return $this->orderFinancial()->listLocalSalesWithProfitability(
+            $startDate,
+            $endDate,
+            $limit,
+            $offset,
+            $status,
+            $search
+        );
+    }
+
     public function getOrderDetails(string $orderId): array
     {
         return $this->orderFinancial()->getOrderDetails($orderId);

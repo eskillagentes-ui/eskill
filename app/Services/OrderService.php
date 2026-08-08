@@ -702,7 +702,12 @@ class OrderService
         }
 
         $totalAmount = (float)($orderData['total_amount'] ?? 0);
+        // shipping.cost = frete do COMPRADOR (0 em frete grátis). Custo do vendedor: /shipments/{id}/costs
         $shippingCost = (float)($orderData['shipping']['cost'] ?? 0);
+        $shipmentId = $orderData['shipping']['id'] ?? null;
+        if ($shippingCost <= 0.0 && $shipmentId) {
+            $shippingCost = $this->resolveSellerShippingCost($shipmentId);
+        }
         $discountAmount = (float)($orderData['coupon']['amount'] ?? ($orderData['discount'] ?? 0));
         $netProfit = $totalAmount - $mlCommission - $paymentFee - $shippingCost - $discountAmount;
 
@@ -715,6 +720,41 @@ class OrderService
             'discount_amount' => round($discountAmount, 2),
             'net_profit' => round($netProfit, 2),
         ];
+    }
+
+    /**
+     * Frete pago pelo vendedor (senders[].cost em GET /shipments/{id}/costs).
+     */
+    private function resolveSellerShippingCost(int|string $shipmentId): float
+    {
+        $cost = 0.0;
+        try {
+            $response = $this->client->get('/shipments/' . $shipmentId . '/costs');
+            if (isset($response['body']) && is_array($response['body'])) {
+                $response = $response['body'];
+            }
+            if (isset($response['data']) && is_array($response['data']) && isset($response['data']['senders'])) {
+                $response = $response['data'];
+            }
+
+            $senders = $response['senders'] ?? [];
+            if (is_array($senders)) {
+                foreach ($senders as $sender) {
+                    if (!is_array($sender)) {
+                        continue;
+                    }
+                    $cost += (float)($sender['cost'] ?? 0);
+                }
+            }
+        } catch (Throwable $e) {
+            Log::warning('Falha ao resolver frete do vendedor no sync', [
+                'shipment_id' => (string)$shipmentId,
+                'error' => $e->getMessage(),
+            ]);
+            $cost = 0.0;
+        }
+
+        return round($cost, 2);
     }
 
     private function getAccountUserId(int $accountId): ?int
