@@ -10,6 +10,9 @@ use App\Services\OrderService;
 use App\Services\ItemService;
 use App\Services\QuestionService;
 use App\Services\NotificationService;
+use App\Services\MessagingService;
+use App\Services\ShipmentSyncService;
+use App\Services\MercadoLivreClient;
 use PDO;
 use PDOStatement;
 use PHPUnit\Framework\MockObject\MockObject;
@@ -95,7 +98,10 @@ class MercadoLivreWebhookServiceTest extends TestCase
         ?MockObject $itemService = null,
         ?MockObject $questionService = null,
         ?MockObject $notificationService = null,
-        ?MockObject $db = null
+        ?MockObject $db = null,
+        ?MockObject $messagingService = null,
+        ?MockObject $shipmentSyncService = null,
+        ?MockObject $mlClient = null
     ): MercadoLivreWebhookService {
         return new MercadoLivreWebhookService(
             self::ACCOUNT_ID,
@@ -105,11 +111,12 @@ class MercadoLivreWebhookServiceTest extends TestCase
             $questionService,
             $notificationService,
             null, // claimsService — injected per-test when needed
-            null, // messagingService — injected per-test when needed
+            $messagingService, // messagingService — injected per-test when needed
             null, // techSheetService — injected per-test when needed
-            null, // mlClient — injected per-test when needed
+            $mlClient, // mlClient — injected per-test when needed
             $db ?? $this->createMockDb(),
-            true
+            true,
+            $shipmentSyncService
         );
     }
 
@@ -226,6 +233,39 @@ class MercadoLivreWebhookServiceTest extends TestCase
         $this->assertTrue($result['success']);
         $this->assertArrayHasKey('event_id', $result);
         $this->assertStringStartsWith('evt_', $result['event_id']);
+    }
+
+    public function testOrderEventDoesNotRenotifySamePaidStatus(): void
+    {
+        $orderService = $this->createMockOrderService([
+            'id' => '2000017426963518',
+            'total_amount' => 99.90,
+            'status' => 'paid',
+        ]);
+
+        $userStmt = $this->createMock(PDOStatement::class);
+        $userStmt->method('execute')->willReturn(true);
+        $userStmt->method('fetchColumn')->willReturn(10);
+
+        $orderStmt = $this->createMock(PDOStatement::class);
+        $orderStmt->method('execute')->willReturn(true);
+        $orderStmt->method('fetchColumn')->willReturn('paid');
+
+        $db = $this->createMock(PDO::class);
+        $db->method('prepare')->willReturnCallback(static function (string $sql) use ($userStmt, $orderStmt) {
+            return str_contains($sql, 'FROM ml_orders') ? $orderStmt : $userStmt;
+        });
+
+        $notifService = $this->createMockNotificationService();
+        $notifService->expects($this->never())->method('create');
+
+        $service = $this->buildService(null, $orderService, null, null, $notifService, $db);
+        $result = $service->processWebhookEvent([
+            'topic' => 'orders_v2',
+            'resource' => '/orders/2000017426963518',
+        ]);
+
+        $this->assertTrue($result['success']);
     }
 
     private function setEnv(string $key, string $value): void
@@ -346,6 +386,36 @@ class MercadoLivreWebhookServiceTest extends TestCase
         $this->assertTrue($result['success']);
     }
 
+    public function testItemsPricesTopicSyncsItemLikeItemsTopic(): void
+    {
+        $itemService = $this->createMockItemService(['id' => 'MLB999']);
+        // Payload real do ML: /items/{id}/prices (não /items/{id})
+        $itemService->expects($this->once())->method('syncItem')->with('MLB999');
+
+        $service = $this->buildService(null, null, $itemService);
+        $result = $service->processWebhookEvent([
+            'topic' => 'items_prices',
+            'resource' => '/items/MLB999/prices',
+        ]);
+
+        $this->assertTrue($result['success']);
+        $this->assertArrayNotHasKey('ignored', $result);
+    }
+
+    public function testItemsPricesDoesNotTreatPricesSuffixAsItemId(): void
+    {
+        $itemService = $this->createMockItemService(['id' => 'MLB4435126877']);
+        $itemService->expects($this->once())->method('syncItem')->with('MLB4435126877');
+
+        $service = $this->buildService(null, null, $itemService);
+        $result = $service->processWebhookEvent([
+            'topic' => 'items_prices',
+            'resource' => '/items/MLB4435126877/prices',
+        ]);
+
+        $this->assertTrue($result['success']);
+    }
+
     public function testItemEventResourceParsing(): void
     {
         $itemService = $this->createMockItemService(['id' => 'MLB789']);
@@ -358,6 +428,21 @@ class MercadoLivreWebhookServiceTest extends TestCase
         ]);
 
         $this->assertTrue($result['success']);
+    }
+
+    public function testItemSyncApiErrorFailsWebhookProcessing(): void
+    {
+        $itemService = $this->createMockItemService(['error' => 'API Error', 'message' => 'Item not found']);
+        $itemService->expects($this->once())->method('syncItem')->with('MLB404');
+
+        $service = $this->buildService(null, null, $itemService);
+        $result = $service->processWebhookEvent([
+            'topic' => 'items',
+            'resource' => '/items/MLB404',
+        ]);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('Item not found', (string)($result['error'] ?? ''));
     }
 
     // === Question events ===
@@ -437,6 +522,38 @@ class MercadoLivreWebhookServiceTest extends TestCase
         $this->assertTrue($result['success']);
     }
 
+    public function testQuestionEventDoesNotRenotifyWhenAlreadyLocal(): void
+    {
+        $questionService = $this->createMockQuestionService(
+            ['id' => '13620643760', 'text' => 'Já conhecida', 'item_id' => 'MLB1', 'item_title' => 'Peça', 'status' => 'ANSWERED'],
+            ['success' => true, 'draft' => 'ok']
+        );
+
+        $userStmt = $this->createMock(PDOStatement::class);
+        $userStmt->method('execute')->willReturn(true);
+        $userStmt->method('fetchColumn')->willReturn(10);
+
+        $qStmt = $this->createMock(PDOStatement::class);
+        $qStmt->method('execute')->willReturn(true);
+        $qStmt->method('fetchColumn')->willReturn(1);
+
+        $db = $this->createMock(PDO::class);
+        $db->method('prepare')->willReturnCallback(static function (string $sql) use ($userStmt, $qStmt) {
+            return str_contains($sql, 'FROM ml_questions') ? $qStmt : $userStmt;
+        });
+
+        $notifService = $this->createMockNotificationService();
+        $notifService->expects($this->never())->method('create');
+
+        $service = $this->buildService(null, null, null, $questionService, $notifService, $db);
+        $result = $service->processWebhookEvent([
+            'topic' => 'questions',
+            'resource' => '/questions/13620643760',
+        ]);
+
+        $this->assertTrue($result['success']);
+    }
+
     // === Claims / Messages ===
 
     public function testClaimEventIsHandledGracefully(): void
@@ -462,14 +579,195 @@ class MercadoLivreWebhookServiceTest extends TestCase
         $logger = $this->createMockLogger();
         $logger->expects($this->atLeastOnce())->method('info');
 
-        $service = $this->buildService($logger);
+        $messaging = $this->createMock(MessagingService::class);
+        $messaging->method('getMessage')->willReturn([
+            'text' => 'Olá',
+            'from' => 1,
+            'to' => 2,
+        ]);
+        $messaging->expects($this->once())->method('processIncomingMessage');
+
+        $service = $this->buildService($logger, null, null, null, null, null, $messaging);
         $result = $service->processWebhookEvent([
             'topic' => 'messages',
             'resource' => '/messages/MSG456',
         ]);
 
-        $this->assertArrayHasKey('success', $result);
-        $this->assertIsBool($result['success']);
+        $this->assertTrue($result['success']);
+    }
+
+    public function testMessageEventFetchFailureMarksWebhookAsFailed(): void
+    {
+        $logger = $this->createMockLogger();
+        $logger->expects($this->atLeastOnce())->method('warning');
+
+        $messaging = $this->createMock(MessagingService::class);
+        $messaging->method('getMessage')->willReturn([
+            'error' => 'not_found',
+            'message' => 'Mensagem indisponível',
+        ]);
+        $messaging->expects($this->never())->method('processIncomingMessage');
+
+        $service = $this->buildService($logger, null, null, null, null, null, $messaging);
+        $result = $service->processWebhookEvent([
+            'topic' => 'messages',
+            'resource' => '/messages/MSG456',
+        ]);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('Mensagem indisponível', (string)$result['error']);
+    }
+
+    public function testShipmentEventSyncFailureMarksWebhookAsFailed(): void
+    {
+        $logger = $this->createMockLogger();
+        $logger->expects($this->atLeastOnce())->method('warning');
+
+        $shipmentSync = $this->createMock(ShipmentSyncService::class);
+        $shipmentSync->method('syncShipment')->willReturn([
+            'success' => false,
+            'error' => 'api_timeout',
+        ]);
+
+        $service = $this->buildService($logger, null, null, null, null, null, null, $shipmentSync);
+        $result = $service->processWebhookEvent([
+            'topic' => 'shipments',
+            'resource' => '/shipments/SHIP123',
+        ]);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('api_timeout', (string)$result['error']);
+    }
+
+    public function testShipmentEventSyncSuccess(): void
+    {
+        $shipmentSync = $this->createMock(ShipmentSyncService::class);
+        $shipmentSync->method('syncShipment')->willReturn([
+            'success' => true,
+            'data' => [
+                'status' => 'shipped',
+                'tracking_number' => 'BR123',
+            ],
+        ]);
+
+        $notification = $this->createMockNotificationService();
+        $notification->expects($this->once())->method('create');
+
+        $service = $this->buildService(null, null, null, null, $notification, null, null, $shipmentSync);
+        $result = $service->processWebhookEvent([
+            'topic' => 'shipments',
+            'resource' => '/shipments/SHIP123',
+        ]);
+
+        $this->assertTrue($result['success']);
+    }
+
+    public function testShipmentEventDoesNotRenotifySameStatus(): void
+    {
+        $shipmentSync = $this->createMock(ShipmentSyncService::class);
+        $shipmentSync->method('syncShipment')->willReturn([
+            'success' => true,
+            'data' => [
+                'status' => 'ready_to_ship',
+                'tracking_number' => null,
+            ],
+        ]);
+
+        $userStmt = $this->createMock(PDOStatement::class);
+        $userStmt->method('execute')->willReturn(true);
+        $userStmt->method('fetchColumn')->willReturn(10);
+
+        $shipStmt = $this->createMock(PDOStatement::class);
+        $shipStmt->method('execute')->willReturn(true);
+        $shipStmt->method('fetchColumn')->willReturn('ready_to_ship');
+
+        $db = $this->createMock(PDO::class);
+        $db->method('prepare')->willReturnCallback(static function (string $sql) use ($userStmt, $shipStmt) {
+            return str_contains($sql, 'FROM shipments') ? $shipStmt : $userStmt;
+        });
+
+        $notification = $this->createMockNotificationService();
+        $notification->expects($this->never())->method('create');
+
+        $service = $this->buildService(null, null, null, null, $notification, $db, null, $shipmentSync);
+        $result = $service->processWebhookEvent([
+            'topic' => 'shipments',
+            'resource' => '/shipments/SHIP_DUP',
+        ]);
+
+        $this->assertTrue($result['success']);
+    }
+
+    public function testPaymentEventFetchFailureMarksWebhookAsFailed(): void
+    {
+        $mlClient = $this->createMock(MercadoLivreClient::class);
+        $mlClient->method('get')->willReturn([
+            'error' => 'not_found',
+            'message' => 'Payment not found',
+        ]);
+
+        $service = $this->buildService(null, null, null, null, null, null, null, null, $mlClient);
+        $result = $service->processWebhookEvent([
+            'topic' => 'payments',
+            'resource' => '/collections/PAY123',
+        ]);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('Payment not found', (string)$result['error']);
+    }
+
+    public function testPaymentEventUsesCollectionsEndpoint(): void
+    {
+        $mlClient = $this->createMock(MercadoLivreClient::class);
+        $mlClient->expects($this->once())
+            ->method('get')
+            ->with('/collections/PAY123')
+            ->willReturn([
+                'id' => 'PAY123',
+                'status' => 'approved',
+                'transaction_amount' => 10.5,
+                'order_id' => 99,
+            ]);
+
+        $orderService = $this->createMockOrderService(['id' => 99, 'status' => 'paid']);
+        $notification = $this->createMockNotificationService();
+        $notification->expects($this->once())->method('create');
+
+        $service = $this->buildService(
+            null,
+            $orderService,
+            null,
+            null,
+            $notification,
+            $this->createMockDb(10),
+            null,
+            null,
+            $mlClient
+        );
+        $result = $service->processWebhookEvent([
+            'topic' => 'payments',
+            'resource' => '/collections/PAY123',
+        ]);
+
+        $this->assertTrue($result['success']);
+    }
+
+    public function testFeedbackEventFetchFailureMarksWebhookAsFailed(): void
+    {
+        $mlClient = $this->createMock(MercadoLivreClient::class);
+        $mlClient->method('get')->willReturn([
+            'error' => 'not_found',
+            'message' => 'Feedback missing',
+        ]);
+
+        $service = $this->buildService(null, null, null, null, null, null, null, null, $mlClient);
+        $result = $service->processWebhookEvent([
+            'topic' => 'feedback',
+            'resource' => '/feedback/FB1',
+        ]);
+
+        $this->assertFalse($result['success']);
+        $this->assertStringContainsString('Feedback missing', (string)$result['error']);
     }
 
     // === Unhandled topics ===
@@ -492,7 +790,8 @@ class MercadoLivreWebhookServiceTest extends TestCase
     public function testVariousUnhandledTopics(): void
     {
         $service = $this->buildService();
-        $topics = ['payments', 'invoices', 'campaigns', 'listings'];
+        // 'payments' é tópico tratado — não deve figurar como unhandled.
+        $topics = ['invoices', 'campaigns', 'listings'];
         foreach ($topics as $topic) {
             $result = $service->processWebhookEvent([
                 'topic' => $topic,
@@ -694,9 +993,13 @@ class MercadoLivreWebhookServiceTest extends TestCase
     public function testParameterizedQueriesForUserLookup(): void
     {
         $stmt = $this->createMock(PDOStatement::class);
-        $stmt->expects($this->once())
+        // Pedidos também consultam status local (dedupe); o lookup de user_id deve
+        // continuar parametrizado com account_id.
+        $stmt->expects($this->atLeastOnce())
             ->method('execute')
-            ->with($this->equalTo([self::ACCOUNT_ID]));
+            ->with($this->callback(static function (array $params): bool {
+                return in_array(self::ACCOUNT_ID, $params, true);
+            }));
         $stmt->method('fetchColumn')->willReturn(10);
 
         $db = $this->createMock(PDO::class);

@@ -262,12 +262,45 @@ class MercadoLivreClient
 
         $options = [
             'timeout' => 30,
+            'connect_timeout' => 10,
             'headers' => $headers,
         ];
 
-        $options['proxy'] = $this->buildProxyOption() ?? false;
+        // Neste PHP/cURL, proxy=false explode com "CURLOPT_PROXY must be a string".
+        // Omitir herda HTTP_PROXY do ambiente. String vazia desliga proxy sem herança.
+        $proxy = $this->buildProxyOption();
+        $options['proxy'] = (is_string($proxy) && $proxy !== '') ? $proxy : '';
+
+        // Correlação: propaga request_id do request HTTP atual (quando existir).
+        $correlationId = $this->resolveOutboundCorrelationId();
+        if ($correlationId !== null) {
+            $options['headers']['X-Request-Id'] = $correlationId;
+        }
 
         return new \GuzzleHttp\Client($options);
+    }
+
+    /**
+     * Resolve um ID de correlação para chamadas outbound à API ML.
+     */
+    private function resolveOutboundCorrelationId(): ?string
+    {
+        $candidates = [
+            $_SERVER['HTTP_X_REQUEST_ID'] ?? null,
+            $_SERVER['HTTP_X_CORRELATION_ID'] ?? null,
+        ];
+
+        foreach ($candidates as $candidate) {
+            if (!is_string($candidate)) {
+                continue;
+            }
+            $value = trim($candidate);
+            if ($value !== '' && strlen($value) <= 128) {
+                return $value;
+            }
+        }
+
+        return null;
     }
 
     private function getPublicHttpClient(): \GuzzleHttp\Client
@@ -561,17 +594,33 @@ class MercadoLivreClient
 
         $authService = $this->authService ?? new MercadoLivreAuthService();
         $refreshed = $authService->refreshToken($this->accountId);
-        if (!$refreshed) {
-            // O refresh pode ter marcado a conta como disconnected.
-            try {
-                $this->loadAccount();
-            } catch (\Throwable $t) {
-                // best-effort
+        if ($refreshed) {
+            return $this->loadAccount();
+        }
+
+        // Refresh falhou (lock concorrente, rede, etc.). Se o access token ainda for
+        // utilizável para a requisição imediata, não tratar como falha terminal —
+        // evita 401 em cascata enquanto outro processo finaliza o refresh.
+        try {
+            if (!$this->loadAccount()) {
+                return false;
             }
+        } catch (\Throwable $t) {
             return false;
         }
 
-        return $this->loadAccount();
+        if ($this->accountDisconnected || !$this->hasAccessToken) {
+            return false;
+        }
+
+        $expiresAtAfter = $this->tokenExpiresAt;
+        if ($expiresAtAfter === null || $expiresAtAfter === '') {
+            return true;
+        }
+
+        $secondsLeftAfter = strtotime((string)$expiresAtAfter) - time();
+        // Margem mínima de uso imediato (não o buffer de refresh proativo).
+        return $secondsLeftAfter > 30;
     }
 
     private function isDbUnavailableError(?\Throwable $e): bool
@@ -825,6 +874,28 @@ class MercadoLivreClient
 
         return str_contains($haystack, 'pa_unauthorized_result_from_policies')
             || (str_contains($haystack, 'policy') && str_contains($haystack, 'unauthorized'));
+    }
+
+    /**
+     * GET /products/{id}/items retorna 404 "No winners found" quando o produto de
+     * catálogo ainda não tem anúncio vencedor — cenário comum, não é falha de integração.
+     */
+    private function isExpectedCatalogWithoutWinners(string $endpoint, ?int $status, ?string $body): bool
+    {
+        if ($status !== 404) {
+            return false;
+        }
+
+        $path = (string)(parse_url($endpoint, PHP_URL_PATH) ?: $endpoint);
+        if (preg_match('#^/products/[^/]+/items$#', $path) !== 1) {
+            return false;
+        }
+
+        $haystack = strtolower((string)$body);
+        return $haystack === ''
+            || str_contains($haystack, 'no winners found')
+            || str_contains($haystack, '"error":"not_found"')
+            || str_contains($haystack, '"error": "not_found"');
     }
 
     /**
@@ -1136,7 +1207,7 @@ class MercadoLivreClient
                 }
             }
 
-            // RATE LIMIT (429) - Respeitar Retry-After
+            // RATE LIMIT (429) - Respeitar Retry-After; sem header, usar backoff padrão em CLI/workers
             if ($allowRetry && $status === 429) {
                 $retryAfter = (int)($e->getResponse()?->getHeaderLine('Retry-After') ?? 0);
                 if ($this->isHttpContext()) {
@@ -1145,13 +1216,17 @@ class MercadoLivreClient
                         'retry_after_seconds' => $retryAfter,
                     ]);
                 } else {
-                    // Se Retry-After for muito longo (> 60s), melhor falhar do que segurar o processo
-                    if ($retryAfter > 0 && $retryAfter <= 60) {
+                    // Proxy/CF e alguns endpoints ML omitem Retry-After; sem fallback o worker falha à toa.
+                    $defaultWait = max(1, min(30, (int)($_ENV['ML_RATE_LIMIT_DEFAULT_WAIT_SECONDS'] ?? 3)));
+                    $waitSeconds = $retryAfter > 0 ? $retryAfter : $defaultWait;
+                    if ($waitSeconds <= 60) {
                         log_warning('ML API Rate Limit atingido', [
                             'endpoint' => $endpoint,
                             'retry_after_seconds' => $retryAfter,
+                            'wait_seconds' => $waitSeconds,
+                            'used_default_wait' => $retryAfter <= 0,
                         ]);
-                        sleep($retryAfter + 1); // +1s de margem
+                        sleep($waitSeconds + 1); // +1s de margem
                         return $this->requestWithRetry($method, $endpoint, $options, false, $requiresAuth);
                     }
                 }
@@ -1180,6 +1255,19 @@ class MercadoLivreClient
             // é comportamento esperado — downgrade de ERROR para WARNING para evitar ruído nos logs.
             if (!$requiresAuth && $this->isPolicyBlockedHttpError($status, $body, $e->getMessage())) {
                 log_warning('ML API public endpoint bloqueado por policy (sem client_id)', [
+                    'method' => $method,
+                    'endpoint' => $endpoint,
+                    'status' => $status,
+                ]);
+
+                return $this->decorateLegacyResponse(
+                    $this->normalizeHttpError($method, $endpoint, $status, $body, $e->getMessage())
+                );
+            }
+
+            // 404 esperado em catálogo sem vencedor — não poluir ERROR.
+            if ($this->isExpectedCatalogWithoutWinners($endpoint, $status, $body)) {
+                log_warning('ML API catalog product sem winners', [
                     'method' => $method,
                     'endpoint' => $endpoint,
                     'status' => $status,
@@ -2049,7 +2137,8 @@ class MercadoLivreClient
     /**
      * Obtém visitas de um item individual.
      *
-     * ML API: GET /visits/items?ids={id}&date_from=...&date_to=...
+     * ML API: GET /items/visits?ids={id}&date_from=...&date_to=...
+     * (doc oficial "Visitas"; /visits/items retorna total histórico sem faixa)
      *
      * @param string $itemId ML item ID (e.g. MLB1234567890)
      * @param int $days Número de dias para consultar (máx 30)
@@ -2067,7 +2156,7 @@ class MercadoLivreClient
     /**
      * Obtém visitas de múltiplos itens em uma única chamada.
      *
-     * ML API: GET /visits/items?ids={id1,id2,...}&date_from=...&date_to=...
+     * ML API: GET /items/visits?ids={id1,id2,...}&date_from=...&date_to=...
      * Máximo 50 IDs por chamada.
      *
      * @param array<string> $itemIds Lista de IDs (máx 50)
@@ -2087,12 +2176,13 @@ class MercadoLivreClient
         $dateTo = date('Y-m-d');
         $dateFrom = date('Y-m-d', strtotime("-{$days} days"));
 
-        // ML limita 50 IDs por chamada
+        // ML limita 50 IDs por chamada em alguns recursos; com faixa de datas
+        // a doc oficial usa GET /items/visits (não /visits/items).
         $chunks = array_chunk($itemIds, 50);
 
         foreach ($chunks as $chunk) {
             try {
-                $data = $this->get('/visits/items', [
+                $data = $this->get('/items/visits', [
                     'ids' => implode(',', $chunk),
                     'date_from' => $dateFrom,
                     'date_to' => $dateTo,
@@ -2110,32 +2200,50 @@ class MercadoLivreClient
                     continue;
                 }
 
-                // A resposta é um array indexado por item_id
-                foreach ($chunk as $id) {
-                    if (isset($data[$id])) {
+                // Resposta tipica: lista [{item_id, total_visits, visits_detail}, ...]
+                // Fallback legado: mapa {ITEM_ID: int} via /visits/items
+                $byId = [];
+                if (isset($data[0]) && is_array($data[0])) {
+                    foreach ($data as $row) {
+                        if (!is_array($row)) {
+                            continue;
+                        }
+                        $id = (string) ($row['item_id'] ?? '');
+                        if ($id === '') {
+                            continue;
+                        }
+                        $byId[$id] = (int) ($row['total_visits'] ?? 0);
+                    }
+                } else {
+                    foreach ($chunk as $id) {
+                        if (!array_key_exists($id, $data)) {
+                            continue;
+                        }
                         $itemData = $data[$id];
-                        $daily = [];
-                        $totalVisits = 0;
-
-                        if (is_array($itemData)) {
-                            foreach ($itemData as $entry) {
-                                $date = $entry['date'] ?? null;
-                                $count = (int)($entry['total'] ?? $entry['quantity'] ?? 0);
-                                if ($date !== null) {
-                                    $daily[$date] = $count;
-                                    $totalVisits += $count;
+                        if (is_numeric($itemData)) {
+                            $byId[$id] = (int) $itemData;
+                        } elseif (is_array($itemData)) {
+                            $totalVisits = (int) ($itemData['total_visits'] ?? 0);
+                            if ($totalVisits === 0) {
+                                foreach ($itemData as $entry) {
+                                    if (!is_array($entry)) {
+                                        continue;
+                                    }
+                                    $totalVisits += (int) ($entry['total'] ?? $entry['quantity'] ?? 0);
                                 }
                             }
+                            $byId[$id] = $totalVisits;
                         }
-
-                        $results[$id] = [
-                            'total' => $totalVisits,
-                            'visits' => $totalVisits,
-                            'daily' => $daily,
-                        ];
-                    } else {
-                        $results[$id] = $empty;
                     }
+                }
+
+                foreach ($chunk as $id) {
+                    $total = $byId[$id] ?? 0;
+                    $results[$id] = [
+                        'total' => $total,
+                        'visits' => $total,
+                        'daily' => [],
+                    ];
                 }
             } catch (\Exception $e) {
                 log_error('Falha ao obter visitas ML', [

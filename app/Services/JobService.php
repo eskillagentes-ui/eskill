@@ -695,7 +695,7 @@ class JobService
             throw new \Exception((string)($result['error'] ?? 'Erro desconhecido no processamento de webhook'));
         }
 
-        return [
+        $jobResult = [
             'account_id' => $accountId,
             'event_hash' => $payload['event_hash'] ?? null,
             'topic' => $payload['topic'] ?? null,
@@ -703,6 +703,16 @@ class JobService
             'event_id' => $result['event_id'] ?? null,
             'success' => true,
         ];
+
+        // Preservar rastreabilidade de tópicos ignorados (unknown_topic etc.)
+        if (!empty($result['ignored'])) {
+            $jobResult['ignored'] = true;
+            if (isset($result['ignored_reason'])) {
+                $jobResult['ignored_reason'] = $result['ignored_reason'];
+            }
+        }
+
+        return $jobResult;
     }
 
     /**

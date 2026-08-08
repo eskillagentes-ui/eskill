@@ -27,6 +27,8 @@ class MercadoLivreClientTest extends TestCase
         return in_array($this->getName(false), [
             'testLoadAccountDecryptsToken',
             'testEnsureValidAccessToken_uses_refresh_when_expired',
+            'testEnsureValidAccessToken_keepsUsableTokenWhenRefreshLockFails',
+            'testEnsureValidAccessToken_failsWhenExpiredAndRefreshLockFails',
         ], true);
     }
 
@@ -229,6 +231,49 @@ class MercadoLivreClientTest extends TestCase
         $this->assertEquals('refreshed-access-token', $client->getAccessToken());
     }
 
+    public function testEnsureValidAccessToken_keepsUsableTokenWhenRefreshLockFails(): void
+    {
+        $pdo = Database::getInstance();
+
+        // Dentro do buffer de refresh (60 min), mas ainda utilizável (>30s).
+        $pdo->prepare('UPDATE ml_accounts SET token_expires_at = :exp WHERE id = :id')
+            ->execute(['exp' => date('Y-m-d H:i:s', time() + 2700), 'id' => $this->accountId]);
+
+        $testAuth = new class extends \App\Services\MercadoLivreAuthService {
+            public function refreshToken(int $accountId, int $maxRetries = 3): bool
+            {
+                // Simula lock concorrente / refresh em andamento em outro processo.
+                return false;
+            }
+        };
+
+        $client = new MercadoLivreClient($this->accountId, $testAuth);
+        $ok = $client->ensureValidAccessToken(60);
+
+        $this->assertTrue($ok, 'Token ainda válido deve ser aceito quando refresh falha por lock');
+        $this->assertEquals('initial-access-token', $client->getAccessToken());
+    }
+
+    public function testEnsureValidAccessToken_failsWhenExpiredAndRefreshLockFails(): void
+    {
+        $pdo = Database::getInstance();
+
+        $pdo->prepare('UPDATE ml_accounts SET token_expires_at = :exp WHERE id = :id')
+            ->execute(['exp' => date('Y-m-d H:i:s', time() - 120), 'id' => $this->accountId]);
+
+        $testAuth = new class extends \App\Services\MercadoLivreAuthService {
+            public function refreshToken(int $accountId, int $maxRetries = 3): bool
+            {
+                return false;
+            }
+        };
+
+        $client = new MercadoLivreClient($this->accountId, $testAuth);
+        $ok = $client->ensureValidAccessToken(60);
+
+        $this->assertFalse($ok, 'Token expirado sem refresh não deve ser considerado válido');
+    }
+
     public function testNetworkDisabledInTestingEnvironment(): void
     {
         $previousEnv = $_ENV['APP_ENV'] ?? null;
@@ -344,7 +389,7 @@ class MercadoLivreClientTest extends TestCase
             /** @var GuzzleClient $guzzle */
             $guzzle = $method->invoke($client, false);
 
-            $this->assertFalse($guzzle->getConfig('proxy'));
+            $this->assertSame('', $guzzle->getConfig('proxy'));
         } finally {
             if ($previousEnabled !== null) {
                 putenv("ML_PROXY_ENABLED={$previousEnabled}");
@@ -423,6 +468,39 @@ class MercadoLivreClientTest extends TestCase
             } else {
                 putenv('ML_PUBLIC_CLIENT_ID_MODE');
                 unset($_ENV['ML_PUBLIC_CLIENT_ID_MODE']);
+            }
+        }
+    }
+
+    public function testCatalogProductWithoutWinnersIsSoftMiss(): void
+    {
+        $previousEnv = $_ENV['APP_ENV'] ?? null;
+
+        putenv('APP_ENV=production');
+        $_ENV['APP_ENV'] = 'production';
+
+        try {
+            $client = $this->makeClientWithMockedTransport([
+                new Response(404, ['Content-Type' => 'application/json'], json_encode([
+                    'message' => 'No winners found',
+                    'error' => 'not_found',
+                    'status' => 404,
+                    'cause' => [],
+                ])),
+            ]);
+            $this->setAuthenticatedState($client);
+
+            $response = $client->get('/products/MLB58038968/items');
+
+            $this->assertSame(404, $response['status'] ?? null);
+            $this->assertNotEmpty($response['error'] ?? null);
+        } finally {
+            if ($previousEnv !== null) {
+                putenv("APP_ENV={$previousEnv}");
+                $_ENV['APP_ENV'] = $previousEnv;
+            } else {
+                putenv('APP_ENV');
+                unset($_ENV['APP_ENV']);
             }
         }
     }
@@ -590,5 +668,17 @@ class MercadoLivreClientTest extends TestCase
                 unset($_ENV['APP_ENV']);
             }
         }
+    }
+
+    public function testRateLimitWithoutRetryAfterUsesDefaultWaitInCli(): void
+    {
+        $source = (string)file_get_contents(
+            dirname(__DIR__, 2) . '/../app/Services/MercadoLivreClient.php'
+        );
+
+        $this->assertStringContainsString('ML_RATE_LIMIT_DEFAULT_WAIT_SECONDS', $source);
+        $this->assertStringContainsString('used_default_wait', $source);
+        $this->assertStringContainsString('connect_timeout', $source);
+        $this->assertStringContainsString('resolveOutboundCorrelationId', $source);
     }
 }

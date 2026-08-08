@@ -77,7 +77,7 @@ function resolveAccountId(\PDO $db, ?int $mlUserId): int
         return 0;
     }
     $stmt = $db->prepare(
-        "SELECT id FROM ml_accounts WHERE ml_user_id = ? AND status IN ('active','inactive') LIMIT 1"
+        "SELECT id FROM ml_accounts WHERE ml_user_id = ? AND status IN ('active', 'expired', 'inactive') ORDER BY CASE status WHEN 'active' THEN 0 WHEN 'expired' THEN 1 ELSE 2 END, updated_at DESC LIMIT 1"
     );
     $stmt->execute([$mlUserId]);
     $row = $stmt->fetch(\PDO::FETCH_ASSOC);

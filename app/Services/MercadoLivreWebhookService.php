@@ -93,10 +93,12 @@ class MercadoLivreWebhookService
         $resource = $payload['resource'] ?? null;
         $userId = $payload['user_id'] ?? null;
         $applicationId = $payload['application_id'] ?? null;
+        // Correlação com o request_id de recebimento (controller), quando disponível.
+        $requestId = isset($payload['request_id']) ? (string)$payload['request_id'] : null;
 
         // Basic validation
         if (!$topic || !$resource) {
-            $this->logger->warning("Webhook received without topic or resource", ['payload' => $payload]);
+            $this->logger->warning("Webhook received without topic or resource", ['payload' => $payload, 'request_id' => $requestId]);
             return ['success' => false, 'error' => 'Missing topic or resource'];
         }
 
@@ -104,7 +106,8 @@ class MercadoLivreWebhookService
         $this->logger->info("Processing Webhook Event [{$eventId}]", [
             'topic' => $topic,
             'resource' => $resource,
-            'account_id' => $this->accountId
+            'account_id' => $this->accountId,
+            'request_id' => $requestId,
         ]);
 
         try {
@@ -116,6 +119,9 @@ class MercadoLivreWebhookService
                     break;
 
                 case 'items':
+                case 'items_prices':
+                    // items_prices chega como /items/{id}/prices (não só /items/{id}).
+                    // Ignorá-lo deixava preço local desatualizado até o próximo "items"/sync.
                     $this->handleItemEvent($resource);
                     break;
 
@@ -192,14 +198,15 @@ class MercadoLivreWebhookService
                 }
             }
 
-            return ['success' => true, 'event_id' => $eventId];
+            return ['success' => true, 'event_id' => $eventId, 'request_id' => $requestId];
         } catch (\Throwable $e) {
             $this->logger->error("Error processing webhook [{$eventId}]", [
                 'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString()
+                'trace' => $e->getTraceAsString(),
+                'request_id' => $requestId,
             ]);
 
-            return ['success' => false, 'error' => $e->getMessage()];
+            return ['success' => false, 'error' => $e->getMessage(), 'request_id' => $requestId];
         }
     }
 
@@ -227,6 +234,10 @@ class MercadoLivreWebhookService
             throw new \Exception("Invalid order resource: {$resource}");
         }
 
+        // Status local antes do sync — ML reenvia o mesmo pedido com _id diferente;
+        // notificar em todo webhook gerava dezenas de "Nova Venda" iguais.
+        $previousStatus = $this->getLocalOrderStatus($orderId);
+
         $order = $this->getOrderService()->getOrder($orderId, ['allow_local_cache' => false]);
         if (!empty($order['error'])) {
             throw new \RuntimeException((string)($order['message'] ?? 'Falha ao carregar pedido do webhook'));
@@ -241,7 +252,7 @@ class MercadoLivreWebhookService
             return;
         }
 
-        if ($status === 'paid') {
+        if ($status === 'paid' && $previousStatus !== 'paid') {
             $total = $order['total_amount'] ?? ($order['data']['total_amount'] ?? '---');
             $this->getNotificationService()->create(
                 $userId,
@@ -251,7 +262,7 @@ class MercadoLivreWebhookService
                 ['order_id' => $orderId]
             );
             $this->emitPregaoSale($orderId, $order);
-        } elseif ($status === 'cancelled') {
+        } elseif ($status === 'cancelled' && $previousStatus !== 'cancelled') {
             $this->getNotificationService()->create(
                 $userId,
                 'order_cancelled',
@@ -301,16 +312,21 @@ class MercadoLivreWebhookService
 
     private function handleItemEvent(string $resource): void
     {
-        // Resource format: /items/{id}
-        $parts = explode('/', $resource);
-        $itemId = end($parts);
+        // Formats: /items/{id} | /items/{id}/prices (topic items_prices)
+        $itemId = $this->extractItemIdFromResource($resource);
 
-        if (!$itemId) {
+        if ($itemId === null || $itemId === '') {
             throw new \Exception("Invalid item resource: {$resource}");
         }
 
         // 1. Force Sync Item to Local DB
-        $this->getItemService()->syncItem($itemId);
+        $syncResult = $this->getItemService()->syncItem($itemId);
+        if (isset($syncResult['error'])) {
+            throw new \RuntimeException(
+                'Falha ao sincronizar item do webhook: '
+                . (string)($syncResult['message'] ?? $syncResult['error'] ?? 'API Error')
+            );
+        }
 
         // 2. Refresh Tech Sheet Analysis
         try {
@@ -320,6 +336,34 @@ class MercadoLivreWebhookService
             $this->logger->warning("Failed to refresh TechSheet for {$itemId}", ['error' => $e->getMessage()]);
         }
 
+    }
+
+    /**
+     * Extrai o item_id de resources ML:
+     * - /items/MLB123
+     * - /items/MLB123/prices (items_prices)
+     */
+    private function extractItemIdFromResource(string $resource): ?string
+    {
+        $resource = trim($resource);
+        if ($resource === '') {
+            return null;
+        }
+
+        // Preferir ID canônico MLB… quando presente
+        if (preg_match('#/(MLB[A-Z0-9]+|MLA[A-Z0-9]+|MLM[A-Z0-9]+)(?:/|$)#i', $resource, $matches)) {
+            return strtoupper($matches[1]);
+        }
+
+        // Fallback: segmento imediatamente após /items/
+        if (preg_match('#/items/([^/?#]+)#i', $resource, $matches)) {
+            $candidate = trim($matches[1]);
+            if ($candidate !== '' && strcasecmp($candidate, 'prices') !== 0) {
+                return $candidate;
+            }
+        }
+
+        return null;
     }
 
     private function handleQuestionEvent(string $resource): void
@@ -332,15 +376,18 @@ class MercadoLivreWebhookService
             throw new \Exception("Invalid question resource: {$resource}");
         }
 
+        // ML reenvia a mesma pergunta com _id diferente → sem dedupe spamava question_new.
+        $alreadyKnown = $this->localQuestionExists($questionId);
+
         $qService = $this->getQuestionService();
         $question = $qService->syncSingleQuestion($questionId);
         if (!empty($question['error'])) {
             throw new \RuntimeException((string)($question['message'] ?? 'Falha ao sincronizar pergunta do webhook'));
         }
 
-        // Notify User
+        // Notify User (apenas na primeira sincronização local)
         $userId = $this->getUserIdFromAccount();
-        if ($userId) {
+        if ($userId && !$alreadyKnown) {
             $itemTitle = $question['item_title'] ?? ($question['item']['title'] ?? 'Anúncio');
             $text = $question['text'] ?? 'Nova pergunta';
             $this->getNotificationService()->create(
@@ -403,14 +450,18 @@ class MercadoLivreWebhookService
         $id = end($parts);
 
         if (!$id) {
-            return;
+            throw new \InvalidArgumentException("Invalid message resource: {$resource}");
         }
 
         $messagingService = $this->getMessagingService();
         $message = $messagingService->getMessage($id);
         if (!empty($message['error'])) {
-            $this->logger->warning('Failed to fetch message', ['message_id' => $id, 'error' => $message['error']]);
-            return;
+            $error = (string)$message['error'];
+            $this->logger->warning('Failed to fetch message', ['message_id' => $id, 'error' => $error]);
+            // Propagar falha para o job/inbox reprocessarem (não marcar como success).
+            throw new \RuntimeException(
+                (string)($message['message'] ?? "Falha ao carregar mensagem do webhook: {$error}")
+            );
         }
 
         $messagingService->processIncomingMessage([
@@ -430,16 +481,22 @@ class MercadoLivreWebhookService
             throw new \Exception("Invalid shipment resource: {$resource}");
         }
 
+        // Status local antes do sync — ML reenvia o mesmo shipment com _id diferente;
+        // notificar em todo webhook gerava dezenas/centenas de alertas iguais.
+        $previousStatus = $this->getLocalShipmentStatus($shipmentId);
+
         // Fetch from ML API and persist to shipments table
         $syncResult = $this->getShipmentSyncService()->syncShipment($shipmentId);
 
         if (!($syncResult['success'] ?? false)) {
+            $error = (string)($syncResult['error'] ?? 'unknown');
             $this->logger->warning('ML_WEBHOOK_SHIPMENT_SYNC_FAILED', [
                 'shipment_id' => $shipmentId,
-                'error'       => $syncResult['error'] ?? 'unknown',
+                'error'       => $error,
                 'account_id'  => $this->accountId,
             ]);
-            return;
+            // Propagar falha para o job/inbox reprocessarem (não marcar como success).
+            throw new \RuntimeException("Falha ao sincronizar envio do webhook: {$error}");
         }
 
         $shipmentData    = $syncResult['data'] ?? [];
@@ -452,11 +509,15 @@ class MercadoLivreWebhookService
             'status'         => $status,
             'substatus'      => $substatus,
             'tracking_number' => $trackingNumber,
+            'previous_status' => $previousStatus,
             'account_id'     => $this->accountId,
         ]);
 
-        // Notify user only on significant status transitions
+        // Notify user only on significant status transitions (não em reentregas ML)
         $notifyStatuses = ['ready_to_ship', 'shipped', 'delivered', 'not_delivered', 'cancelled'];
+        if ($previousStatus === $status) {
+            return;
+        }
         if (in_array($status, $notifyStatuses, true)) {
             $userId = $this->getUserIdFromAccount();
             if ($userId) {
@@ -487,23 +548,42 @@ class MercadoLivreWebhookService
         $paymentId = end($parts);
 
         if (!$paymentId) {
-            $this->logger->warning('ML_WEBHOOK_PAYMENT_INVALID_RESOURCE', ['resource' => $resource]);
-            return;
+            throw new \InvalidArgumentException("Invalid payment resource: {$resource}");
         }
 
-        // Fetch payment details from ML
+        $previousStatus = $this->getLocalPaymentStatus($paymentId);
+
+        // Fetch payment details from ML (endpoint canônico usado no restante do sistema).
         $paymentData = [];
+        $lastError = null;
         try {
-            // The ML payments API endpoint
-            $response = $this->getMlClient()->get("/collections/notifications/{$paymentId}");
+            $response = $this->getMlClient()->get("/collections/{$paymentId}");
             if (!isset($response['error'])) {
                 $paymentData = $response['collection'] ?? $response;
+            } else {
+                $lastError = (string)($response['message'] ?? $response['error']);
+                // Fallback Mercado Pago Payments API
+                $fallback = $this->getMlClient()->get("/v1/payments/{$paymentId}");
+                if (!isset($fallback['error'])) {
+                    $paymentData = $fallback;
+                    $lastError = null;
+                } else {
+                    $lastError = (string)($fallback['message'] ?? $fallback['error'] ?? $lastError);
+                }
             }
         } catch (\Throwable $e) {
+            $lastError = $e->getMessage();
             $this->logger->warning('ML_WEBHOOK_PAYMENT_FETCH_FAILED', [
                 'payment_id' => $paymentId,
-                'error' => $e->getMessage(),
+                'error' => $lastError,
             ]);
+        }
+
+        if (empty($paymentData)) {
+            throw new \RuntimeException(
+                'Falha ao carregar pagamento do webhook'
+                . ($lastError ? ": {$lastError}" : '')
+            );
         }
 
         $status = $paymentData['status'] ?? 'unknown';
@@ -533,8 +613,8 @@ class MercadoLivreWebhookService
             }
         }
 
-        // Notify user on approved payment
-        if ($status === 'approved') {
+        // Notify user on approved payment (só na transição para approved)
+        if ($status === 'approved' && $previousStatus !== 'approved') {
             $userId = $this->getUserIdFromAccount();
             if ($userId) {
                 $amount = isset($paymentData['transaction_amount'])
@@ -563,26 +643,45 @@ class MercadoLivreWebhookService
             'account_id' => $this->accountId,
         ]);
 
+        if (!$feedbackId) {
+            throw new \InvalidArgumentException("Invalid feedback resource: {$resource}");
+        }
+
         // Fetch feedback data from ML API
         $feedbackData = [];
+        $lastError = null;
         try {
             $response = $this->getMlClient()->get("/feedback/{$feedbackId}");
             if (!isset($response['error'])) {
                 $feedbackData = $response;
+            } else {
+                $lastError = (string)($response['message'] ?? $response['error']);
             }
         } catch (\Throwable $e) {
+            $lastError = $e->getMessage();
             $this->logger->warning('ML_WEBHOOK_FEEDBACK_FETCH_FAILED', [
                 'feedback_id' => $feedbackId,
-                'error'       => $e->getMessage(),
+                'error'       => $lastError,
             ]);
         }
 
-        // Persist to ml_feedback table
-        if (!empty($feedbackData)) {
-            $this->persistFeedback($feedbackId, $feedbackData);
+        if (empty($feedbackData)) {
+            throw new \RuntimeException(
+                'Falha ao carregar feedback do webhook'
+                . ($lastError ? ": {$lastError}" : '')
+            );
         }
 
-        // Notify user — feedbacks affect seller reputation
+        $alreadyKnown = $this->localFeedbackExists($feedbackId);
+
+        // Persist to ml_feedback table
+        $this->persistFeedback($feedbackId, $feedbackData);
+
+        // Notify user — só na primeira vez (reentregas ML)
+        if ($alreadyKnown) {
+            return;
+        }
+
         $userId = $this->getUserIdFromAccount();
         if ($userId) {
             $rating      = $feedbackData['rating'] ?? null;
@@ -607,9 +706,16 @@ class MercadoLivreWebhookService
             throw new \Exception("Invalid claim resource: {$resource}");
         }
 
+        $alreadyKnown = $this->localClaimExists($claimId);
+
         $this->getClaimsService()->syncClaim($claimId);
 
-        // Notify Urgent
+        // Notify Urgent — ML reenvia o mesmo claim com _id diferente
+        if ($alreadyKnown) {
+            $this->logger->info('Claim Synced', ['claim_id' => $claimId, 'notify' => false]);
+            return;
+        }
+
         $userId = $this->getUserIdFromAccount();
         if ($userId) {
             $this->getNotificationService()->create(
@@ -647,6 +753,164 @@ class MercadoLivreWebhookService
             return $result !== false && $result !== null ? (int)$result : null;
         } catch (\Exception $e) {
             return null;
+        }
+    }
+
+    /**
+     * Status local do envio antes do sync (para deduplicar notificações de reentrega ML).
+     */
+    private function getLocalShipmentStatus(string $shipmentId): ?string
+    {
+        try {
+            $db = $this->db;
+            if ($db === null && !$this->skipDbAutoConnect) {
+                $db = \App\Database::getInstance();
+            }
+            if ($db === null) {
+                return null;
+            }
+
+            $stmt = $db->prepare(
+                'SELECT status FROM shipments WHERE account_id = ? AND shipment_id = ? LIMIT 1'
+            );
+            $stmt->execute([$this->accountId, $shipmentId]);
+            $status = $stmt->fetchColumn();
+            if ($status === false || $status === null) {
+                return null;
+            }
+
+            $normalized = trim((string)$status);
+            return $normalized !== '' ? $normalized : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Status local do pedido antes do sync (dedupe de notificações order_new/cancelled).
+     */
+    private function getLocalOrderStatus(string $orderId): ?string
+    {
+        try {
+            $db = $this->db;
+            if ($db === null && !$this->skipDbAutoConnect) {
+                $db = \App\Database::getInstance();
+            }
+            if ($db === null) {
+                return null;
+            }
+
+            $stmt = $db->prepare(
+                'SELECT status FROM ml_orders WHERE ml_order_id = ? AND ml_account_id = ? LIMIT 1'
+            );
+            $stmt->execute([$orderId, $this->accountId]);
+            $status = $stmt->fetchColumn();
+            if ($status === false || $status === null) {
+                return null;
+            }
+
+            $normalized = trim((string)$status);
+            return $normalized !== '' ? $normalized : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function localQuestionExists(string $questionId): bool
+    {
+        try {
+            $db = $this->db;
+            if ($db === null && !$this->skipDbAutoConnect) {
+                $db = \App\Database::getInstance();
+            }
+            if ($db === null) {
+                return false;
+            }
+
+            $stmt = $db->prepare(
+                'SELECT 1 FROM ml_questions WHERE question_id = ? AND account_id = ? LIMIT 1'
+            );
+            $stmt->execute([$questionId, $this->accountId]);
+            $value = $stmt->fetchColumn();
+            if ($value === false || $value === null) {
+                return false;
+            }
+
+            // SELECT 1 → 1/"1"; evita falso positivo de mocks/lookup que devolvem user_id
+            return $value === 1 || $value === '1' || $value === true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    private function getLocalPaymentStatus(string $paymentId): ?string
+    {
+        try {
+            $db = $this->db;
+            if ($db === null && !$this->skipDbAutoConnect) {
+                $db = \App\Database::getInstance();
+            }
+            if ($db === null) {
+                return null;
+            }
+
+            $stmt = $db->prepare(
+                'SELECT status FROM ml_payments WHERE payment_id = ? AND ml_account_id = ? LIMIT 1'
+            );
+            $stmt->execute([$paymentId, $this->accountId]);
+            $status = $stmt->fetchColumn();
+            if ($status === false || $status === null) {
+                return null;
+            }
+
+            $normalized = trim((string)$status);
+            return $normalized !== '' ? $normalized : null;
+        } catch (\Throwable $e) {
+            return null;
+        }
+    }
+
+    private function localClaimExists(string $claimId): bool
+    {
+        try {
+            $db = $this->db;
+            if ($db === null && !$this->skipDbAutoConnect) {
+                $db = \App\Database::getInstance();
+            }
+            if ($db === null) {
+                return false;
+            }
+
+            $stmt = $db->prepare(
+                'SELECT 1 FROM ml_claims WHERE id = ? AND account_id = ? LIMIT 1'
+            );
+            $stmt->execute([$claimId, $this->accountId]);
+            $value = $stmt->fetchColumn();
+            return $value === 1 || $value === '1' || $value === true;
+        } catch (\Throwable $e) {
+            return false;
+        }
+    }
+
+    private function localFeedbackExists(string $feedbackId): bool
+    {
+        try {
+            $db = $this->db;
+            if ($db === null && !$this->skipDbAutoConnect) {
+                $db = \App\Database::getInstance();
+            }
+            if ($db === null) {
+                return false;
+            }
+
+            $stmt = $db->prepare(
+                'SELECT 1 FROM ml_feedback WHERE feedback_id = ? AND ml_account_id = ? LIMIT 1'
+            );
+            $stmt->execute([$feedbackId, $this->accountId]);
+            $value = $stmt->fetchColumn();
+            return $value === 1 || $value === '1' || $value === true;
+        } catch (\Throwable $e) {
+            return false;
         }
     }
 
