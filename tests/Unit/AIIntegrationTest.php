@@ -14,8 +14,12 @@ class AIIntegrationTest extends TestCase
 {
     private function skipIfNoEnvVars(): void
     {
-        if (!isset($_ENV['OPENAI_API_KEY']) && !isset($_ENV['ANTHROPIC_API_KEY'])) {
-            $this->markTestSkipped('No AI API keys configured');
+        $hasRealKey = static function (string $key): bool {
+            $value = (string)($_ENV[$key] ?? getenv($key) ?: '');
+            return $value !== '' && !str_contains($value, 'phpunit-fake-key-not-real');
+        };
+        if (!$hasRealKey('OPENAI_API_KEY') && !$hasRealKey('ANTHROPIC_API_KEY') && !$hasRealKey('GEMINI_API_KEY')) {
+            $this->markTestSkipped('No real AI API keys configured (placeholder keys do not run integration tests)');
         }
     }
 
