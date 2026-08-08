@@ -41,6 +41,19 @@
     --transition-fast: all 0.15s ease;
 }
 
+/* ===== Light Theme =====
+ * body[data-theme=light] must redefine --bg-sidebar: :root keeps a dark
+ * sidebar for legacy layouts, and .sidebar uses background-color !important.
+ */
+[data-theme="light"] {
+    --bg-body: #f8f9fa;
+    --bg-card: #ffffff;
+    --bg-sidebar: #ffffff;
+    --text-color: #212529;
+    --text-muted: #6c757d;
+    --border-color: #dee2e6;
+}
+
 /* ===== Dark Theme ===== */
 [data-theme="dark"] {
     --bg-body: #1a1d29;

@@ -193,7 +193,7 @@ class WhatsAppService
             throw new Exception('Configurações do Twilio incompletas');
         }
 
-        $client = new Client();
+        $client = new Client(['timeout' => 15.0]);
         $url = "https://api.twilio.com/2010-04-01/Accounts/$sid/Messages.json";
 
         // Adicionar + se não tiver
@@ -231,7 +231,7 @@ class WhatsAppService
             throw new Exception('URL da API não configurada');
         }
 
-        $client = new Client();
+        $client = new Client(['timeout' => 15.0]);
 
         try {
             $response = $client->post($url . '/api/' . $session . '/send-message', [

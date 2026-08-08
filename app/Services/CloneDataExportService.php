@@ -735,6 +735,14 @@ class CloneDataExportService
                 'filters_json' => json_encode($filters, JSON_UNESCAPED_UNICODE)
             ]);
         } catch (\Exception $e) {
+            log_warning('Falha ao registrar log de exportação de clone', [
+                'service' => 'CloneDataExportService',
+                'account_id' => $this->accountId,
+                'scope' => $scope,
+                'format' => $format,
+                'filename' => $filename,
+                'error' => $e->getMessage(),
+            ]);
         }
     }
 }

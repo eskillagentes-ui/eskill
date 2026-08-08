@@ -523,6 +523,10 @@ class CloneMonitoringService
             ");
             $legacyPending = (int)$stmt->fetchColumn();
         } catch (\Exception $e) {
+            log_warning('Falha ao contar jobs legados de clone na fila', [
+                'service' => 'CloneMonitoringService',
+                'error' => $e->getMessage(),
+            ]);
         }
 
         try {
@@ -536,6 +540,10 @@ class CloneMonitoringService
             $batchPending = (int)($result['batch_pending'] ?? 0);
             $batchProcessing = (int)($result['batch_processing'] ?? 0);
         } catch (\Exception $e) {
+            log_warning('Falha ao contar jobs batch de clone na fila', [
+                'service' => 'CloneMonitoringService',
+                'error' => $e->getMessage(),
+            ]);
         }
 
         return [

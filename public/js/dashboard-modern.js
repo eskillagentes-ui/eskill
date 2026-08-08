@@ -15,7 +15,7 @@ window.ML = {
      * Formata ML item ID inserindo dash: MLB1234567890 → MLB-1234567890
      * Se já formatado (MLB-123), retorna inalterado.
      */
-    formatItemId: function(id) {
+    formatItemId: function (id) {
         var s = String(id || '').trim();
         if (/^[A-Z]{3}-\d+$/.test(s)) return s;
         var m = s.match(/^([A-Z]{3})(\d+)$/);
@@ -27,7 +27,7 @@ window.ML = {
      * @param {string} id  Item ID (com ou sem dash)
      * @returns {string}   https://produto.mercadolivre.com.br/MLB-1234567890
      */
-    itemUrl: function(id) {
+    itemUrl: function (id) {
         return this.ITEM_BASE_URL + '/' + this.formatItemId(id);
     }
 };
@@ -298,19 +298,19 @@ document.addEventListener('DOMContentLoaded', () => {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         })
-        .then(data => {
-            if (data.results && data.results.length > 0) {
-                displaySearchSuggestions(data.results);
-            } else {
-                // Fallback to local search if no API results
+            .then(data => {
+                if (data.results && data.results.length > 0) {
+                    displaySearchSuggestions(data.results);
+                } else {
+                    // Fallback to local search if no API results
+                    performLocalSearch(query);
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching search suggestions:', error);
+                // Fallback to local search on error
                 performLocalSearch(query);
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching search suggestions:', error);
-            // Fallback to local search on error
-            performLocalSearch(query);
-        });
+            });
     }
 
     function displaySearchSuggestions(results) {
@@ -1890,18 +1890,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         })
-        .then(data => {
-            if (data.success && data.documents) {
-                displayRecentDocuments(data.documents);
-            } else {
-                console.warn('No documents data available');
+            .then(data => {
+                if (data.success && data.documents) {
+                    displayRecentDocuments(data.documents);
+                } else {
+                    console.warn('No documents data available');
+                    displayRecentDocuments([]);
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching recent documents:', error);
                 displayRecentDocuments([]);
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching recent documents:', error);
-            displayRecentDocuments([]);
-        });
+            });
     }
 
     function displayRecentDocuments(documents) {
@@ -2140,16 +2140,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         })
-        .then(data => {
-            if (data.success && data.statistics) {
-                displayUserStatistics(data.statistics);
-            } else {
-                console.warn('No statistics data available');
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching user statistics:', error);
-        });
+            .then(data => {
+                if (data.success && data.statistics) {
+                    displayUserStatistics(data.statistics);
+                } else {
+                    console.warn('No statistics data available');
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching user statistics:', error);
+            });
 
         // Update statistics every 5 minutes
         setInterval(updateUserStatistics, 5 * 60 * 1000);
@@ -2214,14 +2214,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         })
-        .then(data => {
-            if (data.success && data.statistics) {
-                displayUserStatistics(data.statistics);
-            }
-        })
-        .catch(error => {
-            console.error('Error updating user statistics:', error);
-        });
+            .then(data => {
+                if (data.success && data.statistics) {
+                    displayUserStatistics(data.statistics);
+                }
+            })
+            .catch(error => {
+                console.error('Error updating user statistics:', error);
+            });
     }
 
     // Initialize user statistics when DOM is loaded
@@ -2844,14 +2844,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         })
-        .then(data => {
-            if (data.success && data.team) {
-                displayTeamStatuses(data.team);
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching team status:', error);
-        });
+            .then(data => {
+                if (data.success && data.team) {
+                    displayTeamStatuses(data.team);
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching team status:', error);
+            });
     }
 
     function displayTeamStatuses(team) {
@@ -3050,14 +3050,14 @@ document.addEventListener('DOMContentLoaded', () => {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         })
-        .then(data => {
-            if (data.success && data.entries) {
-                displayAuditEntries(data.entries);
-            }
-        })
-        .catch(error => {
-            console.error('Error loading audit trail:', error);
-        });
+            .then(data => {
+                if (data.success && data.entries) {
+                    displayAuditEntries(data.entries);
+                }
+            })
+            .catch(error => {
+                console.error('Error loading audit trail:', error);
+            });
     }
 
     function displayAuditEntries(entries) {
@@ -3066,7 +3066,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         auditContainer.innerHTML = entries.map(entry => {
             const severityClass = entry.severity === 'critical' ? 'danger' :
-                                  entry.severity === 'warning' ? 'warning' : 'info';
+                entry.severity === 'warning' ? 'warning' : 'info';
             return `
                 <div class="audit-entry audit-${entry.severity}">
                     <i class="bi bi-${entry.icon} text-${severityClass}"></i>
@@ -3581,31 +3581,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         })
-        .then(data => {
-            if (data.success && data.notifications) {
-                // Calculate priorities for each notification
-                const notifications = data.notifications.map(notification => {
-                    // Convert timestamp string to Date object if needed
-                    if (typeof notification.timestamp === 'string') {
-                        notification.timestamp = new Date(notification.timestamp);
-                    }
-                    notification.priorityScore = calculateNotificationPriority(notification);
-                    return notification;
-                });
+            .then(data => {
+                if (data.success && data.notifications) {
+                    // Calculate priorities for each notification
+                    const notifications = data.notifications.map(notification => {
+                        // Convert timestamp string to Date object if needed
+                        if (typeof notification.timestamp === 'string') {
+                            notification.timestamp = new Date(notification.timestamp);
+                        }
+                        notification.priorityScore = calculateNotificationPriority(notification);
+                        return notification;
+                    });
 
-                // Sort by priority score (highest first)
-                notifications.sort((a, b) => b.priorityScore - a.priorityScore);
+                    // Sort by priority score (highest first)
+                    notifications.sort((a, b) => b.priorityScore - a.priorityScore);
 
-                displaySmartNotifications(notifications);
-            } else {
-                console.warn('No notifications data available');
+                    displaySmartNotifications(notifications);
+                } else {
+                    console.warn('No notifications data available');
+                    displaySmartNotifications([]);
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching smart notifications:', error);
                 displaySmartNotifications([]);
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching smart notifications:', error);
-            displaySmartNotifications([]);
-        });
+            });
     }
 
     function displaySmartNotifications(notifications) {
@@ -4166,18 +4166,18 @@ document.addEventListener('DOMContentLoaded', () => {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         })
-        .then(data => {
-            if (data.success && data.insights) {
-                displayAiInsights(data.insights);
-            } else {
-                console.warn('No AI insights data available');
+            .then(data => {
+                if (data.success && data.insights) {
+                    displayAiInsights(data.insights);
+                } else {
+                    console.warn('No AI insights data available');
+                    displayAiInsights([]);
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching AI insights:', error);
                 displayAiInsights([]);
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching AI insights:', error);
-            displayAiInsights([]);
-        });
+            });
     }
 
     // Display AI insights
@@ -4594,21 +4594,21 @@ document.addEventListener('DOMContentLoaded', () => {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         })
-        .then(data => {
-            if (data.success && data.predictions) {
-                displaySearchPredictions(data.predictions);
-            } else {
-                // Fallback to local search
+            .then(data => {
+                if (data.success && data.predictions) {
+                    displaySearchPredictions(data.predictions);
+                } else {
+                    // Fallback to local search
+                    const localPredictions = generateLocalPredictions(query);
+                    displaySearchPredictions(localPredictions);
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching predictions:', error);
+                // Fallback to local search on error
                 const localPredictions = generateLocalPredictions(query);
                 displaySearchPredictions(localPredictions);
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching predictions:', error);
-            // Fallback to local search on error
-            const localPredictions = generateLocalPredictions(query);
-            displaySearchPredictions(localPredictions);
-        });
+            });
     }
 
     // Generate local predictions as fallback
@@ -5290,16 +5290,16 @@ document.addEventListener('DOMContentLoaded', () => {
                 'X-Requested-With': 'XMLHttpRequest'
             }
         })
-        .then(data => {
-            if (data.success && data.analytics) {
-                displaySystemAnalytics(data.analytics);
-            } else {
-                console.warn('No system analytics data available');
-            }
-        })
-        .catch(error => {
-            console.error('Error fetching system analytics:', error);
-        });
+            .then(data => {
+                if (data.success && data.analytics) {
+                    displaySystemAnalytics(data.analytics);
+                } else {
+                    console.warn('No system analytics data available');
+                }
+            })
+            .catch(error => {
+                console.error('Error fetching system analytics:', error);
+            });
     }
 
     // Display system analytics

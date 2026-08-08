@@ -175,3 +175,71 @@ if (!function_exists('collect')) {
         return \App\Core\Collection::make($items);
     }
 }
+
+// ─── deduplicate_items() ─────────────────────────────────────────────────
+
+if (!function_exists('deduplicate_items')) {
+    /**
+     * Deduplicates a list of items while preserving the first-seen order by default.
+     *
+     * Each item is normalized via a callback when provided, otherwise the raw value
+     * is converted to string, trimmed, and lower-cased for comparison.
+     *
+     * @template T
+     * @param array<int, T> $items
+     * @param (callable(T): string)|null $normalizer
+     * @param bool $preserveFirstOccurrence
+     * @return array<int, T>
+     */
+    function deduplicate_items(array $items, ?callable $normalizer = null, bool $preserveFirstOccurrence = true): array
+    {
+        if ($items === []) {
+            return [];
+        }
+
+        $seen = [];
+        $result = [];
+
+        foreach ($items as $item) {
+            if ($item === null) {
+                continue;
+            }
+
+            $candidate = $normalizer !== null ? $normalizer($item) : $item;
+            $normalized = is_string($candidate) ? $candidate : (string) $candidate;
+            $normalized = trim($normalized);
+            $normalized = strtolower($normalized);
+
+            if ($normalized === '') {
+                continue;
+            }
+
+            if (array_key_exists($normalized, $seen)) {
+                if ($preserveFirstOccurrence) {
+                    continue;
+                }
+
+                $index = $seen[$normalized];
+                if ($index !== null && isset($result[$index])) {
+                    unset($result[$index]);
+                    $result = array_values($result);
+
+                    foreach ($seen as $key => $value) {
+                        if ($key !== $normalized && $value > $index) {
+                            $seen[$key] = $value - 1;
+                        }
+                    }
+                }
+
+                $seen[$normalized] = count($result);
+                $result[] = $item;
+                continue;
+            }
+
+            $seen[$normalized] = count($result);
+            $result[] = $item;
+        }
+
+        return $result;
+    }
+}

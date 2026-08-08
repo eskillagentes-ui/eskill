@@ -1,7 +1,7 @@
 'use strict';
 
 if (typeof window.Chart === 'undefined') {
-    (function() {
+    (function () {
         const script = document.createElement('script');
         script.src = 'https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.7/chart.umd.min.js';
         document.head.appendChild(script);
@@ -28,7 +28,7 @@ if (typeof window.requestJson !== 'function') {
 }
 
 window.Toast = {
-    notify: function(message, type = 'info') {
+    notify: function (message, type = 'info') {
         const container = document.querySelector('.toast-container');
         if (!container || !window.bootstrap || !bootstrap.Toast) {
             return;
@@ -60,14 +60,14 @@ window.Toast = {
         toast.show();
         toastEl.addEventListener('hidden.bs.toast', () => toastEl.remove());
     },
-    success: function(msg) { window.Toast.notify(msg, 'success'); },
-    error: function(msg) { window.Toast.notify(msg, 'error'); },
-    warning: function(msg) { window.Toast.notify(msg, 'warning'); },
-    info: function(msg) { window.Toast.notify(msg, 'info'); },
+    success: function (msg) { window.Toast.notify(msg, 'success'); },
+    error: function (msg) { window.Toast.notify(msg, 'error'); },
+    warning: function (msg) { window.Toast.notify(msg, 'warning'); },
+    info: function (msg) { window.Toast.notify(msg, 'info'); },
 };
 
 window.Loading = {
-    show: function(text = 'Carregando...') {
+    show: function (text = 'Carregando...') {
         const loader = document.getElementById('pageLoader');
         const loaderText = loader ? loader.querySelector('.loader-text') : null;
         if (loaderText) {
@@ -78,14 +78,14 @@ window.Loading = {
         }
     },
 
-    hide: function() {
+    hide: function () {
         const loader = document.getElementById('pageLoader');
         if (loader) {
             loader.classList.remove('active');
         }
     },
 
-    bar: function(show = true) {
+    bar: function (show = true) {
         const bar = document.getElementById('loadingBar');
         if (!bar) {
             return;
@@ -99,7 +99,7 @@ window.Loading = {
         }
     },
 
-    progress: function(percent) {
+    progress: function (percent) {
         const bar = document.getElementById('loadingBar');
         if (!bar) {
             return;
@@ -109,7 +109,7 @@ window.Loading = {
         bar.style.width = percent + '%';
     },
 
-    button: function(btn, loading = true) {
+    button: function (btn, loading = true) {
         const element = typeof btn === 'string' ? document.querySelector(btn) : btn;
         if (!element) {
             return;
@@ -124,7 +124,7 @@ window.Loading = {
         }
     },
 
-    card: function(card, loading = true) {
+    card: function (card, loading = true) {
         const element = typeof card === 'string' ? document.querySelector(card) : card;
         if (!element) {
             return;
@@ -137,7 +137,7 @@ window.Loading = {
         }
     },
 
-    inline: function() {
+    inline: function () {
         return '<span class="inline-loader"><span class="dot"></span><span class="dot"></span><span class="dot"></span></span>';
     },
 };
@@ -222,7 +222,7 @@ async function switchAccount(accountId) {
     }
 }
 
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('themeLight')?.addEventListener('click', () => setTheme('light'));
     document.getElementById('themeDark')?.addEventListener('click', () => setTheme('dark'));
 
@@ -299,9 +299,17 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     showFlashMessagesFromData();
+
+    // PATCH 6/8: enhancements do DRE/caixa do ledger (financials.php é root-owned)
+    if (/^\/dashboard\/financials\/?$/.test(window.location.pathname)) {
+        const s = document.createElement('script');
+        s.src = '/js/financial-ledger-enhancements.js?v=' + Date.now();
+        s.defer = true;
+        document.head.appendChild(s);
+    }
 });
 
-document.addEventListener('submit', function(event) {
+document.addEventListener('submit', function (event) {
     const form = event.target;
     const submitBtn = form.querySelector('[type="submit"]');
     if (submitBtn && !submitBtn.classList.contains('no-loading')) {
@@ -309,14 +317,14 @@ document.addEventListener('submit', function(event) {
     }
 });
 
-document.addEventListener('click', function(event) {
+document.addEventListener('click', function (event) {
     const link = event.target.closest('a[href]:not([target="_blank"]):not([href^="#"]):not([href^="javascript"])');
     if (link && !link.classList.contains('no-loading')) {
         window.Loading.bar(true);
     }
 });
 
-document.addEventListener('click', function(event) {
+document.addEventListener('click', function (event) {
     const button = event.target.closest('[data-switch-account-id]');
     if (!button || button.disabled) {
         return;
