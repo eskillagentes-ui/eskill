@@ -201,7 +201,7 @@
             "category": "pricing",
             "passes": false,
             "priority": "P1",
-            "notes": "F0 implementada 2026-08-08 (7feee073): simulação read-only + tetos + CLI. F1 parcial: 5 fixtures staging 1336 com auto_reprice=1 e pipeline validado até dados de mercado; end-to-end bloqueado no OAuth ML staging (pré-req humano, docs/ops/STAGING.md)."
+            "notes": "F0 OK. F1 2026-08-09: DNS+HTTPS+app OAuth dedicada staging OK; porém OAuth conectou por engano a MESMA conta real FACILYTY (ml_user_id=3058804121, prod id=1335) sob novo id staging 1337 — desativada imediatamente, zero escrita ocorreu. Falta dono conectar conta de teste genuinamente distinta da produção. pregao-tick-staging continua disabled."
         },
         {
             "id": "apply-ml-1335-tech-sheet",

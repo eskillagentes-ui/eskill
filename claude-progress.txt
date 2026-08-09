@@ -1,3 +1,62 @@
+## 2026-08-09 (14ª parte) — ALERTA: OAuth staging conectou a conta real FACILYTY (1335) por engano
+
+- OAuth com a app dedicada (`4716547571285773`) funcionou tecnicamente: `OAuth callback success` às 20:16:12, criou `ml_accounts.id=1337` no staging.
+- **PROBLEMA CRÍTICO**: `ml_user_id=3058804121` / nickname `FACILYTY` é a MESMA conta real do Mercado Livre que já está cadastrada em produção como `ml_accounts.id=1335` (confirmado por query cruzada). ID interno diferente (1337 vs 1335) mas é o mesmo vendedor real — qualquer escrita de preço "no staging" para essa conta afetaria anúncios reais em produção.
+- Isso violou a instrução explícita do prompt aprovado e do STAGING.md ("conectar conta ≠1335") — o usuário logou no OAuth com a conta principal errada (a de produção, não uma conta de teste separada).
+- **Ação de contenção imediata**: `ml_accounts.status` da conta 1337 setado para `inactive` no staging; `users.active_ml_account_id` limpo se apontava para ela. Confirmado: `PREGAO_ACCOUNT_ID` continuava `0` (guard do tick já bloquearia); zero itens com `auto_reprice=1` associados a 1335/1337 no staging; nenhuma escrita de preço ocorreu.
+- **Pendente**: dono precisa conectar uma conta de teste DIFERENTE da FACILYTY/1335 (outro CPF/CNPJ vendedor, não colaborador da mesma conta). Repeti a explicação de "conta principal" mas o usuário aparentemente só tem acesso à conta de produção real.
+- F1 do repricing continua bloqueada — não por infra agora, mas por falta de uma conta ML de teste genuinamente separada da produção.
+
+---
+
+## 2026-08-09 (13ª parte) — Staging passou a usar app ML dedicada
+
+- `.env` staging: `ML_APP_ID`/`ML_CLIENT_ID` = `4716547571285773` (app dedicada), `ML_REDIRECT_URI=https://staging.eskill.com.br/auth/callback`.
+- Produção permanece na app antiga `1643774977535598` (não alterada).
+- `getOAuthConfigDiagnostics()` staging → ready=true.
+- Fixture `1336` segue inactive; aguarda OAuth real com a app nova (conta principal, redirect cadastrado nessa app).
+
+---
+
+## 2026-08-09 (12ª parte) — Staging DNS+HTTPS no ar; OAuth ML ainda pendente
+
+- DNS público: `staging.eskill.com.br` → `72.62.14.91` (Registro.br NS).
+- TLS: certbot emitiu LE para `staging.eskill.com.br` (válido até 2026-11-07); `https://staging.eskill.com.br/api/health` → 200.
+- Isolamento: `deploy_staging.sh --check` OK.
+- Bloqueio restante Fase 1: OAuth ML conta ≠1335 + `PREGAO_ACCOUNT_ID` (hoje `0`; só fixture `1336`). `pregao-tick-staging` continua disabled.
+- ml-health-check ainda falha probes de reachability ML (HTTP 403 em auth/api externos) + `/users/me` no fixture; callback HTTPS staging responde 302.
+
+---
+
+## 2026-08-09 (11ª parte) — Repricing F1 staging: pipeline pronto, bloqueio humano OAuth/DNS
+
+### Objetivo
+Destravar Fase 1 do repricing automático (prompt aprovado `.github/prompts/repricing-automatico.prompt.md`) sem tocar produção 1335.
+
+### Feito
+- `bash scripts/deploy_staging.sh --check`: isolamento OK (Redis DB1, MySQL `eskill_staging`, health Host=staging→200).
+- Permissões `storage/locks` + `storage/reports` staging corrigidas via `clpctl system:permissions:reset` (estavam root:root e bloqueavam simulação).
+- `php bin/reprice-simulate.php --account=1336 --limit=5`: 5 candidatos, 0 apply, todos `skip: market_min_invalido` (fixtures sem mercado real).
+- 5 itens já opt-in: `MLBSTG00000001`–`05` com `auto_reprice=1` (demais fixtures 0).
+- Staging `ai_agents`: registro `sniper` status=`active` (id=4).
+- Enfileirados `run_agent` jobs `#114696` e `#114697` (account_id=1336); processados com `php bin/jobs-once-worker.php --type=run_agent` **no path staging** → `completed` / `success=true`.
+- Preços locais inalterados após 2 runs (sem dados de mercado + token fixture fake) — confirma que não houve escrita fantasma.
+- E2E staging (`PLAYWRIGHT_BASE_URL=http://staging.eskill.com.br`): **96 passed / 16 skipped / 0 failed** (Chromium instalado via `npx playwright install chromium`).
+
+### Bloqueio humano (F1 end-to-end de escrita ML ainda NÃO verde)
+1. DNS público: `staging.eskill.com.br` A → `72.62.14.91` (hoje só `/etc/hosts`→127.0.0.1; dig público vazio).
+2. CloudPanel/TLS: emitir cert e habilitar 443 (`config/nginx/staging.eskill.com.br.conf`).
+3. OAuth ML: cadastrar `https://staging.eskill.com.br/auth/callback`, conectar conta **≠1335** (substituir fixture `1336` / `STAGING_UI_FIXTURE`).
+4. `.env` staging: `PREGAO_ACCOUNT_ID=<id real>`; nunca 1335.
+5. `systemctl enable --now pregao-tick-staging` (root).
+6. Observação operacional: cron `jobs-once-worker` do user `eskill` aponta só para **prod** — jobs staging precisam de one-shot no path staging (ou cron staging separado no futuro; fora deste escopo).
+
+### Status
+- `project-status.json` → `repricing-automatico.passes` permanece `false` (escrita ML staging ainda bloqueada por OAuth/DNS).
+- Produção 1335: zero escrita; `SAFE_MODE=true`, `FORBIDDEN_ACCOUNTS=1335`, `ML_WRITE_AUTOMATION=false`.
+
+---
+
 ## 2026-08-09 (10ª parte) — SEO Killer: descrição, engajamento e pesos rebalanceados
 
 ### SEOScoreCalculator.php — 4 melhorias adicionais
