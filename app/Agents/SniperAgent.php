@@ -20,6 +20,39 @@ class SniperAgent extends BaseAgent
         $this->dryRun = $dryRun;
     }
 
+    /**
+     * Regra pura de decisão de preço do Sniper (sem I/O):
+     * undercut do concorrente mais barato em R$ 0,10, respeitando piso/teto do item.
+     *
+     * Extraída para reuso pelo RepriceSimulationService (Fase 0 — repricing automático),
+     * que calcula o preço sugerido sem escrever nada.
+     */
+    public static function computeTargetPrice(float $myPrice, float $marketMin, float $minAllowed, float $maxAllowed = 0.0): float
+    {
+        // Strategy: Undercut cheapest competitor by R$ 0.10
+        $targetPrice = $marketMin - 0.10;
+
+        // Ensure we don't go below our floor
+        if ($targetPrice < $minAllowed) {
+            $targetPrice = $minAllowed;
+        }
+
+        // Ensure we don't go above ceiling (if defined)
+        if ($maxAllowed > 0 && $targetPrice > $maxAllowed) {
+            $targetPrice = $maxAllowed;
+        }
+
+        return $targetPrice;
+    }
+
+    /**
+     * Regra pura: só vale atualizar se a diferença for maior que R$ 0,05.
+     */
+    public static function requiresPriceChange(float $myPrice, float $targetPrice): bool
+    {
+        return abs($myPrice - $targetPrice) > 0.05;
+    }
+
     public function run(): void
     {
         $this->scanForOpportunities();
@@ -87,21 +120,11 @@ class SniperAgent extends BaseAgent
                      continue;
                 }
 
-                // Strategy: Undercut cheapest competitor by R$ 0.10
-                $targetPrice = $marketMin - 0.10; 
+                // Strategy: Undercut cheapest competitor by R$ 0.10 (regra pura extraída)
+                $targetPrice = self::computeTargetPrice($myPrice, $marketMin, $minAllowed, $maxAllowed);
 
-                // Ensure we don't go below our floor
-                if ($targetPrice < $minAllowed) {
-                    $targetPrice = $minAllowed;
-                }
-
-                // Ensure we don't go above ceiling (if defined)
-                if ($maxAllowed > 0 && $targetPrice > $maxAllowed) {
-                    $targetPrice = $maxAllowed;
-                }
-                
                 // Check if update is needed (diff > 0.05)
-                if (abs($myPrice - $targetPrice) > 0.05) {
+                if (self::requiresPriceChange($myPrice, $targetPrice)) {
                     
                     if ($targetPrice < $myPrice) {
                         // Lowering price to compete

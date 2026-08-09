@@ -235,6 +235,8 @@
             <file>tests/Unit/Services/MercadoLivre/MlOrderAuditServiceTest.php</file>
             <!-- ML-BLG-061: Analytics e Pricing Avançado (feature flags) -->
             <file>tests/Unit/Services/MercadoLivre/MlAdvancedFeaturesServiceTest.php</file>
+            <!-- Repricing automático Fase 0: simulação read-only (DB-free, SQLite in-memory) -->
+            <file>tests/Unit/Services/Pricing/RepriceSimulationServiceTest.php</file>
         </testsuite>
         <testsuite name="Integration">
             <directory>tests/Integration</directory>
