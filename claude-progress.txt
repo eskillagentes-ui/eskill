@@ -1,3 +1,10 @@
+## 2026-08-08 (7ª parte) — Repricing Fase 1 parcial em staging (aprovada pelo dono)
+
+- Deploy staging (`scripts/deploy_staging.sh`) com o código F0; isolamento Redis DB1/MySQL eskill_staging OK.
+- 5 fixtures (MLBSTG00000001..05) marcados `auto_reprice=1` + `cost_price` (80%) + `min_price`/`max_price`.
+- Simulação validou guards em camadas: 1º `min_price_nao_definido` → (corrigido) → 2º `market_min_invalido` (search ML via staging retorna 0 — sem OAuth da conta 1336). Zero escrita, degradação graceful correta.
+- **Bloqueio F1 end-to-end**: OAuth ML staging não conectado (pré-req humano #3 de docs/ops/STAGING.md). Com OAuth, re-rodar `bin/reprice-simulate.php --account=1336` deve produzir sugestões reais.
+
 ## 2026-08-08 (6ª parte) — Repricing Fase 0 implementada (simulação read-only)
 
 - `RepriceSimulationService` + CLI `bin/reprice-simulate.php --account=ID [--limit=N] [--json]`: calcula preço sugerido pela regra pura extraída do SniperAgent (`computeTargetPrice`/`requiresPriceChange` — comportamento idêntico, SniperAgentDryRunTest 2/2), sem escrever nada.

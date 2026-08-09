@@ -200,7 +200,7 @@
             "category": "pricing",
             "passes": false,
             "priority": "P1",
-            "notes": "Prompt aprovado 2026-08-08; Fase 0 (simulação read-only) em implementação."
+            "notes": "F0 implementada 2026-08-08 (7feee073): simulação read-only + tetos + CLI. F1 parcial: 5 fixtures staging 1336 com auto_reprice=1 e pipeline validado até dados de mercado; end-to-end bloqueado no OAuth ML staging (pré-req humano, docs/ops/STAGING.md)."
         },
         {
             "id": "apply-ml-1335-tech-sheet",
