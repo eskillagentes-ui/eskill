@@ -45,6 +45,14 @@ class ItemService
             $offset = ($page - 1) * $limit;
         }
 
+        // Opt-in explícito: widgets de dashboard (ex.: SEO Killer Top Performers)
+        // devem ler o cache local sem 50x GET /items na ML.
+        if (!empty($filters['source']) && $filters['source'] === 'local') {
+            return $this->listItemsFromLocalCache($filters, $limit, $page, $offset, [
+                'reason' => 'source_local',
+            ]);
+        }
+
         $sellerId = $this->getSellerIdFromAccount();
         if (!$sellerId) {
             // Como fallback, tenta /users/me (exige token). Se não houver token, continuará null.
@@ -444,7 +452,8 @@ class ItemService
             }
 
             $itemData = array_merge($rawData, [
-                'id' => $row['id'],
+                'id' => $row['ml_item_id'] ?: ($rawData['id'] ?? (string) $row['id']),
+                'ml_item_id' => $row['ml_item_id'] ?? null,
                 'title' => $row['title'],
                 'price' => isset($row['price']) ? (float)$row['price'] : null,
                 'available_quantity' => isset($row['available_quantity']) ? (int)$row['available_quantity'] : 0,
@@ -1713,23 +1722,37 @@ class ItemService
             // Should contain buy_box_winner
             $winner = $product['buy_box_winner'] ?? null;
 
-            $myPrice = 0; // Need to fetch my item linked to this catalog_id separately if not known
-            // Ideally we pass my_item_price as arg, but for now we look up db or trust caller
-
             $sellerId = $this->getSellerIdFromAccount();
             if (!$sellerId) {
                 $sellerId = $this->client->getSellerId();
+            }
+
+            // Correção de bug: quando a API não retorna buy_box_winner (produto sem
+            // disputa de catálogo ativa, ou sem outros vendedores), o código anterior
+            // sempre fabricava um objeto {price: 0, seller_id: 0}. Isso fazia a UI
+            // reportar "Perdendo" com preço-para-vencer R$0,00 mesmo sem nenhuma
+            // disputa real. Agora, sem winner real, retornamos null/desconhecido
+            // explicitamente em vez de inventar um concorrente com preço zero.
+            if (!is_array($winner) || !isset($winner['price'])) {
+                return [
+                    'id' => $catalogId,
+                    'title' => $product['name'] ?? 'Unknown',
+                    'buy_box_winner' => null,
+                    'is_winner' => null,
+                    'price_to_win' => null,
+                    'status' => 'no_active_competition',
+                ];
             }
 
             return [
                 'id' => $catalogId,
                 'title' => $product['name'] ?? 'Unknown',
                 'buy_box_winner' => [
-                    'price' => $winner['price'] ?? 0,
+                    'price' => $winner['price'],
                     'seller_id' => $winner['seller_id'] ?? 0
                 ],
-                'is_winner' => $sellerId ? ((string)($winner['seller_id'] ?? '') === (string)$sellerId) : false,
-                'price_to_win' => isset($winner['price']) ? $winner['price'] - 0.01 : 0
+                'is_winner' => $sellerId ? ((string)($winner['seller_id'] ?? '') === (string)$sellerId) : null,
+                'price_to_win' => max(0, round($winner['price'] - 0.01, 2)),
             ];
         } catch (\Exception $e) {
             // Fallback for demo or if scope missing

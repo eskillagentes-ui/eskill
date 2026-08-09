@@ -260,9 +260,15 @@ class AdvancedSEOMaximizerTest extends TestCase
 
     public function testScoreImagesSixOrMoreGivesMaxScore(): void
     {
-        $images = array_fill(0, 6, ['url' => 'https://example.com/img.jpg']);
+        // Imagens com size ≥ 800px (menor dimensão) são classificadas como alta
+        // resolução. O campo 'size' é o que a API ML retorna nos objetos de imagem.
+        $images = array_fill(0, 6, [
+            'url'      => 'https://img.mlstatic.com/D_MLB1234-O.jpg',
+            'size'     => '1200x900',
+            'max_size' => '1200x900',
+        ]);
         $score  = $this->invoke('scoreImages', $images);
-        $this->assertSame(100, $score, '6 imagens + todas high-res deve dar score 100');
+        $this->assertSame(100, $score, '6 imagens alta resolução deve dar score 100');
     }
 
     public function testScoreImagesMoreIsBetter(): void

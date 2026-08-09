@@ -1220,8 +1220,8 @@ async function submitKeywords(e) {
                 </div>
                 <div class="col-md-6">
                     <div class="result-item text-center py-4">
-                        <div class="text-muted small mb-2">VOLUME ESTIMADO</div>
-                        <h4 class="fw-bold text-success mb-0">${d.search_volume || 'Alto'}</h4>
+                        <div class="text-muted small mb-2">ESTRATÉGIA RECOMENDADA</div>
+                        <h4 class="fw-bold text-success mb-0" style="font-size:1rem;">${d.recommended_strategy || '-'}</h4>
                     </div>
                 </div>
             </div>

@@ -218,7 +218,9 @@ class TrendsService extends MercadoLivreClient
 
                     $months[] = [
                         'month' => $month,
-                        'search_volume' => $volume,
+                        // Sinal de magnitude do mês; ver 'data_source' no retorno de
+                        // analyzeSeasonality() para saber se veio de vendas reais ou estimativa.
+                        'volume_signal' => $volume,
                         'seasonal_factor' => round($seasonalFactor, 2),
                     ];
                 }
@@ -271,7 +273,7 @@ class TrendsService extends MercadoLivreClient
         }
 
         $last = $months[count($months) - 1] ?? [];
-        $volume = (int)($last['search_volume'] ?? 0);
+        $volume = (int)($last['volume_signal'] ?? 0);
 
         // Trend simples: comparar média dos últimos 3 meses vs 3 anteriores
         $trend = 'stable';
@@ -279,8 +281,8 @@ class TrendsService extends MercadoLivreClient
             $recent = array_slice($months, -3);
             $prev = array_slice($months, -6, 3);
 
-            $recentAvg = array_sum(array_column($recent, 'search_volume')) / max(1, count($recent));
-            $prevAvg = array_sum(array_column($prev, 'search_volume')) / max(1, count($prev));
+            $recentAvg = array_sum(array_column($recent, 'volume_signal')) / max(1, count($recent));
+            $prevAvg = array_sum(array_column($prev, 'volume_signal')) / max(1, count($prev));
 
             if ($prevAvg > 0) {
                 $delta = (($recentAvg - $prevAvg) / $prevAvg) * 100;
@@ -349,7 +351,10 @@ class TrendsService extends MercadoLivreClient
 
                 return [
                     'month' => $row['month'],
-                    'search_volume' => (int)$row['total_sales'], // Usamos vendas como proxy
+                    // Correção de metodologia: era chamado de "search_volume" mas o dado real
+                    // é histórico de vendas (total_sales), não busca. Renomeado para não sugerir
+                    // medição de demanda de pesquisa que o ML não expõe.
+                    'volume_signal' => (int)$row['total_sales'],
                     'order_count' => (int)$row['order_count'],
                     'avg_price' => round((float)$row['avg_price'], 2),
                     'seasonal_factor' => $factor,
@@ -400,7 +405,8 @@ class TrendsService extends MercadoLivreClient
 
                 return [
                     'month' => $row['month'],
-                    'search_volume' => (int)$row['order_count'],
+                    // Correção de metodologia: dado real é contagem de pedidos, não busca.
+                    'volume_signal' => (int)$row['order_count'],
                     'revenue' => round((float)$row['total_revenue'], 2),
                     'seasonal_factor' => $factor,
                 ];
@@ -421,7 +427,7 @@ class TrendsService extends MercadoLivreClient
 
         // Comparar últimos 6 meses com mesmos meses do ano anterior
         $recentMonths = array_slice($months, -6);
-        $recentTotal = array_sum(array_column($recentMonths, 'search_volume'));
+        $recentTotal = array_sum(array_column($recentMonths, 'volume_signal'));
 
         // Buscar dados do mesmo período do ano anterior
         try {
@@ -622,7 +628,7 @@ class TrendsService extends MercadoLivreClient
 
     private function detectSeasonalPattern(array $months): string
     {
-        $volumes = array_column($months, 'search_volume');
+        $volumes = array_column($months, 'volume_signal');
         $maxVolume = max($volumes);
         $minVolume = min($volumes);
         $variance = $maxVolume / ($minVolume ?: 1);
@@ -635,22 +641,22 @@ class TrendsService extends MercadoLivreClient
     private function findPeakMonths(array $months): array
     {
         $sorted = $months;
-        usort($sorted, fn($a, $b) => $b['search_volume'] <=> $a['search_volume']);
+        usort($sorted, fn($a, $b) => $b['volume_signal'] <=> $a['volume_signal']);
 
         return array_slice(array_map(fn(array $m): array => [
             'month' => date('F', strtotime($m['month'])),
-            'volume' => $m['search_volume'],
+            'volume' => $m['volume_signal'],
         ], $sorted), 0, 3);
     }
 
     private function findLowMonths(array $months): array
     {
         $sorted = $months;
-        usort($sorted, fn($a, $b) => $a['search_volume'] <=> $b['search_volume']);
+        usort($sorted, fn($a, $b) => $a['volume_signal'] <=> $b['volume_signal']);
 
         return array_slice(array_map(fn(array $m): array => [
             'month' => date('F', strtotime($m['month'])),
-            'volume' => $m['search_volume'],
+            'volume' => $m['volume_signal'],
         ], $sorted), 0, 3);
     }
 

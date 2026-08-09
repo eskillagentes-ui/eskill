@@ -33,8 +33,14 @@ class RealIntegrationsStructureTest extends TestCase
     {
         $class = \App\Services\AI\SEO\KeywordKiller::class;
 
-        $this->assertTrue(method_exists($class, 'estimateVolumes'), 'Deve ter estimateVolumes');
-        $this->assertTrue(method_exists($class, 'estimateVolumeHeuristic'), 'Deve ter fallback estimateVolumeHeuristic');
+        // Correção de metodologia: "estimateVolumes"/"estimateVolumeHeuristic" foram
+        // removidos porque fabricavam um número de "volume de busca" (7% da oferta,
+        // ou heurística por tamanho da palavra) sem nenhuma base real. O Mercado Livre
+        // não expõe volume de busca via API pública. Substituído por
+        // "analyzeKeywordSupply", que reporta apenas dados reais (total de anúncios
+        // concorrentes) e não fabrica um "fallback" quando a API falha.
+        $this->assertTrue(method_exists($class, 'analyzeKeywordSupply'), 'Deve ter analyzeKeywordSupply');
+        $this->assertTrue(method_exists($class, 'classifyCompetitionFromListings'), 'Deve classificar competição a partir de dados reais');
     }
 
     // =============================

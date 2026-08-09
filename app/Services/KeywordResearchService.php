@@ -176,37 +176,86 @@ class KeywordResearchService
     }
 
     /**
-     * Calcula volume de busca estimado
+     * Analisa oferta/competição real de uma keyword via API do Mercado Livre.
+     *
+     * Correção de metodologia: a versão anterior calculava "monthly_volume" a
+     * partir do comprimento da palavra-chave (2000 - length*50) — um número
+     * inventado, sem nenhuma base em dados reais de busca. O Mercado Livre não
+     * expõe volume de busca via API pública. Este método agora consulta o total
+     * real de anúncios concorrentes (oferta) e reporta apenas isso, mantendo
+     * 'monthly_volume' apenas por compatibilidade de schema (sempre null quando
+     * não há dado real, nunca mais fabricado).
      */
     public function estimateSearchVolume(string $keyword, ?string $categoryId = null): array
     {
-        $length = max(1, mb_strlen($keyword));
-        $baseVolume = max(50, 2000 - ($length * 50));
+        $totalListings = $this->getTotalListings($keyword, $categoryId);
 
         return [
             'keyword' => $keyword,
             'category_id' => $categoryId,
-            'monthly_volume' => $baseVolume,
-            'competition' => $this->estimateCompetition($keyword),
+            // Dado real da API ML: quantos anúncios competem por este termo (oferta, não demanda).
+            'total_listings' => $totalListings,
+            // Mantido por compatibilidade retroativa de schema — não é mais fabricado.
+            // Sempre null: não existe dado real de volume de busca disponível.
+            'monthly_volume' => null,
+            'competition' => $totalListings !== null
+                ? $this->classifyCompetitionFromListings($totalListings)
+                : 'desconhecida',
+            'data_source' => $totalListings !== null ? 'ml_search_api' : 'unavailable',
             'trend' => 0
         ];
     }
 
     /**
-     * Retorna keywords com score de competição
+     * Retorna keywords com competição real (baseada em total de anúncios concorrentes).
      */
     public function getWithCompetitionScore(array $keywords): array
     {
         $result = [];
 
         foreach ($keywords as $keyword) {
+            $totalListings = $this->getTotalListings($keyword, null);
             $result[] = [
                 'keyword' => $keyword,
-                'competition_score' => $this->estimateCompetition($keyword)
+                'total_listings' => $totalListings,
+                'competition_score' => $totalListings !== null
+                    ? $this->classifyCompetitionFromListings($totalListings)
+                    : 'desconhecida',
             ];
         }
 
         return $result;
+    }
+
+    /**
+     * Consulta o total real de anúncios concorrentes para uma keyword via API ML.
+     */
+    private function getTotalListings(string $keyword, ?string $categoryId): ?int
+    {
+        try {
+            $params = ['q' => $keyword, 'limit' => 1];
+            if (!empty($categoryId)) {
+                $params['category'] = $categoryId;
+            }
+            $response = $this->client->get("/sites/{$this->siteId}/search", $params);
+            return isset($response['paging']['total']) ? (int)$response['paging']['total'] : null;
+        } catch (\Exception $e) {
+            return null;
+        }
+    }
+
+    /**
+     * Classifica competição a partir do total real de anúncios concorrentes.
+     */
+    private function classifyCompetitionFromListings(int $totalListings): string
+    {
+        if ($totalListings >= 500) {
+            return 'high';
+        }
+        if ($totalListings >= 50) {
+            return 'medium';
+        }
+        return 'low';
     }
 
     /**
@@ -309,14 +358,4 @@ class KeywordResearchService
         return 'suporte';
     }
 
-    /**
-     * Estimate competition for a keyword
-     */
-    private function estimateCompetition(string $keyword): float
-    {
-        $length = max(1, mb_strlen($keyword));
-        $genericPenalty = $length < 6 ? 0.9 : 0.6;
-        $score = 1 / ($length * 0.15 + 0.7);
-        return min(1.0, round($score * $genericPenalty, 2));
-    }
 }

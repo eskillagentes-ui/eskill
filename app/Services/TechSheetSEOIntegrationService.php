@@ -609,6 +609,10 @@ class TechSheetSEOIntegrationService
             $versioning = new \App\Services\SEO\VersioningService($this->accountId);
             $versionId = $versioning->createSnapshot($itemId, 'title', $beforeData, $afterData, $changedBy, $userId);
 
+            // Governança: escrita real na API ML respeita SAFE_MODE/FORBIDDEN_ACCOUNTS
+            // (mesmo guard usado em HiddenSeoSuggester/TechSheetService::applyApproved).
+            (new \App\Services\HiddenSeo\SafetyGuard())->assertCanApply($this->accountId, false, true);
+
             $updated = $this->mlClient->put("/items/{$itemId}", [
                 'title' => $title,
             ]);
@@ -670,6 +674,10 @@ class TechSheetSEOIntegrationService
 
             $versioning = new \App\Services\SEO\VersioningService($this->accountId);
             $versionId = $versioning->createSnapshot($itemId, 'description', $beforeData, $afterData, $changedBy, $userId);
+
+            // Governança: escrita real na API ML respeita SAFE_MODE/FORBIDDEN_ACCOUNTS
+            // (mesmo guard usado em HiddenSeoSuggester/TechSheetService::applyApproved).
+            (new \App\Services\HiddenSeo\SafetyGuard())->assertCanApply($this->accountId, false, true);
 
             $updated = $this->mlClient->put("/items/{$itemId}/description", [
                 'plain_text' => $plainText,

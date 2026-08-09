@@ -1022,22 +1022,34 @@ class FeeCommissionService
     }
 
     /**
-     * Obtém relatório de pagamentos realizados no período
+     * Obtém relatório de pagamentos realizados no período.
      * Endpoint: GET /billing/integration/periods/key/{period}/group/ML/payment/details
      *
+     * Melhores práticas ML (docs 2026): prefira `from_id` em vez de `offset`
+     * para paginação íntegra quando há >10.000 registros.
+     * Passe $fromId > 0 para ativar cursor-based pagination; $offset fica
+     * disponível como fallback para chamadas legadas.
+     *
      * @param string $periodKey Período no formato YYYY-MM-01
-     * @param int $limit Limite de resultados
-     * @param int $offset Offset para paginação
-     * @return array Detalhes dos pagamentos
+     * @param int $limit Limite de resultados (max 1000)
+     * @param int $offset Offset legado (ignorado quando $fromId > 0)
+     * @param int $fromId Cursor ID para paginação baseada em ID (recomendado)
+     * @return array{results: list<array<string,mixed>>, total: int, period: string, last_id: int|null}
      */
-    public function getPaymentReport(string $periodKey, int $limit = 150, int $offset = 0): array
+    public function getPaymentReport(string $periodKey, int $limit = 150, int $offset = 0, int $fromId = 0): array
     {
         $client = $this->getClient();
 
-        $params = [
-            'limit' => min(1000, $limit),
-            'offset' => $offset,
-        ];
+        $params = ['limit' => min(1000, max(1, $limit))];
+
+        if ($fromId > 0) {
+            // Paginação por cursor (recomendada pelo ML para integridade em >10k registros)
+            $params['from_id'] = $fromId;
+            $params['sort_by'] = 'ID';
+            $params['order_by'] = 'ASC';
+        } else {
+            $params['offset'] = max(0, $offset);
+        }
 
         $response = $client->get(
             "/billing/integration/periods/key/{$periodKey}/group/ML/payment/details",
@@ -1048,6 +1060,7 @@ class FeeCommissionService
             return [
                 'error' => $response['message'] ?? 'Erro ao buscar relatório de pagamentos',
                 'results' => [],
+                'last_id' => null,
             ];
         }
 
@@ -1076,6 +1089,7 @@ class FeeCommissionService
             'results' => $results,
             'total' => count($results),
             'period' => $periodKey,
+            'last_id' => isset($response['last_id']) ? (int)$response['last_id'] : null,
         ];
     }
 

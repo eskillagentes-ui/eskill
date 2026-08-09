@@ -965,10 +965,12 @@ class FinancialReportController extends BaseController
 
         $periodKey = $this->request->get('period', date('Y-m-01'));
         $limit = $this->request->getInt('limit', 150);
-        $offset = $this->request->getInt('offset', 0);
+        $fromId = $this->request->getInt('from_id', 0);
+        // offset mantido para compatibilidade; ignorado quando from_id > 0 (ML best practice)
+        $offset = $fromId > 0 ? 0 : $this->request->getInt('offset', 0);
 
         try {
-            $data = $this->financialService->getPaymentReport($periodKey, $limit, $offset);
+            $data = $this->financialService->getPaymentReport($periodKey, $limit, $offset, $fromId);
             echo json_encode([
                 'success' => !isset($data['error']),
                 'data' => $data,

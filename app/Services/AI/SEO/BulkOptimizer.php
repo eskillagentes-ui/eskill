@@ -517,6 +517,20 @@ class BulkOptimizer
             ];
             
             $updates = [];
+
+            // Governança: escrita real no ML respeita SAFE_MODE/FORBIDDEN_ACCOUNTS
+            // (mesma proteção usada pelo Hidden SEO/Ficha Técnica). Conta 1335 (produção
+            // FACILYTY) nunca aplica automaticamente via AutoPilot/BulkOptimizer.
+            $applyRequested = (bool)($options['apply'] ?? false);
+            $canApply = $applyRequested;
+            if ($applyRequested) {
+                try {
+                    (new \App\Services\HiddenSeo\SafetyGuard())->assertCanApply($this->accountId, false, true);
+                } catch (\Throwable $e) {
+                    $canApply = false;
+                    $result['errors'][] = 'Apply bloqueado: ' . $e->getMessage();
+                }
+            }
             
             // Optimize title
             if ($options['optimize_title'] ?? true) {
@@ -528,7 +542,7 @@ class BulkOptimizer
                         'score' => $titleResult['seo_score'],
                     ];
                     
-                    if ($options['apply'] ?? false) {
+                    if ($canApply) {
                         $updates['title'] = $titleResult['primary'];
                     }
                 }
@@ -543,7 +557,7 @@ class BulkOptimizer
                         'score' => $descResult['seo_score'],
                     ];
                     
-                    if ($options['apply'] ?? false) {
+                    if ($canApply) {
                         try {
                             $this->mlClient->put("/items/{$itemId}/description", [
                                 'plain_text' => $descResult['description']
@@ -564,14 +578,14 @@ class BulkOptimizer
                     'missing' => $attrResult['missing'],
                 ];
                 
-                if (($options['apply'] ?? false) && $attrResult['missing'] > 0) {
+                if ($canApply && $attrResult['missing'] > 0) {
                     $fillResult = $this->attrKiller->fillMissingAttributes($itemId, $item['category_id'], $item);
                     $result['optimizations']['attributes']['filled'] = count($fillResult['filled'] ?? []);
                 }
             }
             
             // Apply item updates
-            if (!empty($updates) && ($options['apply'] ?? false)) {
+            if (!empty($updates) && $canApply) {
                 try {
                     $this->mlClient->put("/items/{$itemId}", $updates);
                     $result['optimizations']['applied'] = true;

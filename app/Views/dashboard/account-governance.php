@@ -186,6 +186,9 @@ $currentPage = $currentPage ?? 'account-governance';
     .causes-list li:last-child {
         border-bottom: none;
     }
+
+    /* Evita flash de elementos x-show antes do Alpine inicializar */
+    [x-cloak] { display: none !important; }
 </style>
 
 <div x-data="governanceApp()" x-init="init()">
@@ -221,13 +224,13 @@ $currentPage = $currentPage ?? 'account-governance';
     </div>
 
     <!-- Loading State -->
-    <div x-show="loading" class="text-center py-5">
+    <div x-show="loading" x-cloak class="text-center py-5">
         <div class="loading-spinner" style="width: 3rem; height: 3rem;"></div>
         <p class="mt-3 text-muted">Processando diagnóstico...</p>
     </div>
 
     <!-- Error State -->
-    <div x-show="error" class="alert alert-danger" x-text="error"></div>
+    <div x-show="error" x-cloak class="alert alert-danger" x-text="error"></div>
 
     <!-- Results -->
     <template x-if="result && !loading">

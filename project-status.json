@@ -1,6 +1,6 @@
 {
     "version": 2,
-    "updated_at": "2026-08-08",
+    "updated_at": "2026-08-09",
     "north_star": "Automação ML em escala com governança: read-only primeiro; escrita/apply na conta 1335 só com aprovação explícita item a item (SAFE_MODE + FORBIDDEN_ACCOUNTS)",
     "features": [
         {
@@ -24,18 +24,18 @@
             "name": "Motor read-only irregularidades + search visibility",
             "description": "ListingIrregularityScanService + ListingVisibilityController + moderations no MercadoLivreClient",
             "category": "catalogo",
-            "passes": true,
+            "passes": false,
             "priority": "P0",
-            "notes": "ListingIrregularityScanService + ListingVisibilityController + moderations no MercadoLivreClient"
+            "notes": "AUDITORIA 2026-08-09: ListingIrregularityScanService e ListingVisibilityController não existem no codebase nem nas rotas do app principal. Feature nunca foi implementada no sistema principal — código encontrado apenas em contexto AWA bootstrap isolado. Precisa ser escopada como capability nova antes de implementar."
         },
         {
             "id": "sales-blocker-store",
             "name": "SalesBlockerStore + cron sync persistido",
             "description": "bin/sync-irregularities.php + migration ml_sales_blockers + API sync/list",
             "category": "catalogo",
-            "passes": true,
+            "passes": false,
             "priority": "P0",
-            "notes": "bin/sync-irregularities.php + migration ml_sales_blockers + API sync/list"
+            "notes": "AUDITORIA 2026-08-09: SalesBlockerStore, bin/sync-irregularities.php e tabela ml_sales_blockers não existem no codebase. Feature nunca foi implementada. Precisa ser escopada como capability nova antes de implementar."
         },
         {
             "id": "ml-write-automation-off",
@@ -98,8 +98,9 @@
             "name": "UI fila persistida sales-blockers + sync",
             "description": "UI fila persistida sales-blockers + sync",
             "category": "catalogo",
-            "passes": true,
-            "priority": "P1"
+            "passes": false,
+            "priority": "P1",
+            "notes": "AUDITORIA 2026-08-09: UI dependia de SalesBlockerStore (ver sales-blocker-store) que não existe. Feature inacessível no app principal."
         },
         {
             "id": "pregao-eskl11-index",

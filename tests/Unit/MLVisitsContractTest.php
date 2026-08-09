@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace Tests\Unit;
 
 use App\Services\MercadoLivreClient;
+use GuzzleHttp\Promise\Create;
+use GuzzleHttp\Psr7\Response;
 use PHPUnit\Framework\TestCase;
 
 /**
@@ -17,39 +19,62 @@ use PHPUnit\Framework\TestCase;
  *    chave 'id'/'total_visits' inexistentes. A API retorna array indexado por item_id.
  *  - FIX-ML-002: getSellerItemsForOptimization só enriquecia os primeiros 20 IDs;
  *    agora percorre todos os IDs em batches de 20.
+ *  - FIX-ML-003 (2026-08-09): getMultiItemVisits chamava GET /items/visits com até
+ *    50 IDs na mesma requisição. A doc oficial ("Visitas") só permite 1 ID por
+ *    chamada nessa variante com date_from/date_to — com mais de um, a API sempre
+ *    respondia 400 "maximum amount of items to query is 1", fazendo TODOS os
+ *    itens caírem no fallback de erro (visitas sempre 0). Corrigido para chamar
+ *    GET /items/{id}/visits/time_window?last={days}&unit=day individualmente por
+ *    item, que já retorna o detalhamento diário em `results`.
  *
  * @covers \App\Services\MercadoLivreClient
  */
 class MLVisitsContractTest extends TestCase
 {
     // ═══════════════════════════════════════════════════════════════════════
-    // FIX-ML-001: getMultiItemVisits return format contract
+    // FIX-ML-001 / FIX-ML-003: getMultiItemVisits return format contract
     // ═══════════════════════════════════════════════════════════════════════
 
     /**
      * getMultiItemVisits deve retornar array indexado por item_id,
-     * onde cada valor contém as chaves 'total', 'visits' e 'daily'.
+     * onde cada valor contém as chaves 'total', 'visits' e 'daily', usando uma
+     * chamada por item ao endpoint /items/{id}/visits/time_window (FIX-ML-003).
      * Não deve conter chaves 'id' ou 'total_visits' no nível superior.
      */
     public function testGetMultiItemVisitsReturnsMapIndexedByItemId(): void
     {
         MercadoLivreClient::disableCircuitBreaker();
 
+        // Mocka fetchVisitAsync (protected) — retorna PromiseInterface com resposta
+        // JSON, sem precisar mockar o httpClient do Guzzle diretamente.
         $client = $this->getMockBuilder(MercadoLivreClient::class)
-            ->onlyMethods(['get', 'getSellerId', 'getAccessToken'])
+            ->onlyMethods(['fetchVisitAsync', 'getSellerId', 'getAccessToken'])
             ->setConstructorArgs([null])
             ->getMock();
 
         $client->method('getAccessToken')->willReturn('test_token');
-        $client->method('get')->willReturn([
+
+        $payloads = [
             'MLB111' => [
-                ['date' => '2025-03-01', 'total' => 10],
-                ['date' => '2025-03-02', 'total' => 15],
+                'total_visits' => 25,
+                'results' => [
+                    ['date' => '2025-03-01', 'total' => 10],
+                    ['date' => '2025-03-02', 'total' => 15],
+                ],
             ],
             'MLB222' => [
-                ['date' => '2025-03-01', 'total' => 5],
+                'total_visits' => 5,
+                'results' => [['date' => '2025-03-01', 'total' => 5]],
             ],
-        ]);
+        ];
+
+        $client->method('fetchVisitAsync')
+            ->willReturnCallback(
+                function (string $id, int $days) use ($payloads): \GuzzleHttp\Promise\PromiseInterface {
+                    $body = json_encode($payloads[$id] ?? []);
+                    return Create::promiseFor(new Response(200, [], $body));
+                }
+            );
 
         $result = $client->getMultiItemVisits(['MLB111', 'MLB222'], 30);
 
@@ -61,13 +86,55 @@ class MLVisitsContractTest extends TestCase
         $this->assertArrayHasKey('total', $result['MLB111'], 'Entrada MLB111 deve ter chave total');
         $this->assertArrayHasKey('visits', $result['MLB111'], 'Entrada MLB111 deve ter chave visits');
 
-        // total deve somar os valores daily
-        $this->assertSame(25, $result['MLB111']['total'], 'MLB111 total deve ser soma dos dias: 10+15=25');
+        // total vem direto de total_visits (já agregado pela API)
+        $this->assertSame(25, $result['MLB111']['total'], 'MLB111 total deve ser 25 (vindo de total_visits)');
         $this->assertSame(5, $result['MLB222']['total'], 'MLB222 total deve ser 5');
+
+        // daily deve conter o detalhamento por dia (usado para derivar janelas menores, ex. 14d)
+        $this->assertCount(2, $result['MLB111']['daily'], 'MLB111 deve ter 2 dias no detalhamento');
+        $this->assertSame(10, $result['MLB111']['daily'][0]['total']);
 
         // NÃO deve ter 'id' nem 'total_visits' como chaves de resultado
         $this->assertArrayNotHasKey('id', $result, 'Resultado não deve ter chave id no nível superior');
         $this->assertArrayNotHasKey('total_visits', $result, 'Resultado não deve ter chave total_visits no nível superior');
+    }
+
+    /**
+     * Regressão para o bug real encontrado em produção: chamar /items/visits
+     * com múltiplos IDs na mesma URL retorna erro 400 da API. getMultiItemVisits
+     * NUNCA deve montar uma URL com múltiplos IDs nessa variante — cada chamada
+     * a `get()` deve ser para exatamente 1 item.
+     */
+    public function testGetMultiItemVisitsNeverBatchesMultipleIdsInSingleCall(): void
+    {
+        MercadoLivreClient::disableCircuitBreaker();
+
+        // Mocka fetchVisitAsync (protected) para capturar quais IDs foram solicitados.
+        // A assinatura `fetchVisitAsync(string $id, ...)` garante 1 ID por chamada por
+        // design — o teste valida que getMultiItemVisits() de fato invoca 1 vez por item.
+        $client = $this->getMockBuilder(MercadoLivreClient::class)
+            ->onlyMethods(['fetchVisitAsync', 'getSellerId', 'getAccessToken'])
+            ->setConstructorArgs([null])
+            ->getMock();
+
+        $client->method('getAccessToken')->willReturn('test_token');
+
+        $calledIds = [];
+        $client->method('fetchVisitAsync')
+            ->willReturnCallback(
+                function (string $id, int $days) use (&$calledIds): \GuzzleHttp\Promise\PromiseInterface {
+                    $calledIds[] = $id;
+                    $body = json_encode(['total_visits' => 1, 'results' => []]);
+                    return Create::promiseFor(new Response(200, [], $body));
+                }
+            );
+
+        $client->getMultiItemVisits(['MLB1', 'MLB2', 'MLB3'], 30);
+
+        $this->assertCount(3, $calledIds, 'Deve haver exatamente 1 chamada por item');
+        foreach (['MLB1', 'MLB2', 'MLB3'] as $id) {
+            $this->assertContains($id, $calledIds, "fetchVisitAsync deve ser chamado para {$id}");
+        }
     }
 
     /**

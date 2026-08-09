@@ -279,8 +279,12 @@ class MarketAnalytics
             $opportunities[] = [
                 'type' => 'keyword_opportunity',
                 'priority' => 'medium',
-                'title' => '🔑 Keywords de Alto Potencial',
-                'description' => 'Identificamos keywords com alto volume de busca via Trends do Mercado Livre',
+                'title' => '🔑 Termos em Alta nas Suas Categorias',
+                // Correção de metodologia: a versão anterior alegava "alto volume de busca"
+                // sem nenhuma medição real — o ML não expõe volume de busca via API pública.
+                // Estes termos vêm de Trends (tendências reais) e autocomplete (sugestões),
+                // não de uma contagem de buscas.
+                'description' => 'Termos em alta e sugestões de autocomplete do Mercado Livre relacionados às suas categorias ativas',
                 'action' => 'Otimizar títulos com estas keywords',
                 'keywords' => $keywordOpportunities,
             ];
@@ -497,7 +501,9 @@ class MarketAnalytics
     }
 
     /**
-     * Descobre keywords de alto potencial via ML Trends API e autocomplete
+     * Descobre termos em alta (Trends) e sugestões de autocomplete do Mercado
+     * Livre para as categorias ativas do vendedor. NÃO mede volume de busca —
+     * o ML não expõe esse dado via API pública.
      */
     private function discoverKeywordOpportunities(): array
     {

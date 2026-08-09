@@ -262,6 +262,11 @@ class AccountGovernanceController
      */
     public function runDiagnosticFromML(): void
     {
+        // Visitas são buscadas em batches paralelos de 10 (Guzzle async), reduzindo
+        // de ~60 s para ~8 s com 183 itens. Ainda assim aumentamos o limite para
+        // 120 s como margem de segurança para contas maiores + orders pagination.
+        @set_time_limit(120);
+
         header('Content-Type: application/json; charset=utf-8');
         header('Cache-Control: no-cache');
 

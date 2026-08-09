@@ -357,16 +357,19 @@ class AdvancedReportController extends BaseController
                 $params['account_id'] = $accountId;
             }
 
+            // Nota: tabela `categories` nunca existiu no schema (JOIN sempre falhava,
+            // engolido pelo catch(\PDOException) abaixo, retornando lista vazia
+            // silenciosamente). `items.category_name` já é denormalizado na própria
+            // tabela (populado a partir da API ML), então dispensa o JOIN.
             $sql = "SELECT 
                         i.category_id,
-                        c.name as category_name,
+                        MAX(i.category_name) as category_name,
                         COUNT(*) as count,
                         SUM(i.sold_quantity) as total_sales,
                         SUM(i.sold_quantity * i.price) as total_revenue
                     FROM items i
-                    LEFT JOIN categories c ON i.category_id = c.ml_category_id
                     WHERE {$where}
-                    GROUP BY i.category_id, c.name
+                    GROUP BY i.category_id
                     ORDER BY total_sales DESC
                     LIMIT 10";
 

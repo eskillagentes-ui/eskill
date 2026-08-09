@@ -71,6 +71,7 @@ class SEOKillerController extends BaseController
     public function diagnose(): void
     {
         $this->json(function () {
+
             if (!$this->accountId) {
                 return ['success' => false, 'error' => 'Nenhuma conta conectada'];
             }
@@ -1204,16 +1205,19 @@ class SEOKillerController extends BaseController
             $limit = $this->request->getInt('limit', 10);
             $period = $this->request->get('period', '30d');
 
-            // Get items and calculate scores
+            // Cache local + score offline: evita storm de /sites/*/search (403 datacenter/CF)
+            // e 50x GET /items no widget do dashboard.
             $itemService = new \App\Services\ItemService($this->accountId);
-            $items = $itemService->listItems(['limit' => 50]);
+            $items = $itemService->listItems(['limit' => 50, 'source' => 'local']);
 
             $calculator = new SEOScoreCalculator($this->accountId);
             $scoredItems = [];
 
             foreach ($items['items'] ?? [] as $item) {
-                $score = $calculator->calculateScore($item['id'], $item);
-                if (isset($score['error'])) continue; // Skip items with errors
+                $score = $calculator->calculateDashboardScore($item['id'], $item);
+                if (isset($score['error'])) {
+                    continue;
+                }
 
                 $scoredItems[] = [
                     'item_id' => $item['id'],
@@ -1226,7 +1230,6 @@ class SEOKillerController extends BaseController
                 ];
             }
 
-            // Sort by score DESC
             usort($scoredItems, fn($a, $b) => $b['score'] <=> $a['score']);
 
             return [
@@ -1237,10 +1240,6 @@ class SEOKillerController extends BaseController
         });
     }
 
-    /**
-     * 📊 Get real AutoPilot status from database
-     * GET /api/seo-killer/autopilot/status
-     */
     public function getAutopilotRealStatus(): void
     {
         $this->json(function () {

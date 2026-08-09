@@ -484,13 +484,21 @@ class UseContextService
         return self::USE_CONTEXTS[$contextId]['weight'] ?? 0.5;
     }
 
+    /**
+     * Correção de metodologia: as frases anteriores ("Alta demanda de buscas...",
+     * "Muitos usuários buscam...") alegavam evidência de busca/demanda real sem
+     * nenhum dado por trás — eram apenas texto estático por contextId. O sistema
+     * não tem fonte de dados de busca para validar essas alegações. Reescrito para
+     * descrever o cenário de uso (fit de categoria/produto), sem alegar volume ou
+     * frequência de busca.
+     */
     private function getSuggestionReason(string $contextId, ?string $categoryId): string
     {
         $reasons = [
-            'profissional' => 'Alta demanda de buscas por uso profissional/delivery',
-            'lazer' => 'Muitos usuários buscam para viagens e passeios',
-            'urbano' => 'Uso diário na cidade é muito comum',
-            'carga' => 'Capacidade de carga é fator decisivo de compra'
+            'profissional' => 'Uso profissional (ex.: delivery, entregas) é um cenário comum nesta categoria',
+            'lazer' => 'Uso para viagens e passeios é um cenário comum nesta categoria',
+            'urbano' => 'Uso diário no trânsito urbano é um cenário comum nesta categoria',
+            'carga' => 'Capacidade de carga costuma ser um critério relevante de decisão de compra'
         ];
 
         return $reasons[$contextId] ?? 'Contexto relevante para esta categoria';

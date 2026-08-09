@@ -75,15 +75,20 @@ class CatalogController extends BaseController
                 try {
                     // Get catalog details including buy box winner
                     $catalogData = $this->itemService->getCatalogDetails($item['catalog_product_id']);
-                    
-                    if (empty($catalogData['buy_box_winner'])) {
+
+                    // Correcao de bug: getCatalogDetails() agora retorna buy_box_winner
+                    // null quando nao ha disputa real de catalogo (antes fabricava um
+                    // vencedor ficticio com preco 0, que empty() nunca filtrava porque
+                    // o array tinha chaves preenchidas). Sem winner real, nao ha como
+                    // avaliar competicao -- pula o item em vez de reportar 'perdendo'.
+                    if (!isset($catalogData['buy_box_winner']) || $catalogData['buy_box_winner'] === null) {
                         continue;
                     }
-                    
+
                     $myPrice = floatval($item['price']);
                     $winnerPrice = floatval($catalogData['buy_box_winner']['price']);
-                    $isWinning = (bool)($catalogData['is_winner'] ?? false);
-                    
+                    $isWinning = $catalogData['is_winner'] ?? null;
+
                     // Calculate suggested price to win (0.5% below winner)
                     $priceToWin = round($winnerPrice * 0.995, 2);
                     
@@ -94,6 +99,8 @@ class CatalogController extends BaseController
                         'permalink' => $item['permalink'],
                         'my_price' => $myPrice,
                         'buy_box_winner' => $catalogData['buy_box_winner'],
+                        // is_winner vem direto da API (comparacao real de seller_id),
+                        // nunca deve ser recalculado so por preco no frontend.
                         'is_winner' => $isWinning,
                         'price_to_win' => $priceToWin,
                         'catalog_product_id' => $item['catalog_product_id']

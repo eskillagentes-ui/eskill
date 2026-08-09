@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\AI\SEO;
 
 use App\Services\AI\Core\AIProviderManager;
+use App\Services\ItemService;
 
 /**
  * 📝 DESCRIPTION KILLER - Descrições que Vendem

@@ -333,33 +333,46 @@ Responda APENAS em JSON válido.";
         $score = 100;
         $len = mb_strlen($title);
 
-        // Length penalties
-        if ($len < 30) $score -= 30;
-        elseif ($len < 40) $score -= 15;
-        elseif ($len > 60) $score -= 20;
-
-        // No numbers
-        if (!preg_match('/\d/', $title)) $score -= 10;
-
-        // All caps
-        if ($title === mb_strtoupper($title)) $score -= 15;
-
-        // Word count
-        $words = str_word_count($title);
-        if ($words < 4) $score -= 10;
-        if ($words > 10) $score -= 5;
-
-        // Has power words
-        $hasPowerWord = false;
-        foreach (self::POWER_WORDS['pt_BR'] as $category => $words) {
-            foreach ($words as $word) {
-                if (mb_stripos($title, $word) !== false) {
-                    $hasPowerWord = true;
-                    break 2;
-                }
-            }
+        // ML recomenda 45-80 chars. Antes o threshold era 60, penalizando títulos
+        // perfeitamente válidos como "Amortecedor Dianteiro Honda CG 160 Titan Esquerdo" (52 chars)
+        // com modelos completos que naturalmente ultrapassam 60 chars.
+        if ($len < 30) {
+            $score -= 30;
+        } elseif ($len < 45) {
+            $score -= 15;
+        } elseif ($len > 80) {
+            $score -= 15;
         }
-        if (!$hasPowerWord) $score -= 5;
+
+        // Títulos sem nenhum dígito raramente são específicos o suficiente para peças/acessórios.
+        // Mantido com penalidade reduzida pois nem todo produto requer número.
+        if (!preg_match('/\d/', $title)) {
+            $score -= 5;
+        }
+
+        // All caps: prejudica legibilidade e pode sinalizar spam ao indexador ML
+        if ($len > 5 && $title === mb_strtoupper($title)) {
+            $score -= 15;
+        }
+
+        // Symbols: %, #, !, $, @ etc. não devem aparecer em títulos ML
+        if (preg_match('/[%#!$@&*()\[\]{}|\\\\<>]/', $title)) {
+            $score -= 20;
+        }
+
+        // Contagem de palavras: 5-15 palavras são efetivas para ML
+        $wordCount = str_word_count($title);
+        if ($wordCount < 4) {
+            $score -= 10;
+        }
+        // Acima de 15 palavras: provável keyword stuffing.
+        // Antes era > 10, penalizando títulos de peças com compatibilidade descrita.
+        if ($wordCount > 15) {
+            $score -= 10;
+        }
+
+        // Power words removidos do scoring: termos de marketing (ORIGINAL, GRÁTIS)
+        // não contribuem para relevância semântica no ML e podem ser penalizados.
 
         return max(0, min(100, $score));
     }

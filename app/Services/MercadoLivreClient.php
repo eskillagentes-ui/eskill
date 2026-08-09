@@ -1265,6 +1265,26 @@ class MercadoLivreClient
                 );
             }
 
+            // /sites/{site}/search 403 genérico (forbidden) — IP datacenter/CF; esperado.
+            // Evita ERROR storm no SEO Killer Top Performers (CompetitorSpy/KeywordKiller).
+            if (
+                $status === 403
+                && preg_match('#^/sites/[^/]+/search(?:\?|$)#', $endpoint) === 1
+            ) {
+
+                log_warning('ML API public search bloqueado (403 forbidden / datacenter)', [
+                    'method' => $method,
+                    'endpoint' => $endpoint,
+                    'status' => $status,
+                    'requires_auth' => $requiresAuth,
+                    'has_token' => $this->hasAccessToken,
+                ]);
+
+                return $this->decorateLegacyResponse(
+                    $this->normalizeHttpError($method, $endpoint, $status, $body, $e->getMessage())
+                );
+            }
+
             // 404 esperado em catálogo sem vencedor — não poluir ERROR.
             if ($this->isExpectedCatalogWithoutWinners($endpoint, $status, $body)) {
                 log_warning('ML API catalog product sem winners', [
@@ -2154,15 +2174,53 @@ class MercadoLivreClient
     }
 
     /**
-     * Obtém visitas de múltiplos itens em uma única chamada.
+     * Obtém visitas de múltiplos itens, com faixa de dias e detalhamento diário.
      *
-     * ML API: GET /items/visits?ids={id1,id2,...}&date_from=...&date_to=...
-     * Máximo 50 IDs por chamada.
+     * Correção de bug crítico (2026-08-09): a implementação anterior chamava
+     * GET /items/visits?ids={id1,id2,...}&date_from=...&date_to=... com até 50
+     * IDs por requisição. Segundo a doc oficial ("Visitas" — recurso-visits),
+     * essa variante com faixa de datas SÓ aceita 1 ID por chamada — com mais de
+     * um, a API sempre responde 400 validation_parameters "maximum amount of
+     * items to query is 1". Isso fazia TODO chamador (AccountGovernance,
+     * AccountXRay, SEOMetricsCollector) sempre cair no fallback de erro e
+     * receber visitas=0 para 100% dos itens, mesmo com vendas reais — quebrando
+     * silenciosamente toda classificação baseada em tráfego (TOXICO/POLUIDOR/
+     * FALLING) no sistema inteiro.
      *
-     * @param array<string> $itemIds Lista de IDs (máx 50)
-     * @param int $days Período em dias (máx 30)
+     * Fix: usa GET /items/{id}/visits/time_window?last={days}&unit=day, que
+     * aceita 1 item por chamada mas já retorna o detalhamento diário em
+     * `results` — permitindo derivar tanto o total quanto janelas menores
+     * (ex. 14d) sem chamada extra. Isso significa 1 requisição por item (mais
+     * lento que o batch quebrado, mas o batch nunca funcionou de fato).
+     *
+     * @param array<string> $itemIds Lista de IDs
+     * @param int $days Período em dias (máx 30; API aceita até 150 no total, mas
+     *                   mantemos 30 para compatibilidade com os chamadores atuais)
      * @return array<string, array{total: int, visits: int, daily: array}>
      */
+    /**
+     * Prepara e dispara uma requisição assíncrona de visitas para um único item.
+     *
+     * Encapsula URL, query params e CF-proxy para que testes façam override
+     * deste método sem precisar mockar o httpClient do Guzzle diretamente.
+     *
+     * @internal protected para override em testes (não faz parte da API pública).
+     */
+    protected function fetchVisitAsync(string $id, int $days): \GuzzleHttp\Promise\PromiseInterface
+    {
+        $endpoint = "/items/{$id}/visits/time_window";
+        $queryParams = ['last' => $days, 'unit' => 'day'];
+
+        // applyCfProxy adapta URL+headers para o proxy Cloudflare quando ativo;
+        // caso contrário, devolve URL e opções sem alteração.
+        [$finalUrl, $finalOptions] = $this->applyCfProxy(
+            $this->baseUrl . $endpoint,
+            ['query' => $queryParams]
+        );
+
+        return $this->httpClient->getAsync($finalUrl, $finalOptions);
+    }
+
     public function getMultiItemVisits(array $itemIds, int $days = 30): array
     {
         $results = [];
@@ -2173,87 +2231,81 @@ class MercadoLivreClient
         }
 
         $days = min(max(1, $days), 30);
-        $dateTo = date('Y-m-d');
-        $dateFrom = date('Y-m-d', strtotime("-{$days} days"));
 
-        // ML limita 50 IDs por chamada em alguns recursos; com faixa de datas
-        // a doc oficial usa GET /items/visits (não /visits/items).
-        $chunks = array_chunk($itemIds, 50);
+        // Chamadas paralelas via Guzzle async em batches de 10 para eliminar o
+        // gargalo sequencial. Antes: 183 itens × (30 ms sleep + ~350 ms latência)
+        // ≈ 69 s. Agora: ceil(183/10) = 19 batches × ~450 ms ≈ 8 s.
+        //
+        // fetchVisitAsync é protected para permitir override em testes sem
+        // precisar mockar o httpClient do Guzzle diretamente.
+        $batches = array_chunk($itemIds, 10);
 
-        foreach ($chunks as $chunk) {
-            try {
-                $data = $this->get('/items/visits', [
-                    'ids' => implode(',', $chunk),
-                    'date_from' => $dateFrom,
-                    'date_to' => $dateTo,
-                ]);
+        foreach ($batches as $batchIds) {
+            $promises = [];
+            foreach ($batchIds as $id) {
+                $promises[$id] = $this->fetchVisitAsync($id, $days);
+            }
 
-                if (isset($data['error'])) {
-                    log_warning('ML Visits API retornou erro', [
-                        'error' => $data['error'],
-                        'message' => $data['message'] ?? '',
-                        'ids_count' => count($chunk),
+            // Utils::settle() nunca rejeita — retorna array com estado
+            // 'fulfilled'|'rejected' e value|reason para cada promise.
+            $settled = \GuzzleHttp\Promise\Utils::settle($promises)->wait();
+
+            foreach ($settled as $id => $outcome) {
+                if ($outcome['state'] !== 'fulfilled') {
+                    $reason = $outcome['reason'] ?? null;
+                    log_error('Falha ao obter visitas ML (concurrent)', [
+                        'item_id' => $id,
+                        'error'   => $reason instanceof \Throwable
+                            ? $reason->getMessage()
+                            : (string) $reason,
                     ]);
-                    foreach ($chunk as $id) {
-                        $results[$id] = $empty;
-                    }
+                    $results[$id] = $empty;
                     continue;
                 }
 
-                // Resposta tipica: lista [{item_id, total_visits, visits_detail}, ...]
-                // Fallback legado: mapa {ITEM_ID: int} via /visits/items
-                $byId = [];
-                if (isset($data[0]) && is_array($data[0])) {
-                    foreach ($data as $row) {
-                        if (!is_array($row)) {
-                            continue;
-                        }
-                        $id = (string) ($row['item_id'] ?? '');
-                        if ($id === '') {
-                            continue;
-                        }
-                        $byId[$id] = (int) ($row['total_visits'] ?? 0);
-                    }
-                } else {
-                    foreach ($chunk as $id) {
-                        if (!array_key_exists($id, $data)) {
-                            continue;
-                        }
-                        $itemData = $data[$id];
-                        if (is_numeric($itemData)) {
-                            $byId[$id] = (int) $itemData;
-                        } elseif (is_array($itemData)) {
-                            $totalVisits = (int) ($itemData['total_visits'] ?? 0);
-                            if ($totalVisits === 0) {
-                                foreach ($itemData as $entry) {
-                                    if (!is_array($entry)) {
-                                        continue;
-                                    }
-                                    $totalVisits += (int) ($entry['total'] ?? $entry['quantity'] ?? 0);
-                                }
-                            }
-                            $byId[$id] = $totalVisits;
-                        }
-                    }
-                }
+                try {
+                    $data = json_decode((string) $outcome['value']->getBody(), true) ?: [];
 
-                foreach ($chunk as $id) {
-                    $total = $byId[$id] ?? 0;
+                    if (isset($data['error'])) {
+                        log_warning('ML Visits API retornou erro (concurrent)', [
+                            'error'   => $data['error'],
+                            'message' => $data['message'] ?? '',
+                            'item_id' => $id,
+                        ]);
+                        $results[$id] = $empty;
+                        continue;
+                    }
+
+                    $total = (int) ($data['total_visits'] ?? 0);
+                    $daily = [];
+                    foreach (($data['results'] ?? []) as $dayEntry) {
+                        if (!is_array($dayEntry) || !isset($dayEntry['date'])) {
+                            continue;
+                        }
+                        $daily[] = [
+                            'date'  => (string) $dayEntry['date'],
+                            'total' => (int) ($dayEntry['total'] ?? 0),
+                        ];
+                    }
+
                     $results[$id] = [
-                        'total' => $total,
+                        'total'  => $total,
                         'visits' => $total,
-                        'daily' => [],
+                        'daily'  => $daily,
                     ];
-                }
-            } catch (\Exception $e) {
-                log_error('Falha ao obter visitas ML', [
-                    'ids_count' => count($chunk),
-                    'error' => $e->getMessage(),
-                ]);
-                foreach ($chunk as $id) {
+                } catch (\Throwable $t) {
+                    log_error('Erro ao parsear resposta de visitas ML (concurrent)', [
+                        'item_id' => $id,
+                        'error'   => $t->getMessage(),
+                    ]);
                     $results[$id] = $empty;
                 }
             }
+
+            // Pausa mínima entre batches para não estourar rate limit da API ML.
+            // 50 ms por batch de 10 ≈ 5 ms/item — bem abaixo do limite publicado
+            // (~20 req/s), mas suficiente para evitar burst abrupto.
+            usleep(50_000);
         }
 
         return $results;

@@ -22,14 +22,26 @@ class SEOScoreCalculator
     private PDO $db;
     
     // Weight factors (total 100%)
+    /**
+     * Pesos alinhados com o impacto real no ranking orgânico do ML:
+     *
+     * - title (25%):       Principal sinal de relevância textual para o motor de busca.
+     * - attributes (20%):  Habilita filtros de busca (Category Fit). Atributos obrigatórios
+     *                       ausentes excluem o anúncio de qualquer pesquisa filtrada.
+     * - images (15%):      Impacto direto na conversão e qualidade de listing.
+     * - description (15%): Informativa para o comprador; secundária para indexação.
+     * - pricing (10%):     Competitividade de preço é critério para Buy Box e destaque.
+     * - keywords (10%):    Cobertura semântica e demanda relativa da categoria.
+     * - engagement (5%):   Lagging indicator — reflexo das outras dimensões; não causa raiz.
+     */
     const WEIGHTS = [
-        'title' => 25,
-        'description' => 20,
-        'images' => 15,
-        'attributes' => 15,
-        'pricing' => 10,
-        'keywords' => 10,
-        'engagement' => 5,
+        'title'       => 25,
+        'attributes'  => 20,
+        'images'      => 15,
+        'description' => 15,
+        'pricing'     => 10,
+        'keywords'    => 10,
+        'engagement'  => 5,
     ];
     
     private ?CompetitorSpy $competitorSpy = null;
@@ -122,6 +134,65 @@ class SEOScoreCalculator
     }
     
     /**
+     * Score leve para dashboard (sem busca publica ML nem fetch de description).
+     * Evita storm de 403 PolicyAgent/datacenter no widget Top Performers.
+     */
+    public function calculateDashboardScore(string|int $itemId, array $itemData): array
+    {
+        $itemId = (string) $itemId;
+        $scores = [
+            'item_id' => $itemId,
+            'overall_score' => 0,
+            'breakdown' => [],
+            'recommendations' => [],
+            'benchmarks' => [],
+            'mode' => 'dashboard_offline',
+        ];
+
+        try {
+            if (is_array($itemData) && isset($itemData['error'], $itemData['status']) && (int)$itemData['status'] >= 400) {
+                throw new \RuntimeException((string)($itemData['message'] ?? $itemData['error']), (int)$itemData['status']);
+            }
+
+            $scores['breakdown']['title'] = $this->scoreTitleQuality($itemData);
+            $scores['breakdown']['description'] = [
+                'score' => 50,
+                'length' => 0,
+                'issues' => ['Descrição não avaliada no dashboard (modo offline)'],
+            ];
+            $scores['breakdown']['images'] = $this->scoreImagesQuality($itemData);
+            $scores['breakdown']['attributes'] = $this->scoreAttributesCompleteness($itemData);
+            $scores['breakdown']['pricing'] = [
+                'score' => 50,
+                'price' => $itemData['price'] ?? 0,
+                'status' => 'offline',
+                'issues' => [],
+            ];
+            $scores['breakdown']['keywords'] = [
+                'score' => 50,
+                'issues' => [],
+            ];
+            $scores['breakdown']['engagement'] = $this->scoreEngagement($itemData);
+
+            $totalScore = 0;
+            foreach ($scores['breakdown'] as $component => $data) {
+                $weight = self::WEIGHTS[$component] ?? 0;
+                $componentScore = $data['score'] ?? 0;
+                $totalScore += ($componentScore * $weight / 100);
+            }
+
+            $scores['overall_score'] = round($totalScore, 1);
+            $scores['grade'] = $this->getGrade($scores['overall_score']);
+            $scores['recommendations'] = $this->generateRecommendations($scores['breakdown']);
+        } catch (\Throwable $e) {
+            $scores['error'] = $e->getMessage();
+            $scores['status'] = $e->getCode() > 0 ? $e->getCode() : 500;
+        }
+
+        return $scores;
+    }
+
+/**
      * 📝 Score de qualidade do título
      */
     private function scoreTitleQuality(array $item): array
@@ -130,147 +201,194 @@ class SEOScoreCalculator
         $issues = [];
         $title = $item['title'] ?? '';
         $titleLen = mb_strlen($title);
-        
-        // Length check (optimal: 50-60 chars)
+
+        // ML recomenda títulos entre 45-80 chars. Abaixo de 30 é insuficiente; acima de
+        // 80 pode ser truncado na exibição mobile e atrapalha a leitura.
         if ($titleLen < 30) {
             $score -= 30;
-            $issues[] = 'Título muito curto (ideal: 50-60 caracteres)';
-        } elseif ($titleLen > 70) {
+            $issues[] = 'Título muito curto (ideal: 45-80 caracteres)';
+        } elseif ($titleLen < 45) {
             $score -= 10;
-            $issues[] = 'Título muito longo (pode ser cortado)';
+            $issues[] = 'Título curto — considere incluir mais especificações (ideal: 45-80 caracteres)';
+        } elseif ($titleLen > 80) {
+            $score -= 10;
+            $issues[] = 'Título muito longo — pode ser cortado em mobile (máximo recomendado: 80 caracteres)';
         }
-        
-        // Brand check
+
+        // Símbolos proibidos / desaconselhados pelo ML: %, #, !, $, @, &, *, (, )
+        // Esses caracteres confundem o motor de busca e podem desqualificar o anúncio.
+        if (preg_match('/[%#!$@&*()\[\]{}|\\\\<>]/', $title)) {
+            $score -= 15;
+            $issues[] = 'Remova símbolos especiais do título (%, #, !, $, etc.)';
+        }
+
+        // Caps lock abusivo: mais de 4 caracteres maiúsculos consecutivos fora de siglas
+        // conhecidas (ex: ORIGINAL, NOVO) prejudica a leitura e pode sinalizar spam.
+        if (preg_match('/[A-Z]{5,}/', $title)) {
+            $score -= 10;
+            $issues[] = 'Evite CAPS LOCK excessivo — use caixa normal para melhor indexação';
+        }
+
+        // Title Architecture check: marca deve aparecer no título (Product Identity)
         $brand = '';
         foreach ($item['attributes'] ?? [] as $attr) {
             if ($attr['id'] === 'BRAND') {
-                $brand = $attr['value_name'] ?? '';
+                $brand = (string) ($attr['value_name'] ?? '');
                 break;
             }
         }
-        
+
         if ($brand && stripos($title, $brand) === false) {
             $score -= 15;
-            $issues[] = 'Marca não aparece no título';
+            $issues[] = "Marca ({$brand}) não aparece no título — essencial para Product Identity";
         }
-        
-        // Model check
+
+        // Model check: modelo é um campo de alta relevância semântica para peças/acessórios.
+        // Registrar no título facilita o match com queries de cauda longa (ex.: "CG 160 Titan").
         $model = '';
         foreach ($item['attributes'] ?? [] as $attr) {
             if ($attr['id'] === 'MODEL') {
-                $model = $attr['value_name'] ?? '';
+                $model = (string) ($attr['value_name'] ?? '');
                 break;
             }
         }
-        
+
         if ($model && stripos($title, $model) === false) {
             $score -= 10;
-            $issues[] = 'Modelo não aparece no título';
+            $issues[] = "Modelo ({$model}) não aparece no título — impacta buscas específicas";
         }
-        
-        // Keyword stuffing check
-        if (preg_match('/(\b\w+\b).*\1/i', $title)) {
-            $score -= 10;
-            $issues[] = 'Possível repetição excessiva de palavras';
+
+        // Keyword stuffing: detecta repetição de palavras com 4+ caracteres mais de 2 vezes.
+        // A regex antiga (`(\b\w+\b).*\1`) era muito ampla e flagueava repetições legítimas
+        // como "CG 160 Motor 160" onde "160" é parte natural do nome do produto.
+        // Agora exige que a mesma palavra de 4+ chars apareça 3+ vezes.
+        $words = preg_split('/\s+/', mb_strtolower($title));
+        $wordFreq = array_count_values(
+            array_filter($words, fn($w) => mb_strlen($w) >= 4)
+        );
+        $stuffed = array_filter($wordFreq, fn($c) => $c >= 3);
+        if (!empty($stuffed)) {
+            $score -= 15;
+            $repeated = implode(', ', array_keys($stuffed));
+            $issues[] = "Repetição excessiva de palavras: '{$repeated}' — pode ser penalizado pelo ML";
         }
-        
-        // Caps lock abuse
-        if (preg_match('/[A-Z]{5,}/', $title)) {
-            $score -= 5;
-            $issues[] = 'Evite CAPS LOCK excessivo';
-        }
-        
+
         return [
-            'score' => max(0, $score),
-            'title' => $title,
+            'score'  => max(0, $score),
+            'title'  => $title,
             'length' => $titleLen,
             'issues' => $issues,
         ];
     }
     
     /**
-     * 📄 Score de qualidade da descrição
+     * 📄 Score de qualidade da descrição (Content Accuracy)
+     *
+     * A descrição no ML deve ser útil ao comprador, não um repositório de palavras-chave.
+     * Critérios alinhados com as diretrizes ML:
+     *  - Extensão suficiente para responder dúvidas do comprador (ideal: 300-2000 chars)
+     *  - Conteúdo estruturado (parágrafos, listas, compatibilidade)
+     *  - Informações funcionais (para que serve, como instalar, compatibilidade)
+     *
+     * REMOVIDO INTENCIONALMENTE: "keyword_density" (proporção de palavras do título
+     * presentes na descrição). Esse critério incentivava keyword stuffing — inserir
+     * as mesmas palavras do título na descrição repetidamente, o que o ML penaliza.
+     * A descrição deve ser escrita para o comprador, não para o indexador.
      */
     private function scoreDescriptionQuality(array $item): array
     {
         $score = 100;
         $issues = [];
         $description = '';
-        
-        // Fetch real description from ML API
+
         try {
             $itemId = $item['id'] ?? '';
-            if ($itemId) {
+            // Preferir description já carregada no item (ex.: via getItemDetails)
+            $description = (string) ($item['description'] ?? '');
+            if ($description === '' && $itemId) {
                 $mlClient = new \App\Services\MercadoLivreClient($this->accountId);
-                $descData = $mlClient->get("/items/{$itemId}/description");
+                $descData  = $mlClient->get("/items/{$itemId}/description");
                 $description = $descData['plain_text'] ?? $descData['text'] ?? '';
             }
         } catch (\Exception $e) {
-            // If we can't fetch description, use a minimal score
-            $issues[] = 'Não foi possível analisar a descrição';
             return [
-                'score' => 50,
-                'length' => 0,
-                'issues' => $issues,
+                'score'         => 50,
+                'length'        => 0,
+                'has_structure' => false,
+                'issues'        => ['Não foi possível analisar a descrição'],
             ];
         }
-        
+
         $descLen = mb_strlen($description);
-        
-        // Length scoring
-        if ($descLen < 100) {
-            $score -= 40;
-            $issues[] = 'Descrição muito curta (mínimo: 300 caracteres)';
+
+        // Extensão: descrição curta não responde às dúvidas do comprador
+        if ($descLen === 0) {
+            $score -= 50;
+            $issues[] = 'Descrição ausente — adicione ao menos 300 caracteres explicando o produto';
+        } elseif ($descLen < 150) {
+            $score -= 35;
+            $issues[] = 'Descrição muito curta — expanda para ao menos 300 caracteres';
         } elseif ($descLen < 300) {
-            $score -= 20;
-            $issues[] = 'Descrição poderia ser mais detalhada (ideal: 500+ caracteres)';
+            $score -= 15;
+            $issues[] = 'Descrição poderia ser mais detalhada (ideal: 300-2000 caracteres)';
         }
-        
-        if ($descLen > 5000) {
+
+        // Extensão excessiva: muito texto sem estrutura pode confundir o comprador
+        if ($descLen > 3000) {
+            $score -= 5;
+            $issues[] = 'Descrição muito extensa — considere organizar em seções menores';
+        }
+
+        // Conteúdo estruturado: parágrafos, listas ou tabelas aumentam legibilidade
+        $paragraphs  = substr_count($description, "\n\n");
+        $lineBreaks  = substr_count($description, "\n");
+        $bulletItems = substr_count($description, '•') + substr_count($description, '- ') + substr_count($description, '* ');
+        $hasStructure = $paragraphs >= 2 || ($lineBreaks >= 3) || ($bulletItems >= 2);
+
+        if (!$hasStructure && $descLen > 300) {
             $score -= 10;
-            $issues[] = 'Descrição muito longa (pode perder atenção do cliente)';
+            $issues[] = 'Use parágrafos ou listas para melhorar a legibilidade';
         }
-        
-        // Check for keyword presence
-        $title = $item['title'] ?? '';
-        $titleWords = array_filter(explode(' ', strtolower($title)), function($word) {
-            return strlen($word) > 3; // Only significant words
-        });
-        
-        $keywordCount = 0;
-        foreach ($titleWords as $word) {
-            if (stripos($description, $word) !== false) {
-                $keywordCount++;
+
+        // Indicadores de conteúdo útil: menção a compatibilidade, garantia, instalação
+        // Esses termos indicam descrição informativa, não apenas descritiva.
+        $utilityKeywords = [
+            'compatível', 'compatibilidade', 'modelo', 'ano', 'instalação', 'instalar',
+            'original', 'garantia', 'montagem', 'par', 'dianteiro', 'traseiro',
+            'serve para', 'indicado para', 'fabricante',
+        ];
+        $utilityMatches = 0;
+        $lowerDesc = mb_strtolower($description);
+        foreach ($utilityKeywords as $kw) {
+            if (str_contains($lowerDesc, $kw)) {
+                $utilityMatches++;
             }
         }
-        
-        $keywordDensity = count($titleWords) > 0 ? ($keywordCount / count($titleWords)) * 100 : 0;
-        if ($keywordDensity < 30) {
-            $score -= 15;
-            $issues[] = 'Descrição não menciona palavras-chave importantes do título';
-        }
-        
-        // Check for structured content (bullet points, paragraphs)
-        $hasStructure = (substr_count($description, "\n") > 2) || 
-                       (substr_count($description, '•') > 0) ||
-                       (substr_count($description, '-') > 2);
-        
-        if (!$hasStructure && $descLen > 200) {
+        if ($descLen >= 150 && $utilityMatches < 2) {
             $score -= 10;
-            $issues[] = 'Use formatação (parágrafos, listas) para melhor legibilidade';
+            $issues[] = 'Inclua informações de compatibilidade, instalação ou garantia na descrição';
         }
-        
+
         return [
-            'score' => max(0, $score),
-            'length' => $descLen,
-            'keyword_density' => round($keywordDensity, 1),
+            'score'         => max(0, $score),
+            'length'        => $descLen,
             'has_structure' => $hasStructure,
-            'issues' => $issues,
+            'utility_score' => $utilityMatches,
+            'issues'        => $issues,
         ];
     }
     
     /**
-     * 🖼️ Score de qualidade das imagens
+     * 🖼️ Score de qualidade das imagens (Image Quality)
+     *
+     * O ML recomenda:
+     *  - Mínimo de 5 imagens para maximizar conversão
+     *  - Resolução mínima de 900x900 px (ideal 1200x1200)
+     *  - Fundo branco na foto principal
+     *  - Imagens sem marca d'água ou texto sobreposto
+     *
+     * O campo `size` ou `max_size` da API ML retorna "LARGURAxALTURA" (ex.: "1200x803").
+     * URLs com "-O." no CDN mlstatic.com indicam imagem em resolução original.
      */
     private function scoreImagesQuality(array $item): array
     {
@@ -278,49 +396,185 @@ class SEOScoreCalculator
         $issues = [];
         $pictures = $item['pictures'] ?? [];
         $pictureCount = count($pictures);
-        
-        if ($pictureCount < 3) {
-            $score -= 40;
-            $issues[] = 'Adicione mais imagens (mínimo 3)';
-        } elseif ($pictureCount < 5) {
-            $score -= 20;
-            $issues[] = 'Ideal ter 5+ imagens';
-        }
-        
+
         if ($pictureCount === 0) {
-            $score = 0;
-            $issues[] = 'CRÍTICO: Produto sem imagens';
+            return [
+                'score'     => 0,
+                'count'     => 0,
+                'high_res'  => 0,
+                'issues'    => ['CRÍTICO: Produto sem imagens'],
+            ];
         }
-        
+
+        if ($pictureCount < 3) {
+            $score -= 35;
+            $issues[] = 'Adicione mais imagens — mínimo 3 para aparecer em destaque';
+        } elseif ($pictureCount < 5) {
+            $score -= 15;
+            $issues[] = 'Ideal ter 5+ imagens para aumentar conversão';
+        }
+
+        // Verificar resolução de cada imagem
+        $highRes = 0;
+        $lowRes  = 0;
+
+        foreach ($pictures as $pic) {
+            // Prefere max_size (tamanho máximo disponível), cai em size
+            $sizeStr = (string) ($pic['max_size'] ?? $pic['size'] ?? '');
+            $url     = (string) ($pic['url'] ?? $pic['secure_url'] ?? '');
+
+            $isHighRes = false;
+            if ($sizeStr !== '' && preg_match('/^(\d+)[xX](\d+)$/', $sizeStr, $m)) {
+                $minDim = min((int) $m[1], (int) $m[2]);
+                // Resolução mínima recomendada pelo ML: 900px na menor dimensão
+                $isHighRes = $minDim >= 900;
+            } elseif (str_contains($url, '-O.') || str_contains($url, '-F.')) {
+                // Sufixo -O. = original (alta res), -F. = full
+                $isHighRes = true;
+            }
+
+            if ($isHighRes) {
+                $highRes++;
+            } else {
+                $lowRes++;
+            }
+        }
+
+        // Penalidade por baixa resolução: impacta diretamente a conversão e confiança
+        if ($highRes === 0 && $pictureCount > 0) {
+            $score -= 25;
+            $issues[] = 'Imagens em baixa resolução — use imagens com mínimo 900x900 px';
+        } elseif ($lowRes > 0) {
+            $penalty = min(15, $lowRes * 5);
+            $score -= $penalty;
+            $issues[] = "{$lowRes} imagem(ns) em resolução insuficiente (< 900px) — substitua por versões maiores";
+        }
+
         return [
-            'score' => max(0, $score),
-            'count' => $pictureCount,
-            'issues' => $issues,
+            'score'    => max(0, $score),
+            'count'    => $pictureCount,
+            'high_res' => $highRes,
+            'low_res'  => $lowRes,
+            'issues'   => $issues,
         ];
     }
     
     /**
-     * 🔧 Score de completude dos atributos
+     * 🔧 Score de completude dos atributos (Attribute Completeness + Attribute Gap)
+     *
+     * Usa o schema real da categoria ML para distinguir:
+     *  - required: ausência impede indexação em filtros críticos → penalidade alta
+     *  - recommended: ausência reduz relevância e visibilidade → penalidade média
+     *
+     * O score puro por contagem (< 5 → -50%) era enganoso: um item com 12 atributos
+     * genéricos mas sem BRAND/MODEL/VEHICLE_YEAR teria score alto e não apareceria
+     * nos filtros mais importantes da categoria.
      */
     private function scoreAttributesCompleteness(array $item): array
     {
         $score = 100;
         $issues = [];
-        
-        $attributeCount = count($item['attributes'] ?? []);
-        
-        if ($attributeCount < 5) {
-            $score -= 50;
-            $issues[] = 'Preencha mais atributos (ideal: 10+)';
-        } elseif ($attributeCount < 10) {
-            $score -= 25;
-            $issues[] = 'Bom, mas pode adicionar mais atributos';
+
+        $filledAttrs = [];
+        foreach ($item['attributes'] ?? [] as $attr) {
+            $filledAttrs[$attr['id']] = $attr['value_name'] ?? $attr['value_id'] ?? null;
         }
-        
+        $filledCount = count(array_filter($filledAttrs));
+
+        // Tentar obter schema da categoria da API ML para checar required/recommended
+        $categoryId = (string) ($item['category_id'] ?? '');
+        $requiredMissing = [];
+        $recommendedMissing = [];
+        $filterEnablingMissing = [];
+
+        if ($categoryId) {
+            try {
+                $mlClient = new \App\Services\MercadoLivreClient($this->accountId);
+                $categoryAttrs = $mlClient->getCategoryAttributes($categoryId);
+
+                foreach ($categoryAttrs as $attrDef) {
+                    $attrId = $attrDef['id'] ?? '';
+                    if (!$attrId) {
+                        continue;
+                    }
+
+                    $isFilled = isset($filledAttrs[$attrId]) && $filledAttrs[$attrId] !== null;
+
+                    // Tags relevantes do schema ML
+                    $tags = $attrDef['tags'] ?? [];
+                    $isRequired    = in_array('required', $tags, true);
+                    $isRecommended = in_array('recommended', $tags, true);
+
+                    // Atributos que habilitam filtros de busca têm tag "filterable" no schema
+                    $isFilterable = in_array('filterable', $tags, true)
+                        || in_array('catalog_required', $tags, true);
+
+                    if (!$isFilled) {
+                        $label = $attrDef['name'] ?? $attrId;
+                        if ($isRequired) {
+                            $requiredMissing[] = $label;
+                        } elseif ($isFilterable) {
+                            $filterEnablingMissing[] = $label;
+                        } elseif ($isRecommended) {
+                            $recommendedMissing[] = $label;
+                        }
+                    }
+                }
+            } catch (\Exception $e) {
+                // Falhou ao buscar schema: cai no fallback por contagem simples abaixo
+                $categoryAttrs = [];
+            }
+        }
+
+        // Penalidade por atributos obrigatórios ausentes (impede indexação nos filtros)
+        $reqCount = count($requiredMissing);
+        if ($reqCount > 0) {
+            $penalty = min(50, $reqCount * 15);
+            $score -= $penalty;
+            $issues[] = "Atributos obrigatórios não preenchidos: " . implode(', ', array_slice($requiredMissing, 0, 4))
+                . ($reqCount > 4 ? " (e mais " . ($reqCount - 4) . ")" : '');
+        }
+
+        // Penalidade por atributos filter-enabling ausentes (limita aparição em filtros)
+        $filterCount = count($filterEnablingMissing);
+        if ($filterCount > 0) {
+            $penalty = min(25, $filterCount * 8);
+            $score -= $penalty;
+            $issues[] = "Atributos de filtro não preenchidos: " . implode(', ', array_slice($filterEnablingMissing, 0, 3))
+                . ($filterCount > 3 ? " (e mais " . ($filterCount - 3) . ")" : '');
+        }
+
+        // Penalidade por atributos recommended ausentes (reduz relevância)
+        $recCount = count($recommendedMissing);
+        if ($recCount > 0) {
+            $penalty = min(15, $recCount * 4);
+            $score -= $penalty;
+            if ($recCount <= 3) {
+                $issues[] = "Atributos recomendados não preenchidos: " . implode(', ', $recommendedMissing);
+            } else {
+                $issues[] = "{$recCount} atributos recomendados não preenchidos — considere completar a ficha técnica";
+            }
+        }
+
+        // Fallback: quando não foi possível obter o schema, usa contagem simples
+        // como sinal de qualidade mínima (não há como saber quais são required).
+        if ($categoryId === '' || ($reqCount === 0 && $filterCount === 0 && $recCount === 0)) {
+            if ($filledCount < 5) {
+                $score -= 40;
+                $issues[] = 'Muito poucos atributos preenchidos (ideal: 10+ para aumentar visibilidade)';
+            } elseif ($filledCount < 10) {
+                $score -= 15;
+                $issues[] = 'Preencha mais atributos para melhorar a completude da ficha técnica';
+            }
+        }
+
         return [
-            'score' => max(0, $score),
-            'filled' => $attributeCount,
-            'issues' => $issues,
+            'score'             => max(0, $score),
+            'filled'            => $filledCount,
+            'required_missing'  => $requiredMissing,
+            'filter_missing'    => $filterEnablingMissing,
+            'recommended_missing' => $recommendedMissing,
+            'issues'            => $issues,
         ];
     }
     
@@ -341,23 +595,63 @@ class SEOScoreCalculator
     }
     
     /**
-     * 📈 Score de engajamento
+     * 📈 Score de engajamento (Conversion History + Sales History)
+     *
+     * Combina histórico de vendas e taxa de conversão (visitas→vendas).
+     * Um item com poucas vendas mas boa conversão indica produto correto com
+     * baixo tráfego — o problema é de visibilidade, não de listing quality.
+     * Um item com muito tráfego e baixa conversão indica problema no listing.
+     *
+     * Anúncios novos (< 10 visitas) recebem score neutro (50) para não
+     * penalizar produtos sem histórico suficiente.
      */
     private function scoreEngagement(array $item): array
     {
-        $score = 50; // Base score
-        $sold_quantity = $item['sold_quantity'] ?? 0;
-        
-        if ($sold_quantity > 100) $score = 100;
-        elseif ($sold_quantity > 50) $score = 90;
-        elseif ($sold_quantity > 20) $score = 80;
-        elseif ($sold_quantity > 10) $score = 70;
-        elseif ($sold_quantity > 5) $score = 60;
-        
+        $score = 50; // neutro como base — não penalizar produtos sem histórico
+        $issues = [];
+
+        $soldQuantity = (int) ($item['sold_quantity'] ?? 0);
+        $visits       = (int) ($item['visits'] ?? $item['visits_30d'] ?? 0);
+
+        // Score de vendas: histórico acumulado do anúncio
+        if ($soldQuantity >= 100) {
+            $score = 90;
+        } elseif ($soldQuantity >= 50) {
+            $score = 80;
+        } elseif ($soldQuantity >= 20) {
+            $score = 70;
+        } elseif ($soldQuantity >= 5) {
+            $score = 60;
+        } elseif ($soldQuantity === 0 && $visits >= 20) {
+            // Produto com tráfego mas zero vendas: problema de conversão
+            $score = 35;
+            $issues[] = 'Anúncio recebe visitas mas não converte — revise preço, fotos e título';
+        }
+
+        // Bonus/penalidade por taxa de conversão (30 dias, quando disponível)
+        if ($visits >= 10) {
+            $conversionRate = $soldQuantity > 0 ? ($soldQuantity / $visits) : 0;
+
+            // Benchmark ML para auto peças: ~2-5% de conversão é normal
+            if ($conversionRate >= 0.05) {
+                $score = min(100, $score + 10); // Conversão excelente
+            } elseif ($conversionRate >= 0.02) {
+                // Faixa normal — sem ajuste
+            } elseif ($conversionRate > 0 && $conversionRate < 0.01) {
+                $score = max(30, $score - 10);
+                $rate = round($conversionRate * 100, 1);
+                $issues[] = "Taxa de conversão baixa ({$rate}%) — revise preço, imagens e título";
+            }
+        }
+
         return [
-            'score' => $score,
-            'sold_quantity' => $sold_quantity,
-            'issues' => $sold_quantity < 5 ? ['Produto com poucas vendas'] : [],
+            'score'           => $score,
+            'sold_quantity'   => $soldQuantity,
+            'visits_30d'      => $visits,
+            'conversion_rate' => $visits >= 10
+                ? round(($soldQuantity / max(1, $visits)) * 100, 1)
+                : null,
+            'issues'          => $issues,
         ];
     }
     
@@ -375,30 +669,44 @@ class SEOScoreCalculator
     }
     
     /**
-     * 💡 Generate recommendations
+     * 💡 Gera recomendações priorizadas por impacto real no score
+     *
+     * Ordena por: weight × (100 - componentScore)
+     * Isso garante que melhorar um componente de alto peso e baixo score
+     * (ex.: título com score 40 e peso 25%) aparece antes de melhorar
+     * imagens com score 80 e peso 15% — mesmo que ambos tenham issues.
      */
     private function generateRecommendations(array $breakdown): array
     {
         $recommendations = [];
-        
+
         foreach ($breakdown as $component => $data) {
-            if (!empty($data['issues'])) {
-                foreach ($data['issues'] as $issue) {
-                    $recommendations[] = [
-                        'component' => $component,
-                        'priority' => $data['score'] < 50 ? 'high' : 'medium',
-                        'issue' => $issue,
-                    ];
-                }
+            if (empty($data['issues'])) {
+                continue;
+            }
+            $componentScore = (float) ($data['score'] ?? 100);
+            $weight         = self::WEIGHTS[$component] ?? 0;
+            $impact         = $weight * (100 - $componentScore) / 100;
+
+            foreach ($data['issues'] as $issue) {
+                $recommendations[] = [
+                    'component' => $component,
+                    'priority'  => $componentScore < 50 ? 'high' : 'medium',
+                    'issue'     => $issue,
+                    '_impact'   => $impact, // usado apenas para ordenação
+                ];
             }
         }
-        
-        // Sort by priority
-        usort($recommendations, fn($a, $b) => 
-            ($a['priority'] === 'high' ? 0 : 1) <=> ($b['priority'] === 'high' ? 0 : 1)
+
+        // Ordena pelo impacto potencial no score final (decrescente)
+        usort($recommendations, fn($a, $b) => $b['_impact'] <=> $a['_impact']);
+
+        // Remove campo interno de ordenação antes de retornar
+        return array_slice(
+            array_map(fn($r) => array_diff_key($r, ['_impact' => true]), $recommendations),
+            0,
+            5
         );
-        
-        return array_slice($recommendations, 0, 5); // Top 5
     }
     
     /**

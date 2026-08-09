@@ -535,6 +535,9 @@ class ImageKiller
         }
 
         // 4. Send Update to ML
+        // Governança: bloqueia escrita em conta blacklist (FORBIDDEN_ACCOUNTS, ex. 1335).
+        (new \App\Services\HiddenSeo\SafetyGuard())->assertCanApply((int)$this->accountId, false, true);
+
         $response = $this->mlClient->put("/items/{$itemId}", [
             'pictures' => $picturesPayload
         ]);

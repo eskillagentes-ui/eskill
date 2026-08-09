@@ -204,7 +204,7 @@ class KeywordKiller
                 'competitor' => [],
             ],
             'suggestions' => [],
-            'volume_estimates' => [],
+            'keyword_supply_analysis' => [],
             'missing_opportunities' => [],
         ];
 
@@ -227,8 +227,9 @@ class KeywordKiller
             $result['keywords']['competitor'] = $this->analyzeCompetitorKeywords($productData);
         }
 
-        // 6. Estimate search volumes
-        $result['volume_estimates'] = $this->estimateVolumes($baseKeywords);
+        // 6. Analisar oferta/competição real por keyword (NÃO é volume de busca —
+        // ver analyzeKeywordSupply() para a correção de metodologia).
+        $result['keyword_supply_analysis'] = $this->analyzeKeywordSupply($baseKeywords);
 
         // 7. Identify missing opportunities
         $result['missing_opportunities'] = $this->findMissingOpportunities($productData, $result['keywords']);
@@ -463,64 +464,69 @@ class KeywordKiller
     }
 
     /**
-     * 📈 Estimar volumes de busca usando dados reais da ML API
+     * 📊 Analisa oferta/competição por keyword usando dados reais da ML API.
+     *
+     * Correção de metodologia: a versão anterior ("estimateVolumes") multiplicava
+     * o total de anúncios concorrentes (oferta) por um fator arbitrário de 7% e
+     * chamava o resultado de "estimated_volume" — isso não é volume de busca,
+     * é uma fabricação sem base estatística. total_results mede OFERTA (quantos
+     * vendedores competem por aquele termo), não DEMANDA (quantas pessoas
+     * pesquisam). O Mercado Livre não expõe volume de busca via API pública.
+     * Este método agora reporta apenas o dado real (total de anúncios) e deriva
+     * um "opportunity_score" a partir dele, sem fingir medir demanda.
      */
-    private function estimateVolumes(array $keywords): array
+    private function analyzeKeywordSupply(array $keywords): array
     {
-        $volumes = [];
+        $supply = [];
 
         foreach (array_slice($keywords, 0, 10) as $keyword) {
-            $estimatedVolume = 0;
-            $totalResults = 0;
+            $totalListings = null;
 
-            // Estimar volume via total_results do search API (proxy real de demanda)
             if ($this->mlClient) {
                 try {
                     $searchData = $this->mlClient->searchItems([
                         'q' => $keyword,
                         'limit' => 1, // Só precisamos do paging.total
                     ]);
-                    $totalResults = intval($searchData['paging']['total'] ?? 0);
-                    // total_results é proxy de oferta; estimar demanda como ~5-10% da oferta
-                    $estimatedVolume = (int)max(10, $totalResults * 0.07);
+                    $totalListings = intval($searchData['paging']['total'] ?? 0);
                 } catch (\Exception $e) {
-                    // Fallback: estimar com heurística quando API falha
-                    $estimatedVolume = $this->estimateVolumeHeuristic($keyword);
+                    $totalListings = null; // Dado real indisponível — não fabricar substituto
                 }
-            } else {
-                $estimatedVolume = $this->estimateVolumeHeuristic($keyword);
             }
 
-            $volumes[] = [
+            $competition = $totalListings !== null
+                ? $this->classifyCompetitionFromListings($totalListings)
+                : 'desconhecida';
+
+            $supply[] = [
                 'keyword' => $keyword,
-                'estimated_volume' => $estimatedVolume,
-                'total_listings' => $totalResults,
-                'competition' => $this->estimateCompetition($keyword),
-                'opportunity_score' => $this->calculateOpportunityScore($estimatedVolume, $keyword),
+                // Dado real da API ML: quantos anúncios competem por este termo (oferta, não demanda).
+                'total_listings' => $totalListings,
+                'competition' => $competition,
+                'data_source' => $totalListings !== null ? 'ml_search_api' : 'unavailable',
+                'opportunity_score' => $this->calculateOpportunityScore($totalListings),
             ];
         }
 
-        // Sort by opportunity score
-        usort($volumes, fn($a, $b) => $b['opportunity_score'] <=> $a['opportunity_score']);
+        // Sort by opportunity score (favorece termos com menos concorrência real)
+        usort($supply, fn($a, $b) => $b['opportunity_score'] <=> $a['opportunity_score']);
 
-        return $volumes;
+        return $supply;
     }
 
     /**
-     * Heurística de fallback para estimativa de volume quando API indisponível
+     * Classifica competição a partir do total real de anúncios concorrentes
+     * (dado real da API ML), em vez do comprimento da palavra-chave.
      */
-    private function estimateVolumeHeuristic(string $keyword): int
+    private function classifyCompetitionFromListings(int $totalListings): string
     {
-        $length = mb_strlen($keyword);
-        $base = 500;
-        if ($length <= 5) {
-            $base = 1500;
-        } elseif ($length <= 10) {
-            $base = 1000;
-        } elseif ($length > 20) {
-            $base = 300;
+        if ($totalListings >= 500) {
+            return 'high';
         }
-        return $base;
+        if ($totalListings >= 50) {
+            return 'medium';
+        }
+        return 'low';
     }
 
     /**
@@ -662,27 +668,23 @@ Responda em JSON:
         return 'informational';
     }
 
-    private function estimateCompetition(string $keyword): string
+    /**
+     * Opportunity score (0-100) baseado somente em oferta real (total_listings),
+     * sem componente de "volume" fabricado. Menos concorrentes reais = mais
+     * oportunidade. Quando o dado real não está disponível, retorna um score
+     * neutro (50) em vez de inventar um número.
+     */
+    private function calculateOpportunityScore(?int $totalListings): int
     {
-        $length = mb_strlen($keyword);
+        if ($totalListings === null) {
+            return 50;
+        }
 
-        if ($length <= 10) return 'high';
-        if ($length <= 20) return 'medium';
-        return 'low';
-    }
-
-    private function calculateOpportunityScore(float $volume, string $keyword): int
-    {
-        $score = 50;
-
-        // Higher volume = higher score
-        $score += min(30, $volume / 100);
-
-        // Lower competition = higher score
-        $comp = $this->estimateCompetition($keyword);
-        if ($comp === 'low') $score += 20;
-        elseif ($comp === 'medium') $score += 10;
-
-        return (int) min(100, $score);
+        $comp = $this->classifyCompetitionFromListings($totalListings);
+        return match ($comp) {
+            'low' => 85,
+            'medium' => 60,
+            default => 35,
+        };
     }
 }

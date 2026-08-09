@@ -1092,7 +1092,7 @@ class TechSheetService
                         'value' => $model['value'],
                         'score' => 0,
                         'sources' => [],
-                        'search_volume' => $model['estimated_volume'] ?? 0,
+                        'inferred_signal_score' => $model['position_relevance_score'] ?? 0,
                     ];
                 }
                 $suggestions[$key]['score'] += 30; // Base score for autocomplete
@@ -1111,14 +1111,14 @@ class TechSheetService
                         'value' => $model['value'],
                         'score' => 0,
                         'sources' => [],
-                        'search_volume' => 0,
+                        'inferred_signal_score' => 0,
                     ];
                 }
                 $suggestions[$key]['score'] += 25 + ($model['trend_score'] ?? 0);
                 $suggestions[$key]['sources'][] = 'trends';
-                $suggestions[$key]['search_volume'] = max(
-                    $suggestions[$key]['search_volume'],
-                    $model['estimated_volume'] ?? 0
+                $suggestions[$key]['inferred_signal_score'] = max(
+                    $suggestions[$key]['inferred_signal_score'],
+                    $model['position_relevance_score'] ?? 0
                 );
             }
         }
@@ -1134,7 +1134,7 @@ class TechSheetService
                         'value' => $model['value'],
                         'score' => 0,
                         'sources' => [],
-                        'search_volume' => 0,
+                        'inferred_signal_score' => 0,
                     ];
                 }
                 $suggestions[$key]['score'] += 20 + ($model['frequency'] ?? 1) * 5;
@@ -1148,13 +1148,13 @@ class TechSheetService
             if (!in_array($extracted['attribute_id'], ['COMPATIBLE_VEHICLE_MODELS', 'VEHICLE_MODEL', 'MOTO_MODEL', 'MODEL'])) {
                 continue;
             }
-            $key = mb_strtolower($extracted['value']);
+                $key = mb_strtolower($extracted['value']);
             if (!isset($suggestions[$key])) {
                 $suggestions[$key] = [
                     'value' => $extracted['value'],
                     'score' => 0,
                     'sources' => [],
-                    'search_volume' => 0,
+                    'inferred_signal_score' => 0,
                 ];
             }
             $suggestions[$key]['score'] += 40; // High score for being in title
@@ -1172,7 +1172,7 @@ class TechSheetService
                         'value' => $model['value'],
                         'score' => 0,
                         'sources' => [],
-                        'search_volume' => 0,
+                        'inferred_signal_score' => 0,
                     ];
                 }
                 $suggestions[$key]['score'] += 15 + ($model['frequency'] ?? 1) * 3;
@@ -1191,7 +1191,7 @@ class TechSheetService
                         'value' => $model['value'],
                         'score' => 0,
                         'sources' => [],
-                        'search_volume' => 0,
+                        'inferred_signal_score' => 0,
                     ];
                 }
                 $suggestions[$key]['score'] += 35 + ($model['match_score'] ?? 0);
@@ -1215,7 +1215,7 @@ class TechSheetService
                             'value' => $model['value'],
                             'score' => 0,
                             'sources' => [],
-                            'search_volume' => 0,
+                            'inferred_signal_score' => 0,
                         ];
                     }
                     // Score menor pois é inferência
@@ -1237,7 +1237,7 @@ class TechSheetService
                         'value' => $model['value'],
                         'score' => 0,
                         'sources' => [],
-                        'search_volume' => 0,
+                        'inferred_signal_score' => 0,
                     ];
                 }
                 $suggestions[$key]['score'] += $model['score'] ?? 15;
@@ -1265,7 +1265,7 @@ class TechSheetService
                 'value' => $suggestion['value'],
                 'score' => $suggestion['score'],
                 'sources' => array_unique($suggestion['sources']),
-                'search_volume' => $suggestion['search_volume'],
+                'inferred_signal_score' => $suggestion['inferred_signal_score'],
                 'recommendation' => $this->getRecommendationLevel($suggestion['score']),
                 'policy' => $suggestion['policy'] ?? 'semantic_clean',
             ];
@@ -1321,7 +1321,8 @@ class TechSheetService
                     'status' => 'pending',
                     'meta' => [
                         'strategy_sources' => $suggestion['sources'],
-                        'search_volume' => $suggestion['search_volume'],
+                        // Sinal derivado (posição em autocomplete/trends), não é volume de busca medido.
+                        'inferred_signal_score' => $suggestion['inferred_signal_score'],
                         'rank' => $suggestion['rank'],
                         'validation' => $isFromTitle ? 'from_title' : ($isInTitle ? 'in_title' : 'in_title_normalized'),
                         'policy' => 'semantic_field_mapping',
@@ -1491,7 +1492,8 @@ class TechSheetService
                     $models[] = [
                         'value' => $model,
                         'source_query' => $query,
-                        'estimated_volume' => $this->estimateVolumeFromPosition(count($models)),
+                        // Sinal derivado da posição no autocomplete, NÃO é volume de busca real.
+                        'position_relevance_score' => $this->estimatePositionRelevanceScore(count($models)),
                     ];
                 }
             }
@@ -1534,7 +1536,8 @@ class TechSheetService
                     'value' => $model,
                     'trend_keyword' => $trend,
                     'trend_score' => max(0, 20 - $i), // Maior score para trends no topo
-                    'estimated_volume' => $this->estimateVolumeFromPosition($i),
+                    // Sinal derivado da posição no trend, NÃO é volume de busca real.
+                    'position_relevance_score' => $this->estimatePositionRelevanceScore($i),
                 ];
             }
         }
@@ -2152,14 +2155,19 @@ class TechSheetService
     }
 
     /**
-     * Estima volume de busca baseado na posição
+     * Score de relevância posicional (0-100), NÃO é volume de busca.
+     *
+     * Correção de metodologia: a versão anterior deste método ("estimateVolumeFromPosition")
+     * fabricava um número absoluto (base 10000, decaindo 10% por posição) e o
+     * gravava como "search_volume" — dava a impressão de medição real de busca,
+     * quando na verdade é só a posição relativa em uma lista (autocomplete/trends).
+     * Autocomplete e trends não expõem contagem de busca; isso é apenas um
+     * sinal derivado de relevância posicional, nunca deve ser lido como volume.
      */
-    private function estimateVolumeFromPosition(int $position): int
+    private function estimatePositionRelevanceScore(int $position): int
     {
-        // Estimativa: posição 0 = 10000, cada posição -10%
-        $baseVolume = 10000;
         $decayFactor = 0.9;
-        return (int)($baseVolume * pow($decayFactor, $position));
+        return (int)round(100 * pow($decayFactor, $position));
     }
 
     /**
@@ -2711,6 +2719,15 @@ class TechSheetService
         }
 
         $payloadAttributes = array_values($currentMap ?: $appliedAttributes);
+
+        // Governança: aplicar sugestão aprovada é escrita real na API ML — respeita
+        // SAFE_MODE/FORBIDDEN_ACCOUNTS como os demais pontos de apply do Hidden SEO
+        // (HiddenSeoSuggester::applyPending, CLI tech-sheet apply). Sem isso, a UI e o
+        // auto-optimizer podiam escrever na conta 1335 (produção FACILYTY) sem passar
+        // pelo mesmo guard. allowApply=true porque chegar aqui já significa que o
+        // usuário aprovou a sugestão e pediu explicitamente para aplicar; a blacklist
+        // de contas (FORBIDDEN_ACCOUNTS) continua bloqueada de forma incondicional.
+        (new \App\Services\HiddenSeo\SafetyGuard())->assertCanApply($this->accountId, false, true);
 
         $mlResponse = $this->mlClient->put("/items/{$itemId}", ['attributes' => $payloadAttributes]);
         if (isset($mlResponse['error']) || ($mlResponse['success'] ?? true) === false) {

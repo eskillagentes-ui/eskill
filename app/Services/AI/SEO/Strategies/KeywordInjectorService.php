@@ -189,44 +189,39 @@ class KeywordInjectorService
     }
 
     /**
-     * Injeta keywords no campo MODEL
+     * @deprecated Injeção de keywords no campo MODEL foi desativada.
+     *
+     * MODEL é um identificador semântico do produto (ex.: "CG 160 Titan"),
+     * não um espaço de palavras-chave. Anexar sinônimos/keywords ao final do
+     * valor (comportamento antigo deste método) contraria a política adotada
+     * pela Ficha Técnica (TechSheetModelSuggestionPolicy: normalização real,
+     * nunca "depósito de palavras-chave") e pode inclusive gerar valor
+     * inconsistente com o schema oficial da categoria no Mercado Livre.
+     *
+     * Mantido apenas por compatibilidade de assinatura — não injeta mais
+     * keywords, retorna o valor original inalterado. Para sugestões de MODEL,
+     * use App\Services\TechSheetModelSuggestionPolicy (Ficha Técnica).
      */
     public function injectInModel(
         string $model,
         array $keywords,
         ?string $categoryId = null
     ): array {
-        $config = self::INJECTION_PATTERNS['model'];
-        $maxLength = $config['max_length'];
-
-        $currentWords = $this->tokenize($model);
-
-        // Filtrar keywords já presentes
-        $newKeywords = array_filter($keywords, function (string $kw) use ($currentWords): bool {
-            return !$this->wordExistsIn($kw, $currentWords);
-        });
-
-        // Limitar quantidade
-        $newKeywords = array_slice($newKeywords, 0, $config['max_keywords']);
-
-        // Construir modelo otimizado (adicionar no final)
-        $optimizedModel = trim($model);
-        foreach ($newKeywords as $kw) {
-            $addition = ' ' . $kw;
-            if (mb_strlen($optimizedModel . $addition) <= $maxLength) {
-                $optimizedModel .= $addition;
-            }
-        }
+        $original = trim($model);
 
         return [
-            'original' => $model,
-            'optimized' => $optimizedModel,
-            'injected_keywords' => $newKeywords,
+            'original' => $original,
+            'optimized' => $original,
+            'injected_keywords' => [],
+            'skipped_keywords' => array_values($keywords),
+            'skip_reason' => 'model_keyword_injection_disabled',
+            'message' => 'Injeção de keywords em MODEL foi desativada — use a Ficha Técnica '
+                . '(TechSheetModelSuggestionPolicy) para normalização real do modelo.',
             'length' => [
-                'original' => mb_strlen($model),
-                'optimized' => mb_strlen($optimizedModel),
-                'max' => $maxLength
-            ]
+                'original' => mb_strlen($original),
+                'optimized' => mb_strlen($original),
+                'max' => self::INJECTION_PATTERNS['model']['max_length'],
+            ],
         ];
     }
 
@@ -315,6 +310,8 @@ class KeywordInjectorService
             case 'title':
                 return $this->injectInTitle($text, $keywords, $categoryId);
             case 'model':
+                // Desativado: ver injectInModel(). MODEL não deve receber keyword
+                // injection — retorna sem alterar e sinaliza o motivo ao chamador.
                 return $this->injectInModel($text, $keywords, $categoryId);
             case 'description':
             default:

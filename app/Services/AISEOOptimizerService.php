@@ -576,6 +576,19 @@ class AISEOOptimizerService
                 $parsed['competitor_keywords'] = $this->getCompetitorKeywords($context['product_data']);
                 $parsed['trending_keywords'] = $this->getTrendingKeywords($context['category']);
 
+                // Defesa extra: o prompt (SEOPrompts::analyzeKeywords) já instrui a IA a
+                // NUNCA incluir "search_volume" (LLM não tem dado real de busca), mas LLMs
+                // nem sempre seguem a instrução à risca. Remove qualquer "search_volume"
+                // que a IA tenha inventado mesmo assim, para não vazar um número fabricado.
+                if (isset($parsed['keyword_opportunities']) && is_array($parsed['keyword_opportunities'])) {
+                    foreach ($parsed['keyword_opportunities'] as &$opportunity) {
+                        if (is_array($opportunity) && array_key_exists('search_volume', $opportunity)) {
+                            unset($opportunity['search_volume']);
+                        }
+                    }
+                    unset($opportunity);
+                }
+
                 return $parsed;
             }
         }
@@ -636,10 +649,18 @@ class AISEOOptimizerService
         $categoryKeywords = $analysis['category_keywords'];
         foreach ($categoryKeywords as $catKeyword) {
             if (!in_array($catKeyword, $currentKeywords)) {
+                $volumeData = $this->getKeywordSearchVolumeData($catKeyword);
                 $analysis['keyword_opportunities'][] = [
                     'keyword' => $catKeyword,
                     'priority' => $this->calculateKeywordImportance($catKeyword, $category),
-                    'search_volume' => $this->getKeywordSearchVolume($catKeyword),
+                    // Correção de metodologia: só é um número real quando 'data_source' ===
+                    // 'google_keyword_planner'. Antes, quando o Keyword Planner não estava
+                    // configurado, o sistema pedia pra uma IA "chutar" um número (alucinação)
+                    // ou usava heurística por tamanho da palavra — ambos fabricavam falsa
+                    // precisão. Agora: sem Keyword Planner configurado, 'search_volume' vem
+                    // null em vez de inventado.
+                    'search_volume' => $volumeData['volume'],
+                    'search_volume_source' => $volumeData['source'],
                     'competition' => $this->getKeywordCompetition($catKeyword)
                 ];
             }
@@ -1761,65 +1782,50 @@ Retorne um JSON com a seguinte estrutura:
     /**
      * Gets keyword search volume
      */
-    private function getKeywordSearchVolume(string $keyword): int
+    /**
+     * Correção de metodologia: a versão anterior, quando o Google Keyword Planner
+     * não estava configurado, pedia para uma IA generativa "estimar" um número
+     * inteiro de volume de busca (a IA não tem acesso a dados reais de busca —
+     * isso é alucinação apresentada como estimativa), e se isso falhasse, caía
+     * numa heurística baseada no tamanho da palavra-chave (fabricação sem base
+     * estatística). Ambos os fallbacks foram removidos. Agora só existe dado real
+     * (Google Keyword Planner) ou 'null' explícito — nunca mais um número
+     * fabricado apresentado como se fosse volume de busca medido.
+     *
+     * @return array{volume: int|null, source: string}
+     */
+    private function getKeywordSearchVolumeData(string $keyword): array
     {
-        // Check cache first
         $cacheKey = 'keyword_volume_' . md5($keyword);
         $cached = $this->cache->get($cacheKey, 'keywords');
-        if ($cached !== null) {
-            return (int)($cached['value'] ?? $cached);
+        if (is_array($cached) && array_key_exists('value', $cached)) {
+            return ['volume' => $cached['value'], 'source' => $cached['source'] ?? 'unknown'];
         }
 
         try {
-            // Try Google Keyword Planner API first (REAL DATA)
             if ($this->keywordPlanner->isConfigured()) {
                 $metrics = $this->keywordPlanner->getKeywordMetrics($keyword, 'BR', 'pt');
 
                 if ($metrics && isset($metrics['volume'])) {
                     $volume = (int)$metrics['volume'];
 
-                    // Cache the result
                     $this->cache->set($cacheKey, ['value' => $volume, 'source' => 'google_keyword_planner'], 'keywords', 172800); // 48 hours
 
                     $this->logger->info('seo', "Google Keyword Planner: Real volume data for '{$keyword}': {$volume}");
-                    return $volume;
-                }
-            }
-
-            // Fallback to AI estimation
-            $prompt = "Estime o volume de buscas mensais para a palavra-chave '{$keyword}' no Brasil. Responda apenas com um número inteiro aproximado.";
-
-            $result = $this->retryService->execute(
-                fn() => $this->ai->generate($prompt, "Você é um especialista em pesquisa de mercado e SEO com conhecimento sobre volumes de busca no Brasil.", 'basic'),
-                'get_keyword_volume',
-                ['timeout', 'rate limit', 'service unavailable']
-            );
-
-            if ($result['success']) {
-                $aiResponse = trim($result['content']);
-
-                // Extract number from response
-                if (is_numeric($aiResponse)) {
-                    $volume = (int)$aiResponse;
-                    $volume = max(0, $volume); // Ensure non-negative
-
-                    // Cache the result
-                    $this->cache->set($cacheKey, ['value' => $volume, 'source' => 'ai_estimation'], 'keywords', 172800); // 48 hours
-
-                    return $volume;
+                    return ['volume' => $volume, 'source' => 'google_keyword_planner'];
                 }
             }
         } catch (\Exception $e) {
-            $this->logger->error('Keyword volume estimation failed', [
+            $this->logger->error('Keyword volume lookup failed', [
                 'error' => $e->getMessage(),
                 'keyword' => $keyword
             ]);
         }
 
-        // Final fallback: return a reasonable estimate
-        $estimatedVolume = $this->estimateKeywordVolumeFallback($keyword);
-        $this->cache->set($cacheKey, ['value' => $estimatedVolume, 'source' => 'fallback'], 'keywords', 172800);
-        return $estimatedVolume;
+        // Sem Keyword Planner configurado ou sem dado disponível: não fabricar
+        // substituto. Cache curto (1h) para não bater na API repetidamente.
+        $this->cache->set($cacheKey, ['value' => null, 'source' => 'unavailable'], 'keywords', 3600);
+        return ['volume' => null, 'source' => 'unavailable'];
     }
 
     /**
@@ -1850,38 +1856,19 @@ Retorne um JSON com a seguinte estrutura:
                 }
             }
 
-            // Fallback to AI estimation
-            $prompt = "Para a palavra-chave '{$keyword}', qual o nível de concorrência no mercado brasileiro? Responda apenas com uma das opções: 'very_low', 'low', 'medium', 'high', 'very_high'.";
-
-            $result = $this->retryService->execute(
-                fn() => $this->ai->generate($prompt, "Você é um especialista em SEO e análise de concorrência de marketplaces no Brasil.", 'basic'),
-                'get_keyword_competition',
-                ['timeout', 'rate limit', 'service unavailable']
-            );
-
-            if ($result['success']) {
-                $aiResponse = trim(mb_strtolower($result['content']));
-
-                // Validate response
-                $validLevels = ['very_low', 'low', 'medium', 'high', 'very_high'];
-                if (in_array($aiResponse, $validLevels)) {
-                    // Cache the result
-                    $this->cache->set($cacheKey, ['value' => $aiResponse, 'source' => 'ai_estimation'], 'keywords', 172800); // 48 hours
-
-                    return $aiResponse;
-                }
-            }
         } catch (\Exception $e) {
-            $this->logger->error('Keyword competition estimation failed', [
+            $this->logger->error('Keyword competition lookup failed', [
                 'error' => $e->getMessage(),
                 'keyword' => $keyword
             ]);
         }
 
-        // Final fallback: return estimated competition
-        $estimatedCompetition = $this->estimateKeywordCompetitionFallback($keyword);
-        $this->cache->set($cacheKey, ['value' => $estimatedCompetition, 'source' => 'fallback'], 'keywords', 172800);
-        return $estimatedCompetition;
+        // Correção de metodologia: os fallbacks anteriores (IA "chutando" um nível de
+        // concorrência sem dados reais, e heurística por tamanho da palavra) foram
+        // removidos. Sem Keyword Planner configurado, retorna explicitamente
+        // 'desconhecida' em vez de fabricar uma classificação.
+        $this->cache->set($cacheKey, ['value' => 'desconhecida', 'source' => 'unavailable'], 'keywords', 3600);
+        return 'desconhecida';
     }
 
     /**
@@ -2584,65 +2571,4 @@ Retorne um JSON com a seguinte estrutura:
      * Fallback method for estimating keyword volume
      * Used when Google Keyword Planner and AI fail
      */
-    private function estimateKeywordVolumeFallback(string $keyword): int
-    {
-        $wordCount = str_word_count($keyword);
-        $length = mb_strlen($keyword);
-
-        // Estimate volume based on keyword characteristics (no rand())
-        if ($wordCount <= 2) {
-            // Short keywords typically have higher volume
-            $baseVolume = 5000;
-        } elseif ($wordCount <= 4) {
-            // Medium keywords
-            $baseVolume = 1500;
-        } else {
-            // Long-tail keywords
-            $baseVolume = 300;
-        }
-
-        // Adjust based on common high-volume patterns
-        $highVolumeIndicators = ['celular', 'iphone', 'notebook', 'tv', 'sapato', 'camiseta', 'calça'];
-        $lowVolumeIndicators = ['especializado', 'artesanal', 'personalizado', 'niche', 'profissional'];
-
-        $multiplier = 1.0;
-
-        foreach ($highVolumeIndicators as $indicator) {
-            if (stripos($keyword, $indicator) !== false) {
-                $multiplier = 2.0;
-                break;
-            }
-        }
-
-        foreach ($lowVolumeIndicators as $indicator) {
-            if (stripos($keyword, $indicator) !== false) {
-                $multiplier = 0.5;
-                break;
-            }
-        }
-
-        return (int)($baseVolume * $multiplier);
-    }
-
-    /**
-     * Fallback method for estimating keyword competition
-     * Used when Google Keyword Planner and AI fail
-     */
-    private function estimateKeywordCompetitionFallback(string $keyword): string
-    {
-        $wordCount = str_word_count($keyword);
-        $length = mb_strlen($keyword);
-
-        // Estimate competition based on keyword characteristics
-        if ($wordCount <= 2 && $length <= 15) {
-            // Short, common keywords = high competition
-            return 'high';
-        } elseif ($wordCount <= 4 && $length <= 25) {
-            // Medium keywords = medium competition
-            return 'medium';
-        } else {
-            // Long-tail keywords = low competition
-            return 'low';
-        }
-    }
 }

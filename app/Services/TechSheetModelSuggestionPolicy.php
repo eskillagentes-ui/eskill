@@ -258,8 +258,8 @@ class TechSheetModelSuggestionPolicy
      * Filtra e re-ranqueia candidatos. Fontes de mineração só sobem score;
      * valor final deve ser identificador limpo.
      *
-     * @param list<array{value:string,score?:int|float,sources?:list<string>,search_volume?:int,brand?:string}> $candidates
-     * @return list<array{value:string,score:int,sources:list<string>,search_volume:int,brand?:string,policy:string}>
+     * @param list<array{value:string,score?:int|float,sources?:list<string>,inferred_signal_score?:int,brand?:string}> $candidates
+     * @return list<array{value:string,score:int,sources:list<string>,inferred_signal_score:int,brand?:string,policy:string}>
      */
     public function selectBest(array $candidates, string $title = ''): array
     {
@@ -270,7 +270,9 @@ class TechSheetModelSuggestionPolicy
             $raw = (string)($candidate['value'] ?? '');
             $sources = array_values(array_unique(array_map('strval', $candidate['sources'] ?? [])));
             $score = (int)($candidate['score'] ?? 0);
-            $searchVolume = (int)($candidate['search_volume'] ?? 0);
+            // Sinal derivado (posição em autocomplete/trends), não é volume de busca
+            // real — ver TechSheetService::estimatePositionRelevanceScore().
+            $inferredSignalScore = (int)($candidate['inferred_signal_score'] ?? 0);
 
             $clean = $this->cleanCandidate($raw, $title);
             if ($clean === null) {
@@ -309,7 +311,7 @@ class TechSheetModelSuggestionPolicy
                     'value' => $clean,
                     'score' => $score,
                     'sources' => $sources,
-                    'search_volume' => $searchVolume,
+                    'inferred_signal_score' => $inferredSignalScore,
                     'policy' => 'semantic_clean',
                 ];
                 if (!empty($candidate['brand'])) {
@@ -321,7 +323,7 @@ class TechSheetModelSuggestionPolicy
                     $bucket[$key]['sources'],
                     $sources
                 )));
-                $bucket[$key]['search_volume'] = max($bucket[$key]['search_volume'], $searchVolume);
+                $bucket[$key]['inferred_signal_score'] = max($bucket[$key]['inferred_signal_score'], $inferredSignalScore);
             }
         }
 

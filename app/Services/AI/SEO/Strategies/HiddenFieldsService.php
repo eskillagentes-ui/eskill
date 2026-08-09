@@ -9,15 +9,28 @@ use App\Services\MercadoLivreClient;
 /**
  * 🔒 E2: Hidden Fields Service
  *
- * Gerencia campos ocultos do Mercado Livre que são indexados
- * mas não exibidos diretamente na listagem.
+ * Gerencia atributos de categoria com tag `hidden` no schema oficial do
+ * Mercado Livre — campos que existem no modelo de dados do produto mas não
+ * aparecem destacados na ficha pública.
  *
- * Campos Ocultos Suportados:
- * - KEYWORDS: Palavras-chave ocultas (máx 60 chars)
- * - MPN: Manufacturer Part Number (código do fabricante)
- * - LINE: Linha do produto
- * - GTIN: Global Trade Item Number (EAN/UPC)
- * - ALPHANUMERIC_MODEL: Código alfanumérico do modelo
+ * IMPORTANTE (correção de metodologia): nenhum destes campos deve ser tratado
+ * como "confirmado" sem verificar o schema real da categoria via
+ * GET /categories/{id}/attributes. Testado empiricamente contra a API oficial
+ * (5 categorias reais do catálogo): MPN e GTIN existem em 100% das categorias
+ * testadas; LINE em 60%; ALPHANUMERIC_MODEL em apenas 20%; e KEYWORDS não
+ * existe em NENHUMA — ou seja, "palavras-chave ocultas" não é um recurso
+ * comprovado do Mercado Livre (não confundir com backend keywords de outros
+ * marketplaces). A partir desta versão, analyzeItem()/generateSuggestions()/
+ * applyToItem() validam cada campo contra o schema real da categoria antes de
+ * tratá-lo como aplicável — um "sinal derivado", nunca um "campo confirmado".
+ *
+ * Campos mapeados (aplicabilidade real varia por categoria, ver acima):
+ * - KEYWORDS: NÃO é atributo oficial do ML — mantido apenas por
+ *   compatibilidade retroativa; será sempre marcado como não aplicável.
+ * - MPN: Manufacturer Part Number (código do fabricante) — confirmado
+ * - LINE: Linha do produto — confirmado, mas nem toda categoria tem
+ * - GTIN: Global Trade Item Number (EAN/UPC) — confirmado
+ * - ALPHANUMERIC_MODEL: Código alfanumérico do modelo — raro, categoria-dependente
  *
  * @package App\Services\AI\SEO\Strategies
  */
@@ -87,12 +100,21 @@ class HiddenFieldsService
 
         $item = $this->client->get("/items/{$itemId}");
         $attributes = $item['attributes'] ?? [];
+        $categoryId = $item['category_id'] ?? null;
+
+        // Correção de metodologia: nunca tratar HIDDEN_FIELDS como confirmado
+        // por padrão. Valida contra o schema real da categoria (ex.: KEYWORDS
+        // não existe em nenhuma categoria testada; LINE/ALPHANUMERIC_MODEL
+        // variam). Campos não presentes no schema são reportados à parte, sem
+        // entrar no cálculo do score.
+        $validIds = $this->getValidAttributeIds($categoryId);
 
         $analysis = [
             'item_id' => $itemId,
-            'category_id' => $item['category_id'] ?? null,
+            'category_id' => $categoryId,
             'hidden_fields' => [],
             'missing_fields' => [],
+            'not_applicable_in_category' => [],
             'optimization_score' => 0,
             'recommendations' => []
         ];
@@ -101,6 +123,14 @@ class HiddenFieldsService
         $totalWeight = 0;
 
         foreach (self::HIDDEN_FIELDS as $fieldId => $config) {
+            if ($validIds !== null && !in_array($fieldId, $validIds, true)) {
+                $analysis['not_applicable_in_category'][$fieldId] = [
+                    'id' => $fieldId,
+                    'reason' => 'Atributo não existe no schema oficial desta categoria (verificado via API ML)',
+                ];
+                continue;
+            }
+
             $currentValue = $this->findAttributeValue($attributes, $fieldId);
             $totalWeight += $config['weight'];
 
@@ -164,48 +194,95 @@ class HiddenFieldsService
     public function generateSuggestions(array $productData, ?string $categoryId = null): array
     {
         $suggestions = [];
+        $notApplicable = [];
         $title = $productData['title'] ?? '';
         $brand = $productData['brand'] ?? '';
         $model = $productData['model'] ?? '';
         $attributes = $productData['attributes'] ?? [];
 
-        // 1. KEYWORDS - Sinônimos e variações não usados no título
-        $suggestions['KEYWORDS'] = $this->generateKeywordsSuggestion(
-            $title,
-            $brand,
-            $model,
-            $categoryId
-        );
+        // Correção de metodologia: só gera sugestão para um campo depois de
+        // confirmar (via schema real da categoria) que ele existe no ML.
+        // Sem categoryId não há como verificar — nesse caso, nenhum campo é
+        // tratado como confirmado por padrão (evita alegar "sinal oculto"
+        // sem evidência, ex.: KEYWORDS nunca existe no schema real).
+        $validIds = $this->getValidAttributeIds($categoryId);
+        $isApplicable = function (string $fieldId) use ($validIds, &$notApplicable): bool {
+            if ($validIds === null) {
+                $notApplicable[$fieldId] = 'category_id não informado — não é possível verificar o schema oficial';
+                return false;
+            }
+            if (!in_array($fieldId, $validIds, true)) {
+                $notApplicable[$fieldId] = 'Atributo não existe no schema oficial desta categoria (verificado via API ML)';
+                return false;
+            }
+            return true;
+        };
 
-        // 2. MPN - Código do fabricante
-        $suggestions['MPN'] = $this->generateMpnSuggestion(
-            $model,
-            $brand,
-            $attributes
-        );
+        // 1. KEYWORDS - NÃO é atributo oficial do ML (verificado empiricamente:
+        // ausente em 100% das categorias testadas). Mantido só por compatibilidade
+        // retroativa da API interna; $isApplicable() sempre vai rejeitar aqui.
+        if ($isApplicable('KEYWORDS')) {
+            $suggestions['KEYWORDS'] = $this->generateKeywordsSuggestion($title, $brand, $model, $categoryId);
+        }
 
-        // 3. LINE - Linha do produto
-        $suggestions['LINE'] = $this->generateLineSuggestion(
-            $productData,
-            $categoryId
-        );
+        // 2. MPN - Código do fabricante (confirmado no schema oficial)
+        if ($isApplicable('MPN')) {
+            $suggestions['MPN'] = $this->generateMpnSuggestion($model, $brand, $attributes);
+        }
 
-        // 4. GTIN - Código de barras (se disponível)
-        $suggestions['GTIN'] = $this->extractGtin($attributes);
+        // 3. LINE - Linha do produto (confirmado, mas nem toda categoria tem)
+        if ($isApplicable('LINE')) {
+            $suggestions['LINE'] = $this->generateLineSuggestion($productData, $categoryId);
+        }
 
-        // 5. ALPHANUMERIC_MODEL - Código alfanumérico
-        $suggestions['ALPHANUMERIC_MODEL'] = $this->generateAlphanumericModel(
-            $model,
-            $brand,
-            $attributes
-        );
+        // 4. GTIN - Código de barras (confirmado no schema oficial)
+        if ($isApplicable('GTIN')) {
+            $suggestions['GTIN'] = $this->extractGtin($attributes);
+        }
+
+        // 5. ALPHANUMERIC_MODEL - raro, categoria-dependente
+        if ($isApplicable('ALPHANUMERIC_MODEL')) {
+            $suggestions['ALPHANUMERIC_MODEL'] = $this->generateAlphanumericModel($model, $brand, $attributes);
+        }
 
         return [
             'suggestions' => $suggestions,
+            'not_applicable_in_category' => $notApplicable,
             'category_id' => $categoryId,
             'generated_at' => date('Y-m-d H:i:s'),
             'total_fields' => count(array_filter($suggestions, fn(array $s): bool => !empty($s['value'])))
         ];
+    }
+
+    /**
+     * Retorna os IDs de atributo confirmados no schema oficial da categoria
+     * (GET /categories/{id}/attributes, já cacheado 12h em MercadoLivreClient).
+     * Retorna null quando não é possível verificar (sem categoryId ou sem
+     * cliente ML) — nesse caso o chamador NÃO deve tratar nenhum campo como
+     * confirmado.
+     *
+     * @return list<string>|null
+     */
+    private function getValidAttributeIds(?string $categoryId): ?array
+    {
+        if ($categoryId === null || $categoryId === '' || !$this->client) {
+            return null;
+        }
+
+        try {
+            $categoryAttrs = $this->client->getCategoryAttributes($categoryId);
+        } catch (\Exception $e) {
+            return null;
+        }
+
+        if (empty($categoryAttrs)) {
+            return null;
+        }
+
+        return array_values(array_filter(array_map(
+            static fn(array $attr): string => (string)($attr['id'] ?? ''),
+            $categoryAttrs
+        )));
     }
 
     /**
@@ -447,6 +524,14 @@ class HiddenFieldsService
             throw new \RuntimeException('Cliente ML não configurado');
         }
 
+        // Correção de metodologia: valida cada campo contra o schema real da
+        // categoria do item antes de tentar aplicar. Sem isso, o sistema
+        // tentava gravar atributos que não existem no ML (ex.: KEYWORDS nunca
+        // existe) como se fossem um "campo oculto confirmado".
+        $item = $this->client->get("/items/{$itemId}");
+        $categoryId = $item['category_id'] ?? null;
+        $validIds = $this->getValidAttributeIds($categoryId);
+
         $attributes = [];
         $applied = [];
         $errors = [];
@@ -454,6 +539,11 @@ class HiddenFieldsService
         foreach ($fields as $fieldId => $value) {
             if (!isset(self::HIDDEN_FIELDS[$fieldId])) {
                 $errors[] = "Campo desconhecido: {$fieldId}";
+                continue;
+            }
+
+            if ($validIds !== null && !in_array($fieldId, $validIds, true)) {
+                $errors[] = "Campo {$fieldId} não existe no schema oficial desta categoria ({$categoryId}) — não é um atributo confirmado do Mercado Livre, não será aplicado.";
                 continue;
             }
 
@@ -488,6 +578,10 @@ class HiddenFieldsService
                 'errors' => $errors
             ];
         }
+
+        // Governança: escrita real na API ML respeita SAFE_MODE/FORBIDDEN_ACCOUNTS,
+        // igual aos demais pontos de apply do Hidden SEO/Ficha Técnica.
+        (new \App\Services\HiddenSeo\SafetyGuard())->assertCanApply((int)$this->accountId, false, true);
 
         // Aplicar via API
         try {

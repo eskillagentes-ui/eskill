@@ -215,6 +215,7 @@ class CompetitorSpy
                 'sort' => 'sold_quantity_desc',
             ]);
 
+
             $competitors = $searchResult['results'] ?? [];
             if (empty($competitors)) {
                 return $result;

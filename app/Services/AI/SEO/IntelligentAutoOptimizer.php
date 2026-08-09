@@ -126,7 +126,13 @@ class IntelligentAutoOptimizer
         $currentPrediction = $this->predictor->predictPerformance($item);
         $result['predictions']['current'] = $currentPrediction;
         
-        if ($seoOptimization['score_after'] > $seoOptimization['score_before']) {
+        // AdvancedSEOMaximizer::calculateSEOScore() retorna um array de scores
+        // (overall/title/description/attributes/images/price), não um número.
+        // Usamos 'overall' como score agregado 0-100 para as comparações abaixo.
+        $scoreAfterOverall = $seoOptimization['score_after']['overall'] ?? 0;
+        $scoreBeforeOverall = $seoOptimization['score_before']['overall'] ?? 0;
+
+        if ($scoreAfterOverall > $scoreBeforeOverall) {
             // Simular item otimizado
             $optimizedItem = $this->simulateOptimizedItem($item, $seoOptimization);
             $optimizedPrediction = $this->predictor->predictPerformance($optimizedItem);
@@ -179,8 +185,10 @@ class IntelligentAutoOptimizer
             'expected_roi' => 0,
         ];
         
-        // Calcular melhoria esperada
-        $scoreImprovement = $seoOptimization['score_after'] - $seoOptimization['score_before'];
+        // Calcular melhoria esperada (score_after/score_before são arrays de
+        // AdvancedSEOMaximizer::calculateSEOScore(); usamos o agregado 'overall').
+        $scoreImprovement = ($seoOptimization['score_after']['overall'] ?? 0)
+            - ($seoOptimization['score_before']['overall'] ?? 0);
         $salesImprovement = $optimizedPrediction['predicted_sales'] - $currentPrediction['predicted_sales'];
         $viewsImprovement = $optimizedPrediction['predicted_views'] - $currentPrediction['predicted_views'];
         

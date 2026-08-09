@@ -27,6 +27,11 @@ const SEOKiller = {
 
     // Inicialização
     init() {
+        if (this._initialized) {
+            return;
+        }
+        this._initialized = true;
+
         console.log('🔥 SEO Killer initialized');
         this.bindEvents();
         this.initTabs();
@@ -34,6 +39,8 @@ const SEOKiller = {
         // Delay initial API calls to avoid burst limit
         setTimeout(() => {
             this.loadDashboardData();
+            // Top Performers independente do diagnose (antes ficava preso se diagnose falhasse)
+            this.loadTopPerformers();
             this.initChatbotWidget();
         }, 100);
     },
@@ -279,23 +286,27 @@ const SEOKiller = {
             const data = await this.utils.fetchAPI('/api/seo-killer/diagnose');
 
             if (data.success && data.stats) {
-                document.getElementById('total-items').textContent = this.utils.formatNumber(data.stats.total || 0);
-                document.getElementById('optimized-items').textContent = this.utils.formatNumber(data.stats.optimized || 0);
-                document.getElementById('pending-items').textContent = this.utils.formatNumber(data.stats.pending || 0);
-                document.getElementById('avg-score').textContent = data.stats.avgScore ? data.stats.avgScore.toFixed(1) : '-';
+                const setText = (id, value) => {
+                    const el = document.getElementById(id);
+                    if (el) el.textContent = value;
+                };
+                setText('total-items', this.utils.formatNumber(data.stats.total || 0));
+                setText('optimized-items', this.utils.formatNumber(data.stats.optimized || 0));
+                setText('pending-items', this.utils.formatNumber(data.stats.pending || 0));
+                setText('avg-score', data.stats.avgScore ? data.stats.avgScore.toFixed(1) : '-');
             }
 
             const updatedEl = document.getElementById('seo-killer-last-updated');
             if (updatedEl) {
                 updatedEl.textContent = new Date().toLocaleString('pt-BR', { dateStyle: 'short', timeStyle: 'short' });
             }
-
-            // Load new components with delays to avoid burst limit
+        } catch (error) {
+            console.error('Erro ao carregar dados do dashboard:', error);
+        } finally {
+            // Sempre carregar widgets; não depender do sucesso do diagnose nem de DOM stats
             setTimeout(() => this.loadTopPerformers(), 200);
             setTimeout(() => this.loadAutopilotStatus(), 400);
             setTimeout(() => this.loadRecentActivity(), 600);
-        } catch (error) {
-            console.error('Erro ao carregar dados do dashboard:', error);
         }
     },
 
@@ -559,7 +570,7 @@ const SEOKiller = {
         try {
             const data = await this.utils.fetchAPI(`/api/seo-killer/top-performers?limit=5&period=${period}`);
 
-            if (data.success && data.items && data.items.length > 0) {
+             if (data.success && data.items && data.items.length > 0) {
                 let html = `
                 <table class="table table-hover align-middle">
                     <thead class="table-light">

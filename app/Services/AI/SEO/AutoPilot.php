@@ -177,6 +177,15 @@ class AutoPilot
             $nextRun
         ]);
 
+        // Sincroniza a flag `enabled` com AutoPilotStatusManager (tabela autopilot_config),
+        // que é a fonte de dados do badge de status na dashboard. Sem isso, enable/disable
+        // aqui não refletia no status exibido ao usuário (bug conhecido, duas tabelas distintas).
+        try {
+            (new AutoPilotStatusManager($this->accountId))->setEnabled((bool)($config['enabled'] ?? false));
+        } catch (\Exception $e) {
+            // Não bloqueia o salvamento principal por falha na sincronização de status.
+        }
+
         return [
             'success' => true,
             'config' => $config,

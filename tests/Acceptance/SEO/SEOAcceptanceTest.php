@@ -324,7 +324,10 @@ class SEOAcceptanceTest extends TestCase
         $volume = $service->estimateSearchVolume($baseKeyword, $categoryId);
         $this->assertIsArray($volume);
         $this->assertArrayHasKey('keyword', $volume);
-        $this->assertArrayHasKey('monthly_volume', $volume);
+        // 'total_listings' é o dado real (oferta via API ML); 'monthly_volume' foi
+        // mantido apenas por compatibilidade de schema, mas nunca mais é fabricado
+        // (ver correção de metodologia em KeywordResearchService::estimateSearchVolume).
+        $this->assertArrayHasKey('total_listings', $volume);
         $this->assertArrayHasKey('competition', $volume);
         
         $withCompetition = $service->getWithCompetitionScore($keywords);

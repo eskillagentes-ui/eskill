@@ -98,12 +98,17 @@ Retorne um JSON com a seguinte estrutura:
     {
       "keyword": "missing keyword",
       "priority": 0.8,
-      "search_volume": 1000,
+      "estimated_interest": "alto|medio|baixo",
       "competition": "low"
     }
   ],
   "score": pontuação de 0-100
 }
+
+IMPORTANTE: você não tem acesso a dados reais de volume de busca do Mercado Livre.
+NÃO inclua nenhum campo "search_volume" ou número de buscas mensais — isso seria
+inventado. Use apenas "estimated_interest" (juízo qualitativo alto/médio/baixo),
+nunca um número absoluto de buscas.
 PROMPT;
     }
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services\AI\SEO;
 
 use App\Database;
+use App\Services\MercadoLivreClient;
 use PDO;
 
 /**
@@ -18,6 +19,10 @@ class AdvancedSEOMaximizer
 {
     private int $accountId;
     private PDO $db;
+    private MercadoLivreClient $mlClient;
+
+    /** @var array<string, array> Memoização em memória por request (evita chamadas repetidas na mesma categoria) */
+    private array $categoryInfoCache = [];
 
     // Fatores de peso para SEO (baseado em análise de 1000+ anúncios top-ranked)
     private const SEO_WEIGHTS = [
@@ -49,6 +54,7 @@ class AdvancedSEOMaximizer
     {
         $this->accountId = $accountId;
         $this->db = Database::getInstance();
+        $this->mlClient = new MercadoLivreClient($accountId);
     }
 
     /**
@@ -329,7 +335,7 @@ class AdvancedSEOMaximizer
     public function advancedCompetitorAnalysis(string $itemId, array $itemData): array
     {
         $analysis = [
-            'item_id' => $itemData,
+            'item_id' => $itemId,
             'competitors' => [],
             'opportunities' => [],
             'threats' => [],
@@ -341,7 +347,9 @@ class AdvancedSEOMaximizer
 
         foreach ($competitors as $competitor) {
             $compAnalysis = [
-                'item_id' => $competitor['id'],
+                // findDirectCompetitors faz SELECT ml_item_id — a coluna é ml_item_id,
+                // não 'id'; usar $competitor['id'] devolvia null para todos.
+                'item_id' => $competitor['ml_item_id'] ?? $competitor['id'] ?? null,
                 'title' => $competitor['title'],
                 'price' => $competitor['price'],
                 'sales' => $competitor['sold_quantity'] ?? 0,
@@ -383,11 +391,27 @@ class AdvancedSEOMaximizer
         }
     }
 
+    /**
+     * Busca dados da categoria na API do ML (nome, path_from_root, etc.).
+     * Bug conhecido corrigido: consultava `SELECT * FROM categories`, tabela
+     * que nunca existiu no schema — sempre retornava vazio silenciosamente.
+     * `MercadoLivreClient::getCategory()` já cacheia 24h (arquivo/Redis);
+     * aqui memoizamos só para a duração do request atual.
+     */
     private function getCategoryInfo(string $categoryId): array
     {
-        $stmt = $this->db->prepare("SELECT * FROM categories WHERE id = ?");
-        $stmt->execute([$categoryId]);
-        return $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        if ($categoryId === '') {
+            return [];
+        }
+
+        if (array_key_exists($categoryId, $this->categoryInfoCache)) {
+            return $this->categoryInfoCache[$categoryId];
+        }
+
+        $category = $this->mlClient->getCategory($categoryId);
+        $this->categoryInfoCache[$categoryId] = $category;
+
+        return $category;
     }
 
     private function extractKeywords(string $text): array
@@ -863,11 +887,28 @@ class AdvancedSEOMaximizer
             $score += 10;
         }
 
-        // Qualidade das imagens (verificar resolução)
+        // Qualidade das imagens: verifica campo size/max_size da imagem ML
+        // (ex.: "1200x803"). Antes sempre incrementava highRes sem verificar nada,
+        // fazendo a pontuação de imagens sempre chegar ao máximo independentemente
+        // da qualidade real. Agora usa dados reais quando disponíveis.
         $highRes = 0;
         foreach ($images as $image) {
-            // Simplificado: considerar todas como alta resolução
-            $highRes++;
+            $size = (string) ($image['size'] ?? $image['max_size'] ?? '');
+            if ($size !== '') {
+                $parts = explode('x', strtolower($size));
+                $w = (int) ($parts[0] ?? 0);
+                $h = (int) ($parts[1] ?? 0);
+                $minDim = ($w > 0 && $h > 0) ? min($w, $h) : max($w, $h);
+                if ($minDim >= 800) {
+                    $highRes++;
+                }
+            } else {
+                // Heurística de URL: imagens ML com '-O.' no path são originais (alta res)
+                $url = (string) ($image['secure_url'] ?? $image['url'] ?? '');
+                if (str_contains($url, '-O.')) {
+                    $highRes++;
+                }
+            }
         }
 
         if (!empty($images)) {
@@ -1235,7 +1276,11 @@ class AdvancedSEOMaximizer
     {
         $improvements = [];
 
-        $scoreImprovement = $results['score_after'] - $results['score_before'];
+        // score_before/score_after são arrays retornados por calculateSEOScore()
+        // (overall/title/description/attributes/images/price); usamos 'overall'
+        // como o agregado 0-100 para o texto de melhoria.
+        $scoreImprovement = ($results['score_after']['overall'] ?? 0)
+            - ($results['score_before']['overall'] ?? 0);
         if ($scoreImprovement > 0) {
             $improvements[] = "SEO Score melhorado em +{$scoreImprovement} pontos";
         }
@@ -1251,6 +1296,24 @@ class AdvancedSEOMaximizer
 
     private function saveOptimizationAnalysis(string $itemId, array $results): void
     {
+        // Tabela nunca existia no schema (INSERT sempre falhava e era engolido
+        // pelo catch(\Throwable) de maximizeItemSEO). score_before/score_after
+        // são arrays (calculateSEOScore), então gravamos como JSON.
+        $this->db->exec("
+            CREATE TABLE IF NOT EXISTS seo_optimization_analysis (
+                id INT AUTO_INCREMENT PRIMARY KEY,
+                account_id INT NOT NULL,
+                item_id VARCHAR(32) NOT NULL,
+                score_before JSON,
+                score_after JSON,
+                optimizations JSON,
+                created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+                UNIQUE KEY uk_account_item (account_id, item_id),
+                INDEX idx_account (account_id)
+            ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+        ");
+
         $stmt = $this->db->prepare("
             INSERT INTO seo_optimization_analysis
             (account_id, item_id, score_before, score_after, optimizations, created_at)
@@ -1265,8 +1328,8 @@ class AdvancedSEOMaximizer
         $stmt->execute([
             $this->accountId,
             $itemId,
-            $results['score_before'],
-            $results['score_after'],
+            json_encode($results['score_before']),
+            json_encode($results['score_after']),
             json_encode($results['optimizations'])
         ]);
     }

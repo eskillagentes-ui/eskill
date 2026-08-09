@@ -212,6 +212,43 @@ class AutoPilotStatusManager
     }
     
     /**
+     * 🔁 Sincroniza a flag `enabled` a partir de AutoPilot::saveConfig().
+     *
+     * Bug conhecido: AutoPilot (seo_autopilot_config) e AutoPilotStatusManager
+     * (autopilot_config) são tabelas distintas — o botão enable/disable do
+     * AutoPilot escrevia só na primeira, mas o badge de status lê a segunda,
+     * então a UI ficava "desativado" mesmo com o AutoPilot habilitado.
+     * Este método mantém a flag em sincronia sem migrar o schema.
+     */
+    public function setEnabled(bool $enabled): void
+    {
+        try {
+            $this->ensureTableExists();
+
+            $stmt = $this->db->prepare("
+                INSERT INTO autopilot_config (account_id, enabled, config, budget_limit, updated_at)
+                VALUES (:account_id, :enabled, :config, :budget_limit, NOW())
+                ON DUPLICATE KEY UPDATE
+                    enabled = :enabled,
+                    updated_at = NOW()
+            ");
+
+            $stmt->execute([
+                'account_id' => $this->accountId,
+                'enabled' => $enabled,
+                'config' => json_encode(['enabled' => $enabled]),
+                'budget_limit' => 100.00,
+            ]);
+        } catch (\Exception $e) {
+            log_warning('AutoPilotStatusManager: falha ao sincronizar enabled', [
+                'account_id' => $this->accountId,
+                'enabled' => $enabled,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    /**
      * 🔧 Create default configuration
      */
     private function createDefaultConfig(): void

@@ -321,10 +321,17 @@ function normalizeExternalUrl(url) {
         },
 
         processData: function() {
-            // Add calculated fields
+            // Correcao de bug: is_winning era recalculado so comparando precos no
+            // frontend, ignorando o campo is_winner real vindo da API (comparacao
+            // de seller_id feita no backend). Isso podia divergir do resultado real
+            // da disputa de catalogo (preco nao e o unico criterio da buy box).
+            // Agora usamos o valor do servidor como fonte da verdade; so caimos no
+            // calculo por preco se o servidor genuinamente nao informou is_winner.
             this.currentData.forEach(item => {
                 item.diff_percent = ((item.my_price - item.buy_box_winner.price) / item.my_price * 100).toFixed(2);
-                item.is_winning = item.my_price <= item.buy_box_winner.price;
+                item.is_winning = (item.is_winner !== null && item.is_winner !== undefined)
+                    ? !!item.is_winner
+                    : (item.my_price <= item.buy_box_winner.price);
             });
         },
 

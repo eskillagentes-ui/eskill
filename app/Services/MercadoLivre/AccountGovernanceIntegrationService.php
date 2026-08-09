@@ -374,7 +374,9 @@ class AccountGovernanceIntegrationService
             'shipping' => $body['shipping'] ?? [],
             'health' => $body['health'] ?? null,
             'visits_30d' => 0,
+            'visits_14d' => 0,
             'sales_30d' => 0,
+            'sales_14d' => 0,
             'conversion_30d' => 0.0,
         ];
     }
@@ -390,10 +392,11 @@ class AccountGovernanceIntegrationService
             $itemMap[$item['id']] = $item;
         }
 
-        // Buscar vendas em batch
+        // Buscar vendas em batch (30d e 14d, na mesma chamada de orders)
         $salesByItem = [];
+        $sales14ByItem = [];
         if ($fetchSales) {
-            $salesByItem = $this->fetchSalesByItem($sellerId, $itemIds);
+            [$salesByItem, $sales14ByItem] = $this->fetchSalesByItem($sellerId, $itemIds);
         }
 
         // Buscar visitas em batch via getMultiItemVisits (50 IDs por chamada, sem limite de 100)
@@ -407,6 +410,19 @@ class AccountGovernanceIntegrationService
                     foreach ($visitsResult as $itemId => $visitData) {
                         if (isset($itemMap[$itemId])) {
                             $itemMap[$itemId]['visits_30d'] = (int) ($visitData['total'] ?? $visitData['visits'] ?? 0);
+                            // Correção de bug: visits_14d nunca era preenchido (ficava
+                            // sempre 0), o que fazia AccountGovernanceService calcular
+                            // trend = -100% para todo item com tráfego em 30d, marcando
+                            // FALLING indiscriminadamente. getMultiItemVisits() já retorna
+                            // o detalhamento diário (visits_detail) da mesma chamada de
+                            // 30d — usamos isso para somar só os últimos 14 dias, sem
+                            // precisar de uma segunda chamada à API.
+                            $visits14 = $this->sumLastNDaysFromDaily($visitData['daily'] ?? [], 14);
+                            // Sem detalhamento diário na resposta (formato legado da API),
+                            // usa estimativa proporcional em vez de 0 fixo — 0 fixo geraria
+                            // sempre trend = -100% (FALLING) no AccountGovernanceService.
+                            $itemMap[$itemId]['visits_14d'] = $visits14
+                                ?? (int) round($itemMap[$itemId]['visits_30d'] * (14 / 30));
                         }
                     }
                 } catch (\Exception $e) {
@@ -423,6 +439,7 @@ class AccountGovernanceIntegrationService
         foreach ($salesByItem as $itemId => $salesCount) {
             if (isset($itemMap[$itemId])) {
                 $itemMap[$itemId]['sales_30d'] = $salesCount;
+                $itemMap[$itemId]['sales_14d'] = $sales14ByItem[$itemId] ?? 0;
                 $visits = $itemMap[$itemId]['visits_30d'] ?? 0;
                 if ($visits > 0) {
                     $itemMap[$itemId]['conversion_30d'] = $salesCount / $visits;
@@ -434,11 +451,48 @@ class AccountGovernanceIntegrationService
     }
 
     /**
-     * Busca vendas por item nos últimos 30 dias via /orders/search
+     * Soma visitas dos últimos N dias a partir do detalhamento diário
+     * (visits_detail) retornado por getMultiItemVisits(). Retorna null quando
+     * não há detalhamento diário disponível (resposta em formato legado),
+     * para o chamador decidir um fallback em vez de assumir 0 dias com visita.
+     *
+     * @param array<int, array{date: string, total: int}> $daily
+     */
+    private function sumLastNDaysFromDaily(array $daily, int $days): ?int
+    {
+        if (empty($daily)) {
+            return null;
+        }
+
+        $cutoff = strtotime("-{$days} days");
+        $sum = 0;
+        $found = false;
+
+        foreach ($daily as $entry) {
+            $timestamp = strtotime((string) ($entry['date'] ?? ''));
+            if ($timestamp === false) {
+                continue;
+            }
+            if ($timestamp >= $cutoff) {
+                $sum += (int) ($entry['total'] ?? 0);
+                $found = true;
+            }
+        }
+
+        return $found ? $sum : null;
+    }
+
+    /**
+     * Busca vendas por item nos últimos 30 dias (e, no mesmo lote, também nos
+     * últimos 14 dias) via /orders/search.
+     *
+     * @return array{0: array<string, int>, 1: array<string, int>} [sales_30d, sales_14d] por item
      */
     private function fetchSalesByItem(string $sellerId, array $itemIds): array
     {
         $salesByItem = array_fill_keys($itemIds, 0);
+        $sales14ByItem = array_fill_keys($itemIds, 0);
+        $cutoff14 = strtotime('-14 days');
         $dateFrom = date('Y-m-d\TH:i:s.000-00:00', strtotime('-30 days'));
 
         $offset = 0;
@@ -478,12 +532,22 @@ class AccountGovernanceIntegrationService
                 }
 
                 foreach ($orders as $order) {
+                    $orderTimestamp = strtotime((string) ($order['date_created'] ?? ''));
+                    $isWithin14d = $orderTimestamp !== false && $orderTimestamp >= $cutoff14;
+
                     $orderItems = $order['order_items'] ?? [];
                     foreach ($orderItems as $orderItem) {
                         $itemId = $orderItem['item']['id'] ?? '';
                         $qty = (int) ($orderItem['quantity'] ?? 1);
                         if (isset($salesByItem[$itemId])) {
                             $salesByItem[$itemId] += $qty;
+                            // Correção de bug: sales_14d nunca era calculado (ficava
+                            // sempre 0), fazendo NO_SALES_14 disparar para todo item,
+                            // mesmo com vendas recentes. Reaproveita as mesmas ordens já
+                            // buscadas para a janela de 30d em vez de uma chamada extra.
+                            if ($isWithin14d) {
+                                $sales14ByItem[$itemId] += $qty;
+                            }
                         }
                     }
                 }
@@ -508,7 +572,7 @@ class AccountGovernanceIntegrationService
             'items_with_sales' => count(array_filter($salesByItem, fn(int $v): bool => $v > 0)),
         ]);
 
-        return $salesByItem;
+        return [$salesByItem, $sales14ByItem];
     }
 
     /**

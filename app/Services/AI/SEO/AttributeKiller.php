@@ -617,6 +617,10 @@ class AttributeKiller
         // Apply attributes to ML
         if (!empty($attributesToFill)) {
             try {
+                // Governança: bloqueia escrita em conta blacklist (FORBIDDEN_ACCOUNTS, ex. 1335)
+                // independente de como este método foi chamado (endpoint direto ou BulkOptimizer).
+                (new \App\Services\HiddenSeo\SafetyGuard())->assertCanApply((int)$this->accountId, false, true);
+
                 $updateResult = $this->mlClient->put("/items/{$itemId}", [
                     'attributes' => $attributesToFill
                 ]);

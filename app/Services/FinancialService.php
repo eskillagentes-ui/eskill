@@ -241,9 +241,9 @@ class FinancialService
         return $this->feeCommission()->getPerceptionsDetails($group, $documentId, $taxType, $taxId, $limit);
     }
 
-    public function getPaymentReport(string $periodKey, int $limit = 150, int $offset = 0): array
+    public function getPaymentReport(string $periodKey, int $limit = 150, int $offset = 0, int $fromId = 0): array
     {
-        return $this->feeCommission()->getPaymentReport($periodKey, $limit, $offset);
+        return $this->feeCommission()->getPaymentReport($periodKey, $limit, $offset, $fromId);
     }
 
     public function getPaymentChargesDetail(string $paymentId, int $limit = 150): array

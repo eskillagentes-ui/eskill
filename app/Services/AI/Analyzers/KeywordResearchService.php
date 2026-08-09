@@ -50,7 +50,7 @@ class KeywordResearchService
             $scoredKeywords[] = [
                 'keyword' => $keyword,
                 'score' => $score['total'],
-                'search_volume' => $score['search_volume'],
+                'total_listings' => $score['total_listings'],
                 'competition' => $score['competition'],
                 'relevance' => $score['relevance'],
                 'commercial_intent' => $score['commercial_intent'],
@@ -167,21 +167,31 @@ class KeywordResearchService
      * @param string $categoryId
      * @return array Score breakdown
      */
+    /**
+     * Correção de metodologia: a versão anterior calculava 'search_volume' e
+     * 'competition' a partir do MESMO dado real (total de anúncios concorrentes
+     * retornado por getSearchResultsCount, que mede OFERTA, não demanda), apenas
+     * com escalas diferentes (/100 vs /50). Isso contava o mesmo sinal duas vezes
+     * disfarçado de duas métricas independentes, e ainda rotulava oferta como se
+     * fosse "volume de busca" — o Mercado Livre não expõe volume de busca via API
+     * pública. Agora o total de anúncios alimenta apenas 'competition' (peso 0.5,
+     * substituindo os antigos pesos somados de search_volume+competition).
+     */
     private function scoreKeyword(string $keyword, string $baseQuery, string $categoryId): array
     {
         $scores = [
-            'search_volume' => 0,
+            'total_listings' => 0,
             'competition' => 0,
             'relevance' => 0,
             'commercial_intent' => 0,
         ];
 
-        // Search volume (estimate from results count)
-        $searchResults = $this->getSearchResultsCount($keyword, $categoryId);
-        $scores['search_volume'] = min(100, ($searchResults / 100));
+        // Dado real da API ML: total de anúncios concorrentes para esta keyword (oferta).
+        $totalListings = $this->getSearchResultsCount($keyword, $categoryId);
+        $scores['total_listings'] = $totalListings;
 
-        // Competition (lower is better)
-        $scores['competition'] = max(0, 100 - min(100, ($searchResults / 50)));
+        // Competição real (menos concorrentes = mais oportunidade)
+        $scores['competition'] = max(0, 100 - min(100, ($totalListings / 50)));
 
         // Relevance to base query
         $scores['relevance'] = $this->calculateRelevance($keyword, $baseQuery);
@@ -191,8 +201,7 @@ class KeywordResearchService
 
         // Weighted total
         $scores['total'] = round(
-            ($scores['search_volume'] * 0.3) +
-                ($scores['competition'] * 0.2) +
+            ($scores['competition'] * 0.5) +
                 ($scores['relevance'] * 0.3) +
                 ($scores['commercial_intent'] * 0.2)
         );

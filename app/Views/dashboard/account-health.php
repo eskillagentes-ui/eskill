@@ -3726,8 +3726,7 @@ require __DIR__ . '/account-health-advanced.php';
                         fora_catalogo: { label: 'Fora do catálogo', icon: 'bi-book', color: 'secondary' },
                     };
                     const info = causeLabels[c] || { label: escapeHtml(c), icon: 'bi-question-circle', color: 'muted' };
-                    return ` < span class = "badge bg-${info.color} bg-opacity-10 text-${info.color}"
-            style = "font-size:10px;" > < i class = "bi ${info.icon} me-1" > < /i>${info.label}</span > `;
+                    return `<span class="badge bg-${info.color} bg-opacity-10 text-${info.color}" style="font-size:10px;"><i class="bi ${info.icon} me-1"></i>${info.label}</span>`;
                 }).join('') + '</div>' : ''}
             </div>
             <div class="stale-item-actions">

@@ -18,6 +18,23 @@ class MercadoLivreWebhookController
     private const WEBHOOK_SIGNATURE_MAX_SKEW_SECONDS = 300;
     private const WEBHOOK_SIGNATURE_REPLAY_WINDOW_SECONDS = 300;
 
+    /**
+     * IPs oficiais do Mercado Livre para notificações de webhook.
+     * Fonte: https://developers.mercadolivre.com.br/pt_br/seguranca-de-aplicacoes
+     * Atenção: estes IPs podem mudar — consulte a documentação regularmente e
+     * atualize a env ML_WEBHOOK_EXTRA_IPS para acrescentar novos sem deploy.
+     */
+    private const MERCADOLIVRE_OFFICIAL_IPS = [
+        '54.88.218.97',
+        '18.215.140.160',
+        '18.213.114.129',
+        '18.206.34.84',
+        '35.236.253.169',
+        '35.245.91.34',
+        '35.245.20.104',
+        '35.186.182.146',
+    ];
+
     /** @var array<string, string|int|null> */
     private array $lastWebhookSignatureMetadata = [];
     private ?string $lastWebhookSignatureError = null;
@@ -36,6 +53,23 @@ class MercadoLivreWebhookController
         $inbox = null;
 
         try {
+            // Validação de IP de origem (camada adicional; a assinatura HMAC é a primária).
+            // Habilitado via ML_WEBHOOK_VALIDATE_IP=true.
+            // IPs podem mudar — use ML_WEBHOOK_EXTRA_IPS=ip1,ip2 para acrescentar sem deploy.
+            if ($this->isIpValidationEnabled()) {
+                $clientIp = $this->resolveClientIp();
+                if (!$this->isAllowedMercadoLivreIp($clientIp)) {
+                    $logger->warning('ML_WEBHOOK_IP_BLOCKED', [
+                        'message' => 'IP de origem não está na allowlist do Mercado Livre',
+                        'request_id' => $requestId,
+                        'client_ip' => $clientIp,
+                    ]);
+                    http_response_code(403);
+                    echo json_encode(['success' => false, 'error' => 'Forbidden', 'request_id' => $requestId]);
+                    return;
+                }
+            }
+
             // Ler payload
             $rawPayload = (string)file_get_contents('php://input', false, null, 0, 262144);
             $payload = json_decode($rawPayload, true);
@@ -564,6 +598,68 @@ class MercadoLivreWebhookController
         }
 
         return null;
+    }
+
+    // -------------------------------------------------------------------------
+    // IP Allowlist (melhores práticas de segurança ML — docs 2026-07)
+    // -------------------------------------------------------------------------
+
+    private function isIpValidationEnabled(): bool
+    {
+        $raw = getenv('ML_WEBHOOK_VALIDATE_IP');
+        if ($raw === false) {
+            $raw = $_ENV['ML_WEBHOOK_VALIDATE_IP'] ?? 'false';
+        }
+        return filter_var($raw, FILTER_VALIDATE_BOOLEAN);
+    }
+
+    /**
+     * Resolve o IP real do cliente respeitando proxies confiáveis.
+     *
+     * Por padrão usa REMOTE_ADDR. Se ML_WEBHOOK_TRUST_PROXY_IP estiver definido,
+     * o REMOTE_ADDR deve bater com esse IP para que X-Forwarded-For ou X-Real-IP
+     * sejam aceitos; caso contrário ignora headers encaminhados (evita spoofing).
+     */
+    private function resolveClientIp(): string
+    {
+        $remoteAddr = (string)($_SERVER['REMOTE_ADDR'] ?? '');
+        $trustedProxy = trim((string)(getenv('ML_WEBHOOK_TRUST_PROXY_IP') ?: ($_ENV['ML_WEBHOOK_TRUST_PROXY_IP'] ?? '')));
+
+        if ($trustedProxy !== '' && $remoteAddr === $trustedProxy) {
+            $forwarded = $this->getRequestHeader('X-Real-IP')
+                ?? $this->getRequestHeader('X-Forwarded-For');
+            if (is_string($forwarded) && $forwarded !== '') {
+                // X-Forwarded-For pode ser lista; pegar o primeiro IP (mais próximo ao cliente).
+                return trim(explode(',', $forwarded)[0]);
+            }
+        }
+
+        return $remoteAddr;
+    }
+
+    /**
+     * Verifica se $ip está na allowlist de IPs oficiais do Mercado Livre,
+     * acrescida de endereços extras configurados em ML_WEBHOOK_EXTRA_IPS.
+     */
+    private function isAllowedMercadoLivreIp(string $ip): bool
+    {
+        if ($ip === '') {
+            return false;
+        }
+
+        $allowed = self::MERCADOLIVRE_OFFICIAL_IPS;
+
+        $extra = trim((string)(getenv('ML_WEBHOOK_EXTRA_IPS') ?: ($_ENV['ML_WEBHOOK_EXTRA_IPS'] ?? '')));
+        if ($extra !== '') {
+            foreach (explode(',', $extra) as $extraIp) {
+                $extraIp = trim($extraIp);
+                if ($extraIp !== '') {
+                    $allowed[] = $extraIp;
+                }
+            }
+        }
+
+        return in_array($ip, $allowed, true);
     }
 
     /**
