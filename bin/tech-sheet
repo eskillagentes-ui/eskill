@@ -17,7 +17,7 @@
  * Exemplos:
  *   php bin/tech-sheet analyze --account=1 --limit=100
  *   php bin/tech-sheet suggestions --account=1 --category=MLB1234
- *   php bin/tech-sheet approve --min-confidence=80
+ *   php bin/tech-sheet approve --min-confidence=80 [--attribute=EMPTY_GTIN_REASON]
  *   php bin/tech-sheet apply --account=1 --dry-run
  *   php bin/tech-sheet stats --account=1
  *   php bin/tech-sheet export --format=csv --output=/tmp/export.csv
@@ -389,10 +389,11 @@ class TechSheetCLI
         $accountId = $this->getAccountId();
         $minConfidence = (int)($this->options['min-confidence'] ?? 80);
         $limit = (int)($this->options['limit'] ?? 100);
+        $attributeFilter = isset($this->options['attribute']) ? strtoupper(trim((string)$this->options['attribute'])) : null;
         $dryRun = isset($this->options['dry-run']);
 
         $this->header("✅ Aprovando Sugestões");
-        $this->info("Conta: {$accountId} | Confiança mínima: {$minConfidence}% | Limite: {$limit}");
+        $this->info("Conta: {$accountId} | Confiança mínima: {$minConfidence}% | Limite: {$limit}" . ($attributeFilter !== null ? " | Atributo: {$attributeFilter}" : ''));
         if ($dryRun) {
             $this->warn("MODO DRY-RUN: Nenhuma alteração será feita");
         }
@@ -401,18 +402,24 @@ class TechSheetCLI
         $db = Database::getInstance();
 
         // Buscar sugestões pendentes com alta confiança
-        $stmt = $db->prepare("
+        $sql = "
             SELECT s.*, i.title
             FROM tech_sheet_suggestions s
             INNER JOIN items i ON i.ml_item_id = s.item_id AND i.account_id = s.account_id
             WHERE s.account_id = :account_id
               AND s.status = 'pending'
               AND s.confidence >= :min_confidence
-            ORDER BY s.confidence DESC
-            LIMIT :limit
-        ");
+        ";
+        if ($attributeFilter !== null) {
+            $sql .= " AND s.attribute_id = :attribute_id\n";
+        }
+        $sql .= " ORDER BY s.confidence DESC\n LIMIT :limit\n";
+        $stmt = $db->prepare($sql);
         $stmt->bindValue(':account_id', $accountId, \PDO::PARAM_INT);
         $stmt->bindValue(':min_confidence', $minConfidence, \PDO::PARAM_INT);
+        if ($attributeFilter !== null) {
+            $stmt->bindValue(':attribute_id', $attributeFilter, \PDO::PARAM_STR);
+        }
         $stmt->bindValue(':limit', $limit, \PDO::PARAM_INT);
         $stmt->execute();
         $suggestions = $stmt->fetchAll(\PDO::FETCH_ASSOC);
@@ -442,8 +449,7 @@ class TechSheetCLI
                 $stmt = $db->prepare("
                     UPDATE tech_sheet_suggestions
                     SET status = 'approved',
-                        decided_at = NOW(),
-                        notes = CONCAT(COALESCE(notes, ''), ' [CLI auto-approve]')
+                        decided_at = NOW()
                     WHERE id = :id
                 ");
                 $stmt->execute(['id' => $sug['id']]);
