@@ -1,3 +1,11 @@
+## 2026-08-08 (6ª parte) — Repricing Fase 0 implementada (simulação read-only)
+
+- `RepriceSimulationService` + CLI `bin/reprice-simulate.php --account=ID [--limit=N] [--json]`: calcula preço sugerido pela regra pura extraída do SniperAgent (`computeTargetPrice`/`requiresPriceChange` — comportamento idêntico, SniperAgentDryRunTest 2/2), sem escrever nada.
+- Tetos via env (`.env.example`): `REPRICE_MAX_PCT=5`, `REPRICE_MAX_ITEMS_PER_RUN=5`, `REPRICE_MIN_MARGIN_PCT=10`. Violação = skip com motivo, nunca clamp.
+- Conta proibida (1335): simula, mas tudo `seria_aplicado=false` + `conta_proibida`.
+- Dry-run real 1335: 0 candidatos (nenhum item com `auto_reprice=1` em conta nenhuma — opt-in nunca ligado). F0 só produz relatório útil após Fase 1 marcar itens em staging.
+- 11 testes novos (SQLite in-memory, zero rede). Suite Unit: 4428 testes, 0 falhas. Commit `7feee073`.
+
 ## 2026-08-08 (5ª parte) — MARCO: primeiro apply governado em produção (1335)
 
 - Dono aprovou o lote EGR. Ritual executado: `approve --attribute=EMPTY_GTIN_REASON --limit=5` → revertido MLB4564086941 para pending (tinha EGR="Outro motivo"; princípio conservador: só preencher lacuna, nunca sobrescrever valor existente sem decisão explícita) → `apply --dry-run` (4 itens) → `apply --i-understand-prod`.
