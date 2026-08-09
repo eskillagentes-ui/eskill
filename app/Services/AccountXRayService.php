@@ -133,6 +133,11 @@ class AccountXRayService
             // ── FASE 5: SEO Audit completo ───────────────────────────
             $this->log('info', 'RAIO X F5: SEO audit por anúncio');
             $seoAudit = $this->runSEOAudit($enrichedItems, $options);
+            // runSEOAudit() não calcula classificação (isso é feito pelo
+            // Governance na F4); sem este merge, o front-end recebe
+            // item.classification sempre ausente e renderiza "? ?" na
+            // coluna Classif. (Onda 2 / T9).
+            $seoAudit['items'] = $this->mergeGovernanceClassification($seoAudit['items'] ?? [], $govResult['items'] ?? []);
 
             // ── FASE 6: Análise de competidores + lacunas ocultas ────
             $this->log('info', 'RAIO X F6: Análise competitiva e lacunas');
@@ -545,6 +550,38 @@ class AccountXRayService
             'category_gaps'      => $this->aggregateCategoryGaps($auditItems),
             'long_tail_summary'  => $this->aggregateLongTailOpportunities($auditItems),
         ];
+    }
+
+    /**
+     * Injeta a classificação do Governance (ANCHOR/SAUDAVEL/EM_RISCO/...)
+     * em cada item do SEO audit, casando por item id (mesmo mapeamento
+     * usado em saveItemScores()). Sem isso, item.classification chega
+     * indefinido ao front-end e a coluna "Classif." exibe "? ?".
+     *
+     * @param list<array<string, mixed>> $auditItems
+     * @param list<array<string, mixed>> $govItems
+     * @return list<array<string, mixed>>
+     */
+    private function mergeGovernanceClassification(array $auditItems, array $govItems): array
+    {
+        if ($auditItems === []) {
+            return $auditItems;
+        }
+
+        $classMap = [];
+        foreach ($govItems as $gItem) {
+            $id = $gItem['id'] ?? '';
+            if ($id !== '') {
+                $classMap[$id] = $gItem['classification'] ?? null;
+            }
+        }
+
+        foreach ($auditItems as &$item) {
+            $id = $item['id'] ?? '';
+            $item['classification'] = $classMap[$id] ?? null;
+        }
+
+        return $auditItems;
     }
 
     // ─────────────────────────────────────────────────────────

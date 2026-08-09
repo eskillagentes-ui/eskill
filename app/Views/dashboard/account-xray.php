@@ -1076,7 +1076,7 @@ declare(strict_types=1);
                   <div class="text-truncate" style="max-width:280px" title="${escHtml(item.title)}">${escHtml(item.title)}</div>
                   ${item.missing_keywords?.length ? `<div class="mt-1">${item.missing_keywords.slice(0,3).map(k => `<span class="kw-badge gap">+${escHtml(k)}</span>`).join('')}</div>` : ''}
                 </td>
-                <td><span class="classification-${escHtml(item.classification || '')}">${classIcon(item.classification)} ${escHtml(item.classification || '?')}</span></td>
+                <td><span class="classification-${escHtml(item.classification || '')}">${item.classification ? (classIcon(item.classification) + ' ' + escHtml(item.classification)) : '—'}</span></td>
                 <td>
                   <div class="d-flex align-items-center gap-1">
                     <span class="fw-bold">${item.seo_score}</span>
@@ -1405,7 +1405,7 @@ declare(strict_types=1);
         TOXICO: '🔴',
         POLUIDOR: '🟠',
         SEM_ESTOQUE: '🟣'
-      } [cls] || '?';
+      } [cls] || '';
     }
 
     // ── exportar PDF ──────────────────────────────────────────────

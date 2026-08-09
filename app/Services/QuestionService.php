@@ -579,9 +579,10 @@ class QuestionService
         $where = ["1=1"];
         $params = [];
 
-        if (!empty($filters['status'])) {
+        $statusFilter = $filters['status'] ?? null;
+        if (!empty($statusFilter) && strtolower((string)$statusFilter) !== 'all') {
             $where[] = "status = ?";
-            $params[] = $filters['status'];
+            $params[] = $statusFilter;
         }
 
         if (!empty($filters['account_id']) && $filters['account_id'] !== 'all') {
@@ -623,6 +624,38 @@ class QuestionService
         ];
     }
 
+    /**
+     * Tempo médio de resposta (segundos) das perguntas respondidas, no mesmo
+     * escopo de conta usado por getQuestionsFromDatabase()/stats() (Onda 2 / T8).
+     * Retorna null quando não há amostra suficiente (nunca gera "-" silencioso
+     * sem diferenciar "sem dado" de "zero").
+     */
+    public function getAverageResponseTimeSeconds(): ?float
+    {
+        if ($this->db === null) {
+            return null;
+        }
+
+        $where = ["status = 'ANSWERED'", "answer_date IS NOT NULL"];
+        $params = [];
+        if ($this->accountId !== null && $this->accountId > 0) {
+            $where[] = "account_id = ?";
+            $params[] = $this->accountId;
+        }
+
+        $sql = "SELECT AVG(TIMESTAMPDIFF(SECOND, date_created, answer_date)) AS avg_s
+                FROM ml_questions WHERE " . implode(' AND ', $where);
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        $avg = $stmt->fetchColumn();
+
+        if ($avg === false || $avg === null) {
+            return null;
+        }
+
+        return (float) $avg;
+    }
+
     public function saveQuestionToDatabase(array $q): void
     {
         if ($this->db === null) {
@@ -640,11 +673,11 @@ class QuestionService
 
         $stmt = $this->db->prepare("
             INSERT INTO ml_questions (
-                question_id, account_id, item_id, status, question_text, 
+                question_id, account_id, item_id, status, question_text,
                 answer_text, from_user_id, date_created, answer_date,
                 updated_at, seller_id
             ) VALUES (
-                :question_id, :account_id, :item_id, :status, :text, 
+                :question_id, :account_id, :item_id, :status, :text,
                 :answer, :from_user_id, :date_created, :date_answered,
                 NOW(), :seller_id
             )

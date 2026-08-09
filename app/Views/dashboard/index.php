@@ -1033,7 +1033,7 @@ $userName = htmlspecialchars($_SESSION['user_name'] ?? 'Usuário');
                             <div class="quick-action-desc">Otimizar anúncios</div>
                         </div>
                     </a>
-                    <a href="/dashboard/promotions" class="quick-action">
+                    <a href="/dashboard/marketing/promotions" class="quick-action">
                         <div class="quick-action-icon" style="background: var(--warning-gradient);">
                             <i class="bi bi-tag"></i>
                         </div>

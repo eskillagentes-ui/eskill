@@ -187,7 +187,8 @@ class AnalyticsController extends BaseController
     public function getSummary(): void
     {
         header('Content-Type: application/json');
-        $data = $this->service->getDashboardSummary($this->getActiveAccountId());
+        $days = $this->request->getIntClamped('days', 1, 90, 7);
+        $data = $this->service->getDashboardSummary($this->getActiveAccountId(), $days);
         echo json_encode(['success' => true, 'data' => $data]);
     }
 

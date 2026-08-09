@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Database;
+use App\Helpers\RevenueHelper;
 use App\Services\ItemService;
 use App\Services\DashboardService;
 use PDO;
@@ -76,8 +77,12 @@ class FullController extends BaseController
 
             // Ordenar
             usort($suggestions, function ($a, $b) use ($sortBy, $sortDir) {
-                $valA = $a[$sortBy] ?? 0;
-                $valB = $b[$sortBy] ?? 0;
+                // days_coverage=null (sem vendas/urgência) deve ordenar como
+                // "infinito" e não como 0, senão itens saudáveis aparecem
+                // misturados com os críticos ao ordenar ASC (Onda 2 / T5).
+                $fallback = $sortBy === 'days_coverage' ? INF : 0;
+                $valA = $a[$sortBy] ?? $fallback;
+                $valB = $b[$sortBy] ?? $fallback;
 
                 if ($sortDir === 'ASC') {
                     return $valA <=> $valB;
@@ -148,8 +153,12 @@ class FullController extends BaseController
             // Calcular velocidade diária
             $dailyVelocity = $salesLast30d / 30;
 
-            // Calcular cobertura em dias
-            $daysCoverage = $dailyVelocity > 0 ? $currentStock / $dailyVelocity : 999;
+            // Cobertura em dias. Sem vendas nos últimos 30d = cobertura
+            // indefinida ("infinita"): expõe null (front-end exibe "∞"/"—")
+            // em vez de 999 cru ou NaN (Onda 2 / T5). Internamente, itens sem
+            // venda são tratados como "healthy" (não há urgência de reposição
+            // sem demanda observada).
+            $daysCoverage = $dailyVelocity > 0 ? $currentStock / $dailyVelocity : null;
 
             // Calcular quantidade sugerida para envio
             $targetStock = ceil($dailyVelocity * self::TARGET_DAYS_COVERAGE);
@@ -157,10 +166,12 @@ class FullController extends BaseController
 
             // Determinar status
             $status = 'healthy';
-            if ($daysCoverage < self::CRITICAL_DAYS) {
-                $status = 'critical';
-            } elseif ($daysCoverage < self::WARNING_DAYS) {
-                $status = 'warning';
+            if ($daysCoverage !== null) {
+                if ($daysCoverage < self::CRITICAL_DAYS) {
+                    $status = 'critical';
+                } elseif ($daysCoverage < self::WARNING_DAYS) {
+                    $status = 'warning';
+                }
             }
 
             // Calcular valor do estoque sugerido
@@ -174,7 +185,7 @@ class FullController extends BaseController
                 'current_stock' => $currentStock,
                 'sales_last_30d' => $salesLast30d,
                 'daily_velocity' => round($dailyVelocity, 2),
-                'days_coverage' => round($daysCoverage, 1),
+                'days_coverage' => $daysCoverage !== null ? round($daysCoverage, 1) : null,
                 'suggested_send' => (int)$suggestedSend,
                 'suggested_value' => round($suggestedValue, 2),
                 'status' => $status,
@@ -187,7 +198,13 @@ class FullController extends BaseController
     }
 
     /**
-     * Busca velocidade de vendas dos últimos 30 dias
+     * Busca velocidade de vendas dos últimos 30 dias.
+     *
+     * A tabela order_items está vazia (sem ETL que a popule); os itens
+     * vendidos ficam apenas dentro de ml_orders.order_data (JSON retornado
+     * pela API do ML). Por isso a agregação é feita em PHP a partir do JSON,
+     * usando a mesma definição de "pago" do restante do sistema
+     * (RevenueHelper — Onda 2 / T1/T5).
      */
     private function getSalesVelocity(array $itemIds): array
     {
@@ -195,28 +212,37 @@ class FullController extends BaseController
             return [];
         }
 
-        $placeholders = implode(',', array_fill(0, count($itemIds), '?'));
+        $wantedIds = array_flip(array_map('strval', $itemIds));
 
         $query = "
-            SELECT
-                oi.item_id,
-                SUM(oi.quantity) as total_sold
-            FROM order_items oi
-            JOIN ml_orders o ON (oi.order_id = o.id OR oi.order_id = o.ml_order_id)
-            WHERE o.ml_account_id = ?
-            AND o.date_created >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-            AND o.status NOT IN ('cancelled')
-            AND oi.item_id IN ({$placeholders})
-            GROUP BY oi.item_id
+            SELECT order_data
+            FROM ml_orders
+            WHERE ml_account_id = :account_id
+            AND date_created >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+            AND " . RevenueHelper::paidStatusesSql() . "
+            AND order_data IS NOT NULL
         ";
 
-        $params = array_merge([$this->accountId], $itemIds);
         $stmt = $this->db->prepare($query);
-        $stmt->execute($params);
+        $stmt->bindValue(':account_id', $this->accountId, PDO::PARAM_INT);
+        $stmt->execute();
 
         $results = [];
         while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
-            $results[$row['item_id']] = (int)$row['total_sold'];
+            $data = json_decode((string)$row['order_data'], true);
+            $orderItems = $data['order_items'] ?? [];
+            if (!is_array($orderItems)) {
+                continue;
+            }
+
+            foreach ($orderItems as $orderItem) {
+                $itemId = (string)($orderItem['item']['id'] ?? '');
+                if ($itemId === '' || !isset($wantedIds[$itemId])) {
+                    continue;
+                }
+                $quantity = (int)($orderItem['quantity'] ?? 0);
+                $results[$itemId] = ($results[$itemId] ?? 0) + $quantity;
+            }
         }
 
         return $results;

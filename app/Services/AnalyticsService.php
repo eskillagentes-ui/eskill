@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Database;
+use App\Helpers\RevenueHelper;
+use App\Services\CategoryService;
 
 class AnalyticsService
 {
@@ -30,7 +32,7 @@ class AnalyticsService
                 AVG(total_amount) as avg_ticket
             FROM ml_orders
             WHERE date_created BETWEEN ? AND ?
-            AND status = 'paid'
+            AND " . RevenueHelper::paidStatusesSql() . "
         ";
 
         $params = [$startDate . ' 00:00:00', $endDate . ' 23:59:59'];
@@ -67,11 +69,11 @@ class AnalyticsService
                 SUM(total) as total_revenue
             FROM (
                 SELECT
-                    buyer_id,
+                    JSON_UNQUOTE(JSON_EXTRACT(order_data, '\$.buyer.id')) as buyer_id,
                     SUM(total_amount) as total
                 FROM ml_orders
-                WHERE status = 'paid'
-                AND buyer_id IS NOT NULL
+                WHERE " . RevenueHelper::paidStatusesSql() . "
+                AND JSON_UNQUOTE(JSON_EXTRACT(order_data, '\$.buyer.id')) IS NOT NULL
         ";
 
         $params = [];
@@ -81,7 +83,7 @@ class AnalyticsService
         }
 
         $sql .= "
-                GROUP BY buyer_id
+                GROUP BY JSON_UNQUOTE(JSON_EXTRACT(order_data, '\$.buyer.id'))
             ) as customer_totals
             GROUP BY segment
             ORDER BY avg_ltv DESC
@@ -127,7 +129,46 @@ class AnalyticsService
 
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
-        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        return $this->attachCategoryNames($rows, $accountId);
+    }
+
+    /**
+     * Resolve category_id -> nome legível (Onda 2 / T3: "Giro de Estoque"
+     * exibia IDs crus como "MLB186370"). Usa CategoryService, que já cacheia
+     * a resposta da API do ML por 24h; falha isolada em uma categoria não
+     * derruba o restante da lista (fallback para o próprio ID).
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return list<array<string, mixed>>
+     */
+    private function attachCategoryNames(array $rows, ?int $accountId): array
+    {
+        if ($rows === []) {
+            return $rows;
+        }
+
+        $categoryService = new CategoryService($accountId);
+
+        foreach ($rows as &$row) {
+            $categoryId = $row['category_id'] ?? null;
+            $row['category_name'] = $categoryId;
+
+            if (is_string($categoryId) && $categoryId !== '') {
+                try {
+                    $category = $categoryService->getCategory($categoryId);
+                    if (!empty($category['name'])) {
+                        $row['category_name'] = $category['name'];
+                    }
+                } catch (\Throwable) {
+                    // Mantém o ID como fallback; nunca quebra o card por uma categoria.
+                }
+            }
+        }
+        unset($row);
+
+        return $rows;
     }
 
     /**
@@ -135,15 +176,22 @@ class AnalyticsService
      */
     public function getProfitMargins(?int $accountId = null): array
     {
+        // listing_type e gross_margin nunca são preenchidos em ml_orders (ETL não
+        // grava esses campos, mesmo com o dado disponível no payload da API) — por
+        // isso a query original sempre agrupava em um único bucket "N/A" com margem
+        // 0 (Onda 2 / T3). Extraímos o tipo de anúncio direto do order_data (mesmo
+        // padrão de JSON_EXTRACT já usado em getInventoryTurnover) e calculamos a
+        // margem líquida real a partir de net_profit/total_amount (campo que É
+        // preenchido corretamente pelo OrderService).
         $sql = "
             SELECT
-                o.listing_type,
+                COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.order_data, '\$.order_items[0].listing_type_id')), 'unknown') as listing_type,
                 COUNT(*) as order_count,
                 SUM(o.total_amount) as revenue,
                 SUM(o.net_profit) as profit,
-                ROUND(AVG(o.gross_margin), 2) as avg_margin
+                ROUND(AVG(o.net_profit / NULLIF(o.total_amount, 0)) * 100, 2) as avg_margin
             FROM ml_orders o
-            WHERE o.status = 'paid'
+            WHERE " . RevenueHelper::paidStatusesSql('o.status') . "
             AND o.date_created >= DATE_SUB(NOW(), INTERVAL 30 DAY)
         ";
 
@@ -154,7 +202,7 @@ class AnalyticsService
         }
 
         $sql .= "
-            GROUP BY o.listing_type
+            GROUP BY COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.order_data, '\$.order_items[0].listing_type_id')), 'unknown')
             ORDER BY avg_margin DESC
         ";
 
@@ -204,7 +252,7 @@ class AnalyticsService
                 SUM(total_amount) as revenue
             FROM ml_orders
             WHERE date_created >= DATE_SUB(NOW(), INTERVAL 30 DAY)
-            AND status = 'paid'
+            AND " . RevenueHelper::paidStatusesSql() . "
         ";
 
         $params = [];
@@ -242,28 +290,47 @@ class AnalyticsService
 
     /**
      * Real-time Dashboard Summary
+     *
+     * Onda 2 / T3: o comparativo original era "hoje (parcial, só o que já
+     * vendeu desde 00h)" vs "ontem (dia inteiro)". Isso produzia "-100%" quase
+     * sempre no início do dia, mesmo com vendas normais — não é um bug de
+     * dado, é um erro de metodologia (períodos de tamanhos diferentes). Agora
+     * comparamos dois períodos completos e do mesmo tamanho: últimos $days
+     * dias vs os $days dias imediatamente anteriores.
      */
-    public function getDashboardSummary(?int $accountId = null): array
+    public function getDashboardSummary(?int $accountId = null, int $days = 7): array
     {
-        $today = date('Y-m-d');
-        $yesterday = date('Y-m-d', strtotime('-1 day'));
+        $days = max(1, $days);
 
-        $orderSqlSuffix = " AND status = 'paid'";
+        $orderSqlSuffix = " AND " . RevenueHelper::paidStatusesSql();
         $orderParams = [];
         if ($accountId !== null && $accountId > 0) {
             $orderSqlSuffix .= " AND ml_account_id = :account_id";
             $orderParams['account_id'] = $accountId;
         }
 
-        $todayStmt = $this->db->prepare("SELECT COALESCE(SUM(total_amount), 0) FROM ml_orders WHERE DATE(date_created) = :date" . $orderSqlSuffix);
-        $todayStmt->execute(array_merge(['date' => $today], $orderParams));
-        $revenueToday = (float)$todayStmt->fetchColumn();
+        $currentStmt = $this->db->prepare(
+            "SELECT COALESCE(SUM(total_amount), 0) FROM ml_orders
+             WHERE date_created >= DATE_SUB(NOW(), INTERVAL :days DAY)" . $orderSqlSuffix
+        );
+        $currentStmt->execute(array_merge(['days' => $days], $orderParams));
+        $revenueToday = (float)$currentStmt->fetchColumn();
 
-        $yesterdayStmt = $this->db->prepare("SELECT COALESCE(SUM(total_amount), 0) FROM ml_orders WHERE DATE(date_created) = :date" . $orderSqlSuffix);
-        $yesterdayStmt->execute(array_merge(['date' => $yesterday], $orderParams));
-        $revenueYesterday = (float)$yesterdayStmt->fetchColumn();
+        $previousStmt = $this->db->prepare(
+            "SELECT COALESCE(SUM(total_amount), 0) FROM ml_orders
+             WHERE date_created >= DATE_SUB(NOW(), INTERVAL :days2 DAY)
+               AND date_created < DATE_SUB(NOW(), INTERVAL :days1 DAY)" . $orderSqlSuffix
+        );
+        $previousStmt->execute(array_merge(['days2' => $days * 2, 'days1' => $days], $orderParams));
+        $revenueYesterday = (float)$previousStmt->fetchColumn();
 
-        $growth = $revenueYesterday > 0 ? (($revenueToday - $revenueYesterday) / $revenueYesterday) * 100 : 0;
+        if ($revenueYesterday > 0) {
+            $growth = (($revenueToday - $revenueYesterday) / $revenueYesterday) * 100;
+        } else {
+            // Sem base de comparação: 0% (neutro) se também não há receita atual,
+            // ou +100% (crescimento a partir de zero) se passou a vender.
+            $growth = $revenueToday > 0 ? 100.0 : 0.0;
+        }
 
         $questionsSql = "SELECT COUNT(*) FROM ml_questions WHERE status = 'UNANSWERED'";
         $itemsSql = "SELECT COUNT(*) FROM items WHERE status = 'active'";
@@ -282,12 +349,59 @@ class AnalyticsService
         $itemsStmt->execute($sharedParams);
         $activeItems = (int)$itemsStmt->fetchColumn();
 
+        // Taxa de conversão = vendas 7d / visitas 7d (Onda 2 / T3). Reaproveita
+        // account_index_metrics, já coletado pelo Pregão (mesma janela de 7d
+        // exibida em "Exposição"), em vez de bater na API do ML de novo.
+        [$conversionRate, $visits7d, $sales7d] = $this->getConversionRateFromIndexMetrics($accountId);
+
         return [
+            // Nomes mantidos por compatibilidade com o front-end existente, mas
+            // agora representam "período atual" (últimos $days dias) e
+            // "período anterior" (os $days dias antes desse), não mais um
+            // "hoje parcial" vs "ontem inteiro".
             'revenue_today' => $revenueToday,
             'revenue_yesterday' => $revenueYesterday,
+            'revenue_period' => $revenueToday,
+            'revenue_previous_period' => $revenueYesterday,
+            'period_days' => $days,
             'growth_rate' => round($growth, 2),
             'pending_questions' => $pendingQuestions,
             'active_items' => $activeItems,
+            'conversion_rate' => $conversionRate,
+            'visits_7d' => $visits7d,
+            'sales_7d' => $sales7d,
         ];
+    }
+
+    /**
+     * Taxa de conversão = vendas / visitas na janela de 7 dias, lida de
+     * account_index_metrics (mesma fonte usada pelo painel Pregão). Retorna
+     * null quando não há visitas coletadas ainda (evita 0% falso/silencioso).
+     *
+     * @return array{0: ?float, 1: ?float, 2: ?float} [conversion_rate, visits_7d, sales_7d]
+     */
+    private function getConversionRateFromIndexMetrics(?int $accountId): array
+    {
+        $sql = "SELECT vendas_7d, visitas_7d FROM account_index_metrics WHERE 1=1";
+        $params = [];
+        if ($accountId) {
+            $sql .= " AND account_id = :account_id";
+            $params['account_id'] = $accountId;
+        }
+        $sql .= " ORDER BY updated_at DESC LIMIT 1";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+
+        if (!$row || $row['visitas_7d'] === null) {
+            return [null, null, null];
+        }
+
+        $visits = (float)$row['visitas_7d'];
+        $sales = (float)($row['vendas_7d'] ?? 0);
+        $rate = $visits > 0 ? round(($sales / $visits) * 100, 2) : null;
+
+        return [$rate, $visits, $sales];
     }
 }

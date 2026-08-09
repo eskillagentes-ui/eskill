@@ -208,6 +208,8 @@ class ItemService
                 $items = $this->filterItemsByCustomCriteria($items, $filters);
             }
 
+            $items = $this->attachVisits($items);
+
             $total = $response['paging']['total'] ?? count($items);
             $pages = max(1, (int)ceil($total / $limit));
 
@@ -289,6 +291,7 @@ class ItemService
 
         // Apply custom filters (low_stock, high_sales)
         $items = $this->filterItemsByCustomCriteria($items, $filters);
+        $items = $this->attachVisits($items);
 
         $total = $response['paging']['total'] ?? count($items);
         $pages = max(1, (int)ceil($total / $limit));
@@ -470,6 +473,8 @@ class ItemService
 
             $items[] = $this->formatItemForList($itemData);
         }
+
+        $items = $this->attachVisits($items);
 
         $pages = $total > 0 ? (int)ceil($total / $limit) : 1;
 
@@ -1699,6 +1704,54 @@ class ItemService
         }
 
         return $response;
+    }
+
+    /**
+     * Popula item.visits com visitas reais dos últimos N dias (janela
+     * consistente, padrão 7d — mesma métrica exibida no Pregão), buscando em
+     * batch via MercadoLivreClient::getMultiItemVisits() (Onda 2 / T2).
+     * Sem isso, a coluna Visitas fica sempre em 0 (nenhum campo do item bruto
+     * da API de listagem/cache local traz visitas).
+     *
+     * @param list<array<string, mixed>> $items
+     * @return list<array<string, mixed>>
+     */
+    private function attachVisits(array $items, int $days = 7): array
+    {
+        if ($items === []) {
+            return $items;
+        }
+
+        $ids = [];
+        foreach ($items as $item) {
+            $id = $item['id'] ?? null;
+            if (is_string($id) && $id !== '') {
+                $ids[] = $id;
+            }
+        }
+
+        if ($ids === []) {
+            return $items;
+        }
+
+        try {
+            $visitMap = $this->client->getMultiItemVisits($ids, $days);
+        } catch (\Throwable $e) {
+            log_warning('ItemService: falha ao buscar visitas em batch', [
+                'service' => 'ItemService',
+                'error' => $e->getMessage(),
+            ]);
+            return $items;
+        }
+
+        foreach ($items as &$item) {
+            $id = $item['id'] ?? '';
+            $visitData = $visitMap[$id] ?? null;
+            $item['visits'] = (int) ($visitData['total'] ?? $visitData['visits'] ?? 0);
+        }
+        unset($item);
+
+        return $items;
     }
 
     private function formatItemForList(array $item): array

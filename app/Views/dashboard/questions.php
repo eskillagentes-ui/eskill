@@ -416,7 +416,9 @@ async function loadAutoAnswerSettings() {
         document.getElementById('autoAnswerStatsBadge').className =
             'badge ' + (enabled ? 'bg-success' : 'bg-secondary');
     } catch (e) {
-        document.getElementById('autoAnswerStatsBadge').textContent = 'Erro';
+        console.error('Erro ao carregar configurações de auto-resposta:', e);
+        document.getElementById('autoAnswerStatsBadge').textContent = '—';
+        document.getElementById('autoAnswerStatsBadge').className = 'badge bg-secondary';
     }
 }
 

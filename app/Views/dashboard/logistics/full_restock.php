@@ -15,7 +15,7 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
                      <h5 class="mb-0 text-primary"><i class="bi bi-box-seam-fill"></i> Sugestões de Envio</h5>
                      <small class="text-muted">Baseado nas vendas dos últimos 30 dias</small>
                 </div>
-                
+
                 <button class="btn btn-sm btn-outline-primary" onclick="fullManager.loadData()">
                     <i class="bi bi-arrow-clockwise"></i> Recalcular
                 </button>
@@ -63,7 +63,7 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
         loadData: async function() {
             try {
                 const data = await requestJson('/api/logistics/full/suggestions');
-                
+
                 if (data.success) {
                     this.render(data.items);
                 }
@@ -83,7 +83,7 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
             items.forEach(item => {
                 let statusClass = 'bg-success';
                 let statusText = 'Saudável';
-                
+
                 if (item.status === 'critical') {
                     statusClass = 'bg-danger';
                 } else if (item.status === 'warning') {
@@ -104,7 +104,7 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
                         <td class="text-center h5 mb-0">${item.current_stock}</td>
                         <td class="text-center text-muted">${item.sales_last_30d}</td>
                         <td class="text-center">
-                            <span class="badge ${statusClass}">${Math.round(item.days_covrage)} dias</span>
+                            <span class="badge ${statusClass}">${item.days_coverage === null || item.days_coverage === undefined ? '∞' : Math.round(item.days_coverage) + ' dias'}</span>
                         </td>
                         <td class="text-center h4 text-primary fw-bold bg-warning bg-opacity-10">
                             ${item.suggested_send > 0 ? '+' + item.suggested_send : '<i class="bi bi-check-circle-fill text-success" style="font-size: 1rem;"></i>'}

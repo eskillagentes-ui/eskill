@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Services\Pregao\PregaoQuestionsService;
 use App\Services\QuestionService;
 
 class QuestionController extends BaseController
@@ -106,12 +107,16 @@ class QuestionController extends BaseController
                 }
             }
 
+            $avgSeconds = $this->service->getAverageResponseTimeSeconds();
+
             echo json_encode([
                 'success' => true,
                 'total' => $total,
                 'pending' => $pending,
                 'answered' => $answered,
-                'avg_response_time' => '-',
+                'avg_response_time' => $avgSeconds !== null
+                    ? PregaoQuestionsService::formatDurationHuman((int) round($avgSeconds))
+                    : '—',
             ]);
         } catch (\Throwable $e) {
             log_warning('Erro ao calcular stats de perguntas', [
@@ -125,7 +130,7 @@ class QuestionController extends BaseController
                 'total' => 0,
                 'pending' => 0,
                 'answered' => 0,
-                'avg_response_time' => '-',
+                'avg_response_time' => '—',
             ]);
         }
     }

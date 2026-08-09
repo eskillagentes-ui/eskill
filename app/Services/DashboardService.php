@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Database;
 use App\Helpers\Log;
+use App\Helpers\RevenueHelper;
 use App\Services\MercadoLivreClient;
 use App\Services\SearchService;
 use App\Services\CategoryService;
@@ -41,18 +42,24 @@ class DashboardService
             $params['account_id'] = $accountId;
         }
 
+        // Fonte única de receita (Onda 2 / T1): pedidos pagos/em cumprimento,
+        // excluindo cancelados — mesmo critério de Analytics e Vendas. Usado
+        // apenas para revenue/profit; a distribuição por status (abaixo)
+        // continua contando TODOS os status, inclusive cancelados.
+        $ordersWhereRevenue = $ordersWhere . " AND " . RevenueHelper::paidStatusesSql();
+
         // Total de pedidos, receita e lucro (últimos 30 dias)
-        $stmt = $db->prepare("SELECT COUNT(*) as total, COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(net_profit), 0) as profit FROM ml_orders {$ordersWhere}");
+        $stmt = $db->prepare("SELECT COUNT(*) as total, COALESCE(SUM(total_amount), 0) as revenue, COALESCE(SUM(net_profit), 0) as profit FROM ml_orders {$ordersWhereRevenue}");
         $stmt->execute($params);
         $ordersSummary = $stmt->fetch() ?: ['total' => 0, 'revenue' => 0, 'profit' => 0];
 
-        // Pedidos por status
+        // Pedidos por status (todos os status, inclusive cancelados)
         $stmt = $db->prepare("SELECT status, COUNT(*) as count FROM ml_orders {$ordersWhere} GROUP BY status");
         $stmt->execute($params);
         $ordersByStatus = $stmt->fetchAll() ?: [];
 
-        // Vendas por dia (Revenue e Profit)
-        $stmt = $db->prepare("SELECT DATE(date_created) as date, COALESCE(SUM(total_amount), 0) as total, COALESCE(SUM(net_profit), 0) as profit FROM ml_orders {$ordersWhere} GROUP BY DATE(date_created) ORDER BY date ASC");
+        // Vendas por dia (Revenue e Profit) — mesma fonte única de receita
+        $stmt = $db->prepare("SELECT DATE(date_created) as date, COALESCE(SUM(total_amount), 0) as total, COALESCE(SUM(net_profit), 0) as profit FROM ml_orders {$ordersWhereRevenue} GROUP BY DATE(date_created) ORDER BY date ASC");
         $stmt->execute($params);
         $salesOverTime = $stmt->fetchAll() ?: [];
 
@@ -142,7 +149,7 @@ class DashboardService
                 total_amount DECIMAL(10,2) DEFAULT 0,
                 date_created DATETIME NOT NULL,
                 synced_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-                
+
                 subtotal DECIMAL(10,2) DEFAULT 0,
                 ml_commission DECIMAL(10,2) DEFAULT 0,
                 payment_fee DECIMAL(10,2) DEFAULT 0,
@@ -157,7 +164,7 @@ class DashboardService
                 net_profit DECIMAL(10,2) DEFAULT 0,
                 roi DECIMAL(10,2) DEFAULT 0,
                 is_profitable TINYINT(1) DEFAULT 1,
-                
+
                 is_full TINYINT(1) DEFAULT 0,
                 is_flex TINYINT(1) DEFAULT 0,
                 free_shipping TINYINT(1) DEFAULT 0,
@@ -267,4 +274,3 @@ class DashboardService
         return $response;
     }
 }
-

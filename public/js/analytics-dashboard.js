@@ -3,6 +3,33 @@
 const Analytics = {
     charts: {},
 
+    /**
+     * Onda 2 / T3: gráficos como LTV, Margens por Tipo e Previsão 7d ficavam
+     * silenciosamente vazios (canvas sem dados, sem nenhuma mensagem) quando
+     * a API não tinha amostra suficiente. Mostra um estado explícito de
+     * "sem dados" ao lado do canvas em vez de deixá-lo mudo.
+     * @returns {boolean} true se há dados e o chamador deve renderizar o gráfico.
+     */
+    toggleNoDataState(canvas, rows, message) {
+        if (!canvas) return false;
+
+        let emptyEl = canvas.parentElement?.querySelector('.analytics-empty-state');
+        if (rows && rows.length > 0) {
+            canvas.style.display = '';
+            if (emptyEl) emptyEl.remove();
+            return true;
+        }
+
+        canvas.style.display = 'none';
+        if (!emptyEl) {
+            emptyEl = document.createElement('p');
+            emptyEl.className = 'analytics-empty-state text-muted text-center py-4 mb-0';
+            canvas.parentElement?.appendChild(emptyEl);
+        }
+        emptyEl.textContent = message;
+        return false;
+    },
+
     async safeLoad(label, fn) {
         try {
             await fn();
@@ -36,6 +63,20 @@ const Analytics = {
         const growthEl = document.getElementById('growth-rate');
         growthEl.textContent = (data.growth_rate >= 0 ? '+' : '') + data.growth_rate + '%';
         growthEl.className = data.growth_rate >= 0 ? 'trend-up' : 'trend-down';
+
+        // Taxa de conversão = vendas 7d / visitas 7d (Onda 2 / T3). Janela fixa
+        // de 7 dias (mesma do painel Pregão "Exposição"), independente do
+        // seletor de período do gráfico de receita.
+        const conversionEl = document.getElementById('conversion-rate');
+        if (conversionEl) {
+            if (data.conversion_rate === null || data.conversion_rate === undefined) {
+                conversionEl.textContent = '—';
+                conversionEl.title = 'Sem dados de visitas coletados ainda';
+            } else {
+                conversionEl.textContent = data.conversion_rate + '%';
+                conversionEl.title = `${data.sales_7d || 0} vendas / ${data.visits_7d || 0} visitas (últimos 7 dias)`;
+            }
+        }
     },
 
     async loadRevenueTrend() {
@@ -100,17 +141,23 @@ const Analytics = {
 
     async loadCustomerLTV() {
         const json = await requestJson('/api/analytics/customer-ltv');
+        const rows = Array.isArray(json.data) ? json.data : [];
 
-        const ctx = document.getElementById('ltvChart').getContext('2d');
+        const canvas = document.getElementById('ltvChart');
+        if (!this.toggleNoDataState(canvas, rows, 'Sem dados suficientes de LTV no período.')) {
+            return;
+        }
+
+        const ctx = canvas.getContext('2d');
 
         if (this.charts.ltv) this.charts.ltv.destroy();
 
         this.charts.ltv = new Chart(ctx, {
             type: 'doughnut',
             data: {
-                labels: json.data.map(d => d.segment),
+                labels: rows.map(d => d.segment),
                 datasets: [{
-                    data: json.data.map(d => d.customer_count),
+                    data: rows.map(d => d.customer_count),
                     backgroundColor: ['#6f42c1', '#4CAF50', '#FFC107', '#FF5722']
                 }]
             },
@@ -123,18 +170,24 @@ const Analytics = {
 
     async loadProfitMargins() {
         const json = await requestJson('/api/analytics/profit-margins');
+        const rows = Array.isArray(json.data) ? json.data : [];
 
-        const ctx = document.getElementById('marginChart').getContext('2d');
+        const canvas = document.getElementById('marginChart');
+        if (!this.toggleNoDataState(canvas, rows, 'Sem dados suficientes de margem por tipo de anúncio.')) {
+            return;
+        }
+
+        const ctx = canvas.getContext('2d');
 
         if (this.charts.margin) this.charts.margin.destroy();
 
         this.charts.margin = new Chart(ctx, {
             type: 'bar',
             data: {
-                labels: json.data.map(d => d.listing_type || 'N/A'),
+                labels: rows.map(d => d.listing_type || 'N/A'),
                 datasets: [{
                     label: 'Margem Média (%)',
-                    data: json.data.map(d => parseFloat(d.avg_margin)),
+                    data: rows.map(d => parseFloat(d.avg_margin)),
                     backgroundColor: '#28a745'
                 }]
             },
@@ -153,9 +206,17 @@ const Analytics = {
     async loadInventoryTurnover() {
         const json = await requestJson('/api/analytics/inventory-turnover');
 
+        const rows = Array.isArray(json.data) ? json.data : [];
+        if (!rows.length) {
+            document.getElementById('turnover-table').innerHTML =
+                '<p class="text-muted text-center py-3 mb-0">Sem dados suficientes de giro de estoque no período.</p>';
+            return;
+        }
+
         let html = '<table class="table table-sm"><thead><tr><th>Categoria</th><th>Taxa</th></tr></thead><tbody>';
-        json.data.forEach(d => {
-            html += `<tr><td>ID ${d.category_id}</td><td><span class="badge bg-success">${d.turnover_rate}%</span></td></tr>`;
+        rows.forEach(d => {
+            const label = d.category_name || `ID ${d.category_id}`;
+            html += `<tr><td>${label}</td><td><span class="badge bg-success">${d.turnover_rate}%</span></td></tr>`;
         });
         html += '</tbody></table>';
 
@@ -164,18 +225,24 @@ const Analytics = {
 
     async loadForecast() {
         const json = await requestJson('/api/analytics/forecast?days=7');
+        const rows = Array.isArray(json.data) ? json.data : [];
 
-        const ctx = document.getElementById('forecastChart').getContext('2d');
+        const canvas = document.getElementById('forecastChart');
+        if (!this.toggleNoDataState(canvas, rows, 'Sem histórico suficiente para prever a receita dos próximos dias.')) {
+            return;
+        }
+
+        const ctx = canvas.getContext('2d');
 
         if (this.charts.forecast) this.charts.forecast.destroy();
 
         this.charts.forecast = new Chart(ctx, {
             type: 'line',
             data: {
-                labels: json.data.map(d => d.date),
+                labels: rows.map(d => d.date),
                 datasets: [{
                     label: 'Previsão (R$)',
-                    data: json.data.map(d => d.predicted_revenue),
+                    data: rows.map(d => d.predicted_revenue),
                     borderColor: '#fff',
                     backgroundColor: 'rgba(255, 255, 255, 0.2)',
                     borderWidth: 2,
