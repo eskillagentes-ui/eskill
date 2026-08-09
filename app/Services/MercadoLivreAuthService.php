@@ -1363,8 +1363,12 @@ class MercadoLivreAuthService
      */
     public function getTokenStatus(int $accountId): array
     {
+        // Fonte única de verdade: ml_accounts.status/refresh_failure_count/
+        // last_refresh_error, lidos com o mesmo critério usado pelo Sentinela
+        // (Sentinela.php) para evitar telas divergentes sobre o mesmo estado.
         $stmt = $this->pdo()->prepare('
-            SELECT id, ml_user_id, nickname, token_expires_at, status, last_token_refresh
+            SELECT id, ml_user_id, nickname, token_expires_at, status,
+                   last_refresh_at, refresh_failure_count, last_refresh_error
             FROM ml_accounts WHERE id = :id LIMIT 1
         ');
         $stmt->execute(['id' => $accountId]);
@@ -1376,14 +1380,24 @@ class MercadoLivreAuthService
                 'status' => 'not_found',
                 'expires_at' => null,
                 'seconds_remaining' => 0,
+                'is_expired' => true,
+                'requires_reconnect' => true,
             ];
         }
 
-        $expiresAt = $row['token_expires_at'] ? strtotime($row['token_expires_at']) : null;
+        $accountStatus = (string) ($row['status'] ?? 'unknown');
+        $lastError = (string) ($row['last_refresh_error'] ?? '');
+        $requiresReconnect = $accountStatus === 'disconnected'
+            || stripos($lastError, 'invalid_grant') !== false;
+
+        $expiresAt = $row['token_expires_at'] ? strtotime((string) $row['token_expires_at']) : null;
         $secondsRemaining = $expiresAt ? max(0, $expiresAt - time()) : 0;
+        $isExpired = $requiresReconnect || $expiresAt === null || $secondsRemaining <= 0;
 
         $tokenStatus = 'unknown';
-        if ($secondsRemaining <= 0) {
+        if ($requiresReconnect) {
+            $tokenStatus = 'reconnect_required';
+        } elseif ($isExpired) {
             $tokenStatus = 'expired';
         } elseif ($secondsRemaining <= 1800) { // 30 min
             $tokenStatus = 'expiring_soon';
@@ -1398,11 +1412,18 @@ class MercadoLivreAuthService
             'account_id' => (int)$row['id'],
             'ml_user_id' => $row['ml_user_id'],
             'nickname' => $row['nickname'],
-            'account_status' => $row['status'],
+            'account_status' => $accountStatus,
             'expires_at' => $row['token_expires_at'],
+            'expires_at_formatted' => function_exists('format_datetime')
+                ? format_datetime($row['token_expires_at'] ?? null)
+                : $row['token_expires_at'],
             'seconds_remaining' => $secondsRemaining,
+            'is_expired' => $isExpired,
+            'requires_reconnect' => $requiresReconnect,
             'status' => $tokenStatus,
-            'last_refresh' => $row['last_token_refresh'] ?? null,
+            'refresh_failure_count' => (int) ($row['refresh_failure_count'] ?? 0),
+            'last_refresh_error' => $row['last_refresh_error'] ?? null,
+            'last_refresh' => $row['last_refresh_at'] ?? null,
         ];
     }
 

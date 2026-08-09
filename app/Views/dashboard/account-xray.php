@@ -1330,9 +1330,22 @@ declare(strict_types=1);
       });
     }
 
+    function parseAppDate(d) {
+      // Timezone único (America/Sao_Paulo, -03:00 fixo, sem horário de verão):
+      // strings sem offset explícito (ex.: vindas de coluna DATETIME) já são
+      // wall-clock nesse fuso — ancora o offset antes de criar o Date() para
+      // não deixar o navegador reinterpretar no seu próprio timezone local.
+      const s = String(d).trim();
+      const hasOffset = /Z$|[+-]\d{2}:?\d{2}$/.test(s);
+      const iso = s.replace(' ', 'T');
+      return new Date(hasOffset ? iso : iso + '-03:00');
+    }
+
     function relDate(d) {
       if (!d) return '—';
-      const diff = (Date.now() - new Date(d).getTime()) / 60000;
+      const parsed = parseAppDate(d);
+      if (Number.isNaN(parsed.getTime())) return '—';
+      const diff = (Date.now() - parsed.getTime()) / 60000;
       if (diff < 2) return 'agora';
       if (diff < 60) return Math.round(diff) + 'min atrás';
       if (diff < 1440) return Math.round(diff / 60) + 'h atrás';

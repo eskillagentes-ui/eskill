@@ -5,13 +5,14 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Services\ClaimsService;
-use App\Services\MercadoLivreClient;
 use App\Services\UserService;
 
 /**
  * Controller de Devoluções (RMA)
  *
- * Gerencia o painel de devoluções e logística reversa.
+ * Read-only: exibe reclamações/disputas do tipo devolução vindas da API do
+ * Mercado Livre (via ClaimsService, mesma fonte única usada por
+ * /dashboard/claims). ML_WRITE_AUTOMATION=false — nenhuma escrita no ML.
  */
 class ReturnsController extends BaseController
 {
@@ -37,60 +38,26 @@ class ReturnsController extends BaseController
             exit;
         }
 
-        $accountId = $_SESSION['active_ml_account_id'] ?? null;
-        $client = new MercadoLivreClient($accountId);
+        $pendingRaw = $this->claimsService->getClaims('opened');
+        $historyRaw = $this->claimsService->getClaims('closed');
 
-        // Fetch opened claims (pending triage)
-        $pendingRaw = $this->fetchClaims($client, 'opened');
-        $pending    = $pendingRaw['data'] ?? ($pendingRaw['results'] ?? []);
+        // BUG CORRIGIDO (Onda 1 / T4): a view assumia campos de um modelo
+        // local de RMA (ml_order_id, sku, quantity, claim_id, condition_rating,
+        // inspector_name) que nunca existiu — os dados reais são claims do ML
+        // (id, resource_id, reason_id, date_created, status...). Passar o
+        // claim raiz direto para strtotime($r['created_at']) com campo
+        // inexistente (null) causava TypeError/HTTP 500 em PHP 8.
+        $pendingError = isset($pendingRaw['error']) ? $pendingRaw : null;
+        $historyError = isset($historyRaw['error']) ? $historyRaw : null;
+        $pending = $pendingError ? [] : array_values($pendingRaw['data'] ?? ($pendingRaw['results'] ?? []));
+        $history = $historyError ? [] : array_values($historyRaw['data'] ?? ($historyRaw['results'] ?? []));
 
-        // Fetch closed/resolved claims (history)
-        $historyRaw = $this->fetchClaims($client, 'closed');
-        $history    = $historyRaw['data'] ?? ($historyRaw['results'] ?? []);
+        $error = $pendingError ?? $historyError;
 
-        $pageTitle = 'Devoluções & RMA';
+        $pageTitle = 'Devoluções (Reclamações ML)';
         ob_start();
         require __DIR__ . '/../Views/dashboard/returns/index.php';
         $content = ob_get_clean();
         require __DIR__ . '/../Views/layouts/modern/app.php';
-    }
-
-    /**
-     * Busca reclamações da API do Mercado Livre por status.
-     *
-     * @param MercadoLivreClient $client
-     * @param string             $status  'opened' ou 'closed'
-     * @return array
-     */
-    private function fetchClaims(MercadoLivreClient $client, string $status): array
-    {
-        try {
-            // Doc ML: /post-purchase/v1/claims/search exige players.user_id + players.role
-            $me = $client->get('/users/me');
-            $sellerId = isset($me['id']) ? (string) $me['id'] : '';
-            if ($sellerId === '') {
-                return [];
-            }
-
-            $response = $client->get('/post-purchase/v1/claims/search', [
-                'players.user_id' => $sellerId,
-                'players.role'    => 'respondent',
-                'status'          => $status,
-                'limit'           => 50,
-                'offset'          => 0,
-            ]);
-
-            if (isset($response['error'])) {
-                return [];
-            }
-
-            return $response;
-        } catch (\Throwable $e) {
-            logger()->warning('ReturnsController: failed to fetch claims', [
-                'status' => $status,
-                'error'  => $e->getMessage(),
-            ]);
-            return [];
-        }
     }
 }

@@ -56,7 +56,7 @@
             const parsed = typeof ev.ts === 'string' ? new Date(ev.ts) : null;
             const when = parsed && !Number.isNaN(parsed.getTime())
                 ? parsed.toLocaleString('pt-BR', {
-                    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
+                    timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit'
                 })
                 : 'horário indisponível';
             meta.textContent = when + ' · ' + String(ev.source || 'live');

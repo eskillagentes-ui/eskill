@@ -543,11 +543,22 @@ class AuthController extends BaseController
         $stmt->execute(['user_id' => $userId]);
         $accounts = $stmt->fetchAll(\PDO::FETCH_ASSOC);
 
-        // Add thumbnail URLs
+        // Add thumbnail URLs + status de token calculado no servidor (fonte
+        // única de verdade — mesmo critério usado pelo Sentinela). Evita a
+        // tela de Configurações recalcular "expirado" no navegador via
+        // `new Date()`, o que divergia do status real quando o timezone do
+        // navegador do visitante era diferente de America/Sao_Paulo.
         foreach ($accounts as &$account) {
             $account['thumbnail'] = $account['ml_user_id']
                 ? "https://http2.mlstatic.com/D_Q_NP_2X_" . substr($account['ml_user_id'], -7) . "-V.webp"
                 : null;
+
+            $tokenStatus = $this->authService->getTokenStatus((int) $account['id']);
+            $account['is_expired'] = $tokenStatus['is_expired'] ?? ($account['status'] === 'expired');
+            $account['requires_reconnect'] = $tokenStatus['requires_reconnect'] ?? false;
+            $account['token_status'] = $tokenStatus['status'] ?? 'unknown';
+            $account['token_expires_at_formatted'] = $tokenStatus['expires_at_formatted'] ?? null;
+            $account['seconds_remaining'] = $tokenStatus['seconds_remaining'] ?? 0;
         }
 
         header('Content-Type: application/json');

@@ -135,7 +135,7 @@ $spark = static function (array $series): string {
                         <td class="mono"><?= htmlspecialchars($fmtLimit($r)) ?></td>
                         <td class="mono"><?= $pct === null ? 'n/d' : htmlspecialchars(number_format((float) $pct, 1, ',', '.') . '%') ?></td>
                         <td><span class="pill <?= $statusClass($st) ?>"><?= htmlspecialchars($st === 'nd' ? 'n/d' : $st) ?></span></td>
-                        <td class="mono mut"><?= htmlspecialchars((string) ($r['collected_at'] ?? '—')) ?></td>
+                        <td class="mono mut"><?= htmlspecialchars(format_datetime($r['collected_at'] ?? null, 'd/m/Y H:i:s')) ?></td>
                         <td class="spark-cell"><?= $spark($hist) ?></td>
                     </tr>
                 <?php endforeach; ?>

@@ -171,9 +171,22 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
     };
     const fmtDate = (val) => {
         if (!val) return '—';
-        const d = new Date(val);
-        if (Number.isNaN(d.getTime())) return escapeHtml(val);
-        return d.toLocaleDateString('pt-BR') + ' ' + d.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        // Timezone único (America/Sao_Paulo): valores "YYYY-MM-DD HH:mm:ss" sem
+        // offset já vêm em wall-clock do fuso da aplicação — exibe os números
+        // como estão, sem reinterpretar via Date() (evita que o navegador
+        // aplique seu próprio timezone local, causando o mesmo pedido exibir
+        // horas diferentes em telas distintas).
+        const naive = String(val).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?\s*$/);
+        if (naive) {
+            const [, y, mo, d, h, mi] = naive;
+            return `${d}/${mo}/${y} ${h}:${mi}`;
+        }
+        // Strings com offset explícito (ex.: API do ML) são convertidas de
+        // forma inequívoca e sempre exibidas no fuso único da aplicação.
+        const dt = new Date(val);
+        if (Number.isNaN(dt.getTime())) return escapeHtml(val);
+        return dt.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' }) + ' ' +
+            dt.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit' });
     };
 
     function initDates(days = 30) {

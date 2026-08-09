@@ -648,13 +648,17 @@
     }
 
     function renderMLAccount(account) {
-        const isExpired = account.status === 'expired' ||
-            (account.token_expires_at && new Date(account.token_expires_at) < new Date());
+        // Timezone único / fonte única de verdade: is_expired e
+        // requires_reconnect vêm calculados no servidor (mesmo critério do
+        // Sentinela), em vez de recalcular "expirado" no navegador via
+        // `new Date()` — isso divergia quando o timezone do navegador do
+        // visitante era diferente de America/Sao_Paulo.
+        const isExpired = account.requires_reconnect ?? account.is_expired ?? (account.status === 'expired');
         const statusClass = isExpired ? 'danger' : (account.status === 'active' ? 'success' : 'warning');
         const statusText = isExpired ? 'Token Expirado' : (account.status === 'active' ? 'Ativo' : 'Inativo');
         const statusIcon = isExpired ? 'exclamation-triangle' : (account.status === 'active' ? 'check-circle' : 'pause-circle');
 
-        const expiresAt = account.token_expires_at ? new Date(account.token_expires_at).toLocaleString('pt-BR') : 'N/A';
+        const expiresAt = account.token_expires_at_formatted || (account.token_expires_at ? String(account.token_expires_at) : 'N/A');
 
         return `
         <div class="d-flex justify-content-between align-items-center p-3 border rounded mb-2" id="ml-account-${account.id}">

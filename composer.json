@@ -36,7 +36,8 @@
       "app/Helpers/LogHelper.php",
       "app/Helpers/CacheHelper.php",
       "app/Helpers/Functions.php",
-      "app/Helpers/PregaoHelper.php"
+      "app/Helpers/PregaoHelper.php",
+      "app/Helpers/DateHelper.php"
     ]
   },
   "autoload-dev": {

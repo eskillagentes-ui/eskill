@@ -324,7 +324,7 @@ class AccountSyncService
                 ];
             }
 
-            if ($tokenStatus === 'expired' || $tokenStatus === 'unknown') {
+            if ($tokenStatus === 'expired' || $tokenStatus === 'unknown' || $tokenStatus === 'reconnect_required') {
                 return [
                     'error' => 'Token inválido/expirado. Reautorize a conta para continuar a sincronização.',
                     'error_code' => 'account_reauth_required',

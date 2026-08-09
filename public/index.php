@@ -26,6 +26,7 @@ require_once ROOT_PATH . '/autoload.php';
 require_once APP_PATH . '/Helpers/LogHelper.php';
 require_once APP_PATH . '/Helpers/CacheHelper.php';
 require_once APP_PATH . '/Helpers/ViewHelper.php';
+require_once APP_PATH . '/Helpers/DateHelper.php';
 
 // Carregar variáveis de ambiente
 // Priorizar .env.test se APP_ENV=testing estiver definido no ambiente

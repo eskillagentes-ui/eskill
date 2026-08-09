@@ -636,10 +636,19 @@ final class Sentinela
             $pct = 100.0;
             $reason = sprintf('OAuth crítico: status=%s falhas=%d', $statusAcc, $failures);
         }
-        if ($hoursLeft !== null && $hoursLeft <= 0 && (int) ($acc['has_refresh'] ?? 0) === 0) {
+        // BUG CORRIGIDO (Onda 1): token já expirado (hoursLeft <= 0) só virava
+        // vermelho quando NÃO havia refresh_token. Se havia refresh_token mas
+        // o token mesmo assim chegou expirado, isso é sinal de que o refresh
+        // automático (cron/worker) falhou em rodar a tempo — e o Sentinela
+        // reportava "verde/token saudável" enquanto a conta já estava com o
+        // access_token expirado (divergência com a tela de Configurações,
+        // que lê o mesmo token_expires_at e mostrava "Token Expirado").
+        if ($hoursLeft !== null && $hoursLeft <= 0) {
             $status = 'vermelho';
             $pct = 100.0;
-            $reason = 'token expirado sem refresh token';
+            $reason = (int) ($acc['has_refresh'] ?? 0) === 1
+                ? 'token expirado — refresh automático não ocorreu a tempo'
+                : 'token expirado sem refresh token';
         }
         $err = (string) ($acc['last_refresh_error'] ?? '');
         if (str_contains(strtolower($err), 'invalid_grant')) {

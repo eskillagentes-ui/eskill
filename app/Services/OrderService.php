@@ -657,7 +657,15 @@ class OrderService
             'shipping_cost' => $shippingCost,
             'discount_amount' => $financials['discount_amount'],
             'net_profit' => $financials['net_profit'],
-            'date_created' => $orderData['date_created'] ?? date('Y-m-d H:i:s'),
+            // A API do ML retorna date_created com offset próprio (ex.: -04:00),
+            // que pode divergir do fuso único da aplicação (America/Sao_Paulo).
+            // Normaliza para o fuso único antes de persistir em coluna DATETIME
+            // (sem isso, o wall-clock gravado fica com offset errado — causa
+            // raiz do mesmo pedido aparecendo com horas diferentes em telas
+            // que leem do banco vs. telas que consultam a API ao vivo).
+            'date_created' => isset($orderData['date_created'])
+                ? (normalize_datetime_to_app_tz($orderData['date_created']) ?? date('Y-m-d H:i:s'))
+                : date('Y-m-d H:i:s'),
             'order_data_upd' => $orderJson,
             'status_upd' => $status,
             'total_amount_upd' => $total,

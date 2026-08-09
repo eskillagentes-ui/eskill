@@ -103,6 +103,7 @@ spl_autoload_register(function ($class) {
 // Load global function helpers (not classes, so PSR-4 can't load them)
 require_once __DIR__ . '/app/Helpers/LogHelper.php';
 require_once __DIR__ . '/app/Helpers/CacheHelper.php';
+require_once __DIR__ . '/app/Helpers/DateHelper.php';
 
 // Load environment variables after autoloader is registered
 if (file_exists(__DIR__ . '/.env')) {
@@ -135,4 +136,11 @@ if (file_exists(__DIR__ . '/.env')) {
             }
         }
     }
+}
+
+// Fuso único do negócio (APP_TIMEZONE=America/Sao_Paulo) para todos os
+// scripts CLI/workers/crons que usam este bootstrap — evita divergência de
+// timezone entre agentes/crons e a aplicação web (ambos usam TimezoneHelper).
+if (class_exists('App\\Helpers\\TimezoneHelper')) {
+    \App\Helpers\TimezoneHelper::applyFromEnv();
 }

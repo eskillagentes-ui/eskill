@@ -421,7 +421,10 @@ class AccountXRayService
     {
         $salesMap = [];
         try {
-            $from     = date('Y-m-d', strtotime('-30 days')) . 'T00:00:00.000-03:00';
+            // Timezone único da aplicação (America/Sao_Paulo) em vez de offset
+            // fixo -03:00 (evita divergência caso o fuso configurado mude).
+            $tzOffset = \App\Helpers\TimezoneHelper::mysqlOffsetLiteral();
+            $from     = date('Y-m-d', strtotime('-30 days')) . 'T00:00:00.000' . $tzOffset;
             $response = $this->mlClient->get('/orders/search', [
                 'seller'         => $sellerId,
                 'order.status'   => 'paid',

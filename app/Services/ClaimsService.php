@@ -34,38 +34,82 @@ class ClaimsService
 
     /**
      * Get claims with filters
+     *
+     * Doc ML (developers.mercadolivre.com.br): /post-purchase/v1/claims/search
+     * exige ao menos um filtro real (offset/limit não contam). players.role
+     * exige players.user_id, e vice-versa — os dois têm que ser enviados
+     * juntos. Sem isso a API responde 400 "atLeastOneFilterProvided".
+     *
+     * @param string $type Status desejado ('opened'/'closed'). Qualquer outro
+     *                      valor (ex.: legado 'to_seller') preserva o
+     *                      comportamento histórico de filtrar 'opened'.
      */
     public function getClaims(string $type = 'to_seller', int $limit = 50, int $offset = 0): array
     {
         try {
+            $sellerId = $this->resolveSellerId();
+            if ($sellerId === null) {
+                $message = 'Não foi possível identificar o vendedor (ml_user_id da conta ou GET /users/me indisponível) para filtrar as reclamações.';
+                return [
+                    'error' => $message,
+                    'error_code' => 'seller_id_unavailable',
+                    'message' => $message,
+                    'requires_reconnect' => $this->client->isAccountDisconnected(),
+                ];
+            }
+
+            $status = in_array($type, ['opened', 'closed'], true) ? $type : 'opened';
+
             $params = [
                 'limit' => $limit,
                 'offset' => $offset,
-                'status' => 'opened',
+                'status' => $status,
+                'players.user_id' => $sellerId,
+                'players.role' => 'respondent',
             ];
-
-            // Doc ML: listagem é /claims/search (sem /search → 404 resource not found).
-            $sellerId = $this->resolveSellerId();
-            if ($sellerId !== null) {
-                $params['players.user_id'] = $sellerId;
-                $params['players.role'] = 'respondent';
-            }
 
             $endpoint = '/post-purchase/v1/claims/search';
             $response = $this->client->get($endpoint, $params);
 
             if (isset($response['error'])) {
-                return ['error' => $response['message'] ?? 'Failed to fetch claims'];
+                // Mantém 'error' com a mensagem legível (contrato histórico
+                // desta classe) e adiciona 'error_code'/'requires_reconnect'
+                // (Onda 1 / T2) para consumidores que precisam de erro
+                // estruturado sem quebrar quem já lê 'error' como texto.
+                $message = $response['message'] ?? 'Failed to fetch claims';
+                return [
+                    'error' => $message,
+                    'error_code' => $response['error'],
+                    'message' => $message,
+                    'requires_reconnect' => ($response['error'] ?? '') === 'account_disconnected',
+                ];
             }
 
             return $response;
         } catch (\Exception $e) {
-            return ['error' => $e->getMessage()];
+            return [
+                'error' => $e->getMessage(),
+                'error_code' => 'exception',
+                'message' => $e->getMessage(),
+                'requires_reconnect' => false,
+            ];
         }
     }
 
+    /**
+     * Resolve o ml_user_id do vendedor para os filtros obrigatórios da busca
+     * de claims. Prioriza o valor já persistido em ml_accounts (via o client
+     * já carregado) para evitar uma chamada extra e frágil a GET /users/me
+     * — se essa chamada falhar silenciosamente, a busca de claims perdia o
+     * filtro obrigatório e a API respondia atLeastOneFilterProvided.
+     */
     private function resolveSellerId(): ?string
     {
+        $fromAccount = $this->client->getMlUserId();
+        if ($fromAccount !== null && $fromAccount !== '') {
+            return $fromAccount;
+        }
+
         try {
             $me = $this->client->get('/users/me');
             if (isset($me['id']) && $me['id'] !== '' && $me['id'] !== null) {

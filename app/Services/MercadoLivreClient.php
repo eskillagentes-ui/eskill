@@ -92,6 +92,7 @@ class MercadoLivreClient
     private bool $accountDisconnected = false;
     private ?string $accountNickname = null;
     private ?string $accountStatus = null;
+    private ?string $mlUserId = null;
     private ?string $lastRefreshError = null;
     /**
      * Endpoints aprendidos dinamicamente como bloqueados para client_id em requests públicos.
@@ -435,7 +436,7 @@ class MercadoLivreClient
         $db = Database::getInstance();
         try {
             $stmt = $db->prepare(
-                'SELECT access_token, refresh_token, token_expires_at, tokens_encrypted, status, last_refresh_error, nickname
+                'SELECT access_token, refresh_token, token_expires_at, tokens_encrypted, status, last_refresh_error, nickname, ml_user_id
                  FROM ml_accounts WHERE id = :id LIMIT 1'
             );
             $stmt->execute(['id' => $this->accountId]);
@@ -449,7 +450,7 @@ class MercadoLivreClient
             }
 
             $stmt = $db->prepare(
-                "SELECT access_token, refresh_token, token_expires_at, tokens_encrypted, status, NULL AS last_refresh_error, nickname
+                "SELECT access_token, refresh_token, token_expires_at, tokens_encrypted, status, NULL AS last_refresh_error, nickname, ml_user_id
                  FROM ml_accounts WHERE id = :id LIMIT 1"
             );
             $stmt->execute(['id' => $this->accountId]);
@@ -463,6 +464,7 @@ class MercadoLivreClient
         $this->accountNickname = isset($row['nickname']) ? (string)$row['nickname'] : null;
         $this->accountStatus = isset($row['status']) ? (string)$row['status'] : null;
         $this->lastRefreshError = isset($row['last_refresh_error']) ? (string)$row['last_refresh_error'] : null;
+        $this->mlUserId = isset($row['ml_user_id']) && $row['ml_user_id'] !== null ? (string)$row['ml_user_id'] : null;
 
         $this->accountDisconnected = $this->isAccountDisconnectedState($this->accountStatus, $this->lastRefreshError);
         if ($this->accountDisconnected) {
@@ -1056,6 +1058,13 @@ class MercadoLivreClient
             '#^/answers#',
             '#^/my/#',
             '#^/v1/claims#',
+            // BUG CORRIGIDO (Onda 1): claims/returns usam /post-purchase/v1/claims,
+            // que não batia em nenhum padrão acima ('#^/v1/claims#' não cobre o
+            // prefixo /post-purchase). Resultado: requiresAuth=false para GET,
+            // pulando o refresh proativo de token (ensureValidAccessToken) e o
+            // erro estruturado de "conta desconectada" — causa raiz de Claims
+            // falhar de forma intermitente com token perto de expirar.
+            '#^/post-purchase#',
             // Search é endpoint público - usar searchItems() para forçar public
             // '#^/sites/[^/]+/search#',
         ];
@@ -1607,6 +1616,31 @@ class MercadoLivreClient
     public function getAccountId(): ?int
     {
         return $this->accountId;
+    }
+
+    /**
+     * ID do usuário Mercado Livre (ml_accounts.ml_user_id) da conta carregada.
+     * Evita chamadas extras e frágeis a GET /users/me só para descobrir o
+     * seller_id ao montar filtros obrigatórios (ex.: players.user_id em
+     * /post-purchase/v1/claims/search).
+     */
+    public function getMlUserId(): ?string
+    {
+        if ($this->mlUserId === null && $this->accountId !== null) {
+            $this->loadAccount();
+        }
+
+        return $this->mlUserId;
+    }
+
+    /**
+     * Indica se a conta está marcada como desconectada (reconexão OAuth
+     * necessária) — fonte única: ml_accounts.status/last_refresh_error via
+     * isAccountDisconnectedState(), a mesma usada pelo restante do client.
+     */
+    public function isAccountDisconnected(): bool
+    {
+        return $this->accountDisconnected;
     }
 
     /**

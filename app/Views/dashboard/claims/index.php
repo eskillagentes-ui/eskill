@@ -17,15 +17,21 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
                 </button>
             </div>
             <div class="card-body p-0">
+                <div id="claims-error" class="alert alert-danger d-flex justify-content-between align-items-center m-3" style="display:none;">
+                    <span id="claims-error-message"></span>
+                    <button class="btn btn-sm btn-outline-danger ms-3" onclick="claimsManager.loadClaims()">
+                        <i class="bi bi-arrow-clockwise"></i> Tentar novamente
+                    </button>
+                </div>
                 <div class="table-responsive">
                     <table class="table table-hover align-middle mb-0">
                         <thead class="bg-light">
                             <tr>
                                 <th class="ps-4">Reclamação</th>
-                                <th>Pedido Relacionado</th>
+                                <th>Pedido/Recurso Relacionado</th>
                                 <th>Motivo</th>
                                 <th>Fase</th>
-                                <th>Risco</th>
+                                <th>Tipo</th>
                                 <th>Data</th>
                                 <th class="text-end pe-4">Ações</th>
                             </tr>
@@ -73,46 +79,81 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
             this.loadClaims();
         },
 
+        // Nunca renderiza undefined/Invalid Date: campo ausente vira '—'.
+        safe: function(val, fallback) {
+            return (val === null || val === undefined || val === '') ? (fallback ?? '—') : String(val);
+        },
+
+        fmtDate: function(val) {
+            if (!val) return '—';
+            const d = new Date(val);
+            if (Number.isNaN(d.getTime())) return '—';
+            return d.toLocaleDateString('pt-BR', { timeZone: 'America/Sao_Paulo' });
+        },
+
+        showError: function(message) {
+            const box = document.getElementById('claims-error');
+            const msg = document.getElementById('claims-error-message');
+            if (msg) msg.textContent = message || 'Erro ao carregar reclamações. Tente novamente.';
+            if (box) box.style.display = 'flex';
+            document.getElementById('claims-list').innerHTML =
+                '<tr><td colspan="7" class="text-center text-muted py-4">Não foi possível carregar as reclamações.</td></tr>';
+        },
+
+        hideError: function() {
+            const box = document.getElementById('claims-error');
+            if (box) box.style.display = 'none';
+        },
+
         loadClaims: async function() {
+            this.hideError();
+            document.getElementById('claims-list').innerHTML =
+                '<tr><td colspan="7" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
             try {
                 const data = await requestJson('/api/claims/list');
-                
-                if (data.success) {
-                    const claims = Array.isArray(data.claims)
-                        ? data.claims
-                        : (data.claims && typeof data.claims === 'object' ? Object.values(data.claims) : []);
-                    this.render(claims);
+
+                if (!data.success) {
+                    if (data.requires_reconnect) {
+                        this.showError((data.message || 'Conta desconectada.') + ' Reconecte a conta do Mercado Livre em Configurações.');
+                    } else {
+                        this.showError(data.message || 'Erro ao carregar reclamações.');
+                    }
+                    return;
                 }
+
+                const claims = Array.isArray(data.claims) ? data.claims : [];
+                this.render(claims);
             } catch (e) {
                 console.error(e);
+                this.showError('Erro de conexão ao carregar reclamações.');
             }
         },
 
         render: function(claims) {
             const container = document.getElementById('claims-list');
             if (claims.length === 0) {
-                container.innerHTML = '<tr><td colspan="7" class="text-center text-muted">Nenhuma reclamação em aberto.</td></tr>';
+                container.innerHTML = '<tr><td colspan="7" class="text-center text-muted py-4">Nenhuma reclamação em aberto.</td></tr>';
                 return;
             }
 
             let html = '';
             claims.forEach(c => {
-                const stageBadge = c.stage === 'mediation' 
-                    ? '<span class="badge bg-danger">Mediação</span>' 
-                    : '<span class="badge bg-warning text-dark">Disputa</span>';
-                    
-                const riskColor = c.risk_level === 'high' ? 'text-danger' : (c.risk_level === 'medium' ? 'text-warning' : 'text-success');
+                const stageBadge = c.stage === 'mediation'
+                    ? '<span class="badge bg-danger">Mediação</span>'
+                    : (c.stage === 'dispute'
+                        ? '<span class="badge bg-warning text-dark">Disputa</span>'
+                        : `<span class="badge bg-secondary">${this.safe(c.stage)}</span>`);
 
                 html += `
                     <tr>
-                        <td class="ps-4 fw-bold">#${c.id}</td>
-                        <td>${c.resource_id}</td>
-                        <td>${c.reason} <br> <small class="text-muted">${c.reason_id}</small></td>
+                        <td class="ps-4 fw-bold">#${this.safe(c.id)}</td>
+                        <td>${this.safe(c.resource_id ?? c.order_id)}</td>
+                        <td>${this.safe(c.reason_id)}</td>
                         <td>${stageBadge}</td>
-                        <td class="${riskColor} fw-bold text-uppercase small">${c.risk_level}</td>
-                        <td>${new Date(c.created_date).toLocaleDateString('pt-BR')}</td>
+                        <td class="small text-uppercase text-muted">${this.safe(c.type)}</td>
+                        <td>${this.fmtDate(c.date_created)}</td>
                         <td class="text-end pe-4">
-                            <button class="btn btn-sm btn-primary" onclick="claimsManager.openReply('${c.id}')">
+                            <button class="btn btn-sm btn-primary" onclick="claimsManager.openReply('${this.safe(c.id, '')}')">
                                 <i class="bi bi-chat-left-text"></i> Responder
                             </button>
                         </td>

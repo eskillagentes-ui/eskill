@@ -70,7 +70,9 @@
     const agentState = Object.create(null);
 
     setInterval(() => {
-        if ($('clock')) $('clock').textContent = new Date().toLocaleTimeString('pt-BR');
+        // Timezone único (America/Sao_Paulo): forçado explicitamente para não
+        // depender do relógio/timezone do sistema operacional de quem está vendo.
+        if ($('clock')) $('clock').textContent = new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' });
         refreshAgentFreshness(Date.now());
         refreshObservabilityFreshness(Date.now());
     }, 1000);
@@ -455,7 +457,9 @@
         const li = document.createElement('li');
         if (robot === 'VENDA' || level === 'success') li.className = 'sale';
         if (level === 'alert') li.className = 'alert';
-        const ts = ev.ts ? new Date(ev.ts).toLocaleTimeString('pt-BR') : new Date().toLocaleTimeString('pt-BR');
+        const ts = ev.ts
+            ? new Date(ev.ts).toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' })
+            : new Date().toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo' });
         const iconNode = document.createElement('span');
         iconNode.className = 'ic';
         iconNode.textContent = String(icon);
@@ -798,7 +802,7 @@
                 const parsed = new Date(item.updated_at);
                 time.textContent = Number.isNaN(parsed.getTime())
                     ? 'horário indisponível'
-                    : 'último ciclo ' + parsed.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+                    : 'último ciclo ' + parsed.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit' });
             }
         }
     }
@@ -929,7 +933,7 @@
             const parsed = new Date(ev.ts);
             lastEvent.textContent = Number.isNaN(parsed.getTime())
                 ? '—'
-                : parsed.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+                : parsed.toLocaleTimeString('pt-BR', { timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit' });
         }
         switch (ev.type) {
             case 'index.tick':
@@ -1019,7 +1023,7 @@
             const observed = typeof item.observed_at === 'string' ? new Date(item.observed_at) : null;
             if (observed && !Number.isNaN(observed.getTime())) {
                 detailText += ' · ' + observed.toLocaleString('pt-BR', {
-                    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+                    timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
                 });
             } else if (item.available) {
                 // Timestamp ausente nunca vira zero/época — sinaliza explicitamente.
@@ -1055,7 +1059,7 @@
         const ageSeconds = Math.max(0, Math.floor((referenceMs - observabilityConsolidatedMs) / 1000));
         const consolidated = new Date(observabilityConsolidatedMs);
         const time = consolidated.toLocaleTimeString('pt-BR', {
-            hour: '2-digit', minute: '2-digit', second: '2-digit'
+            timeZone: 'America/Sao_Paulo', hour: '2-digit', minute: '2-digit', second: '2-digit'
         });
         freshness.textContent = 'consolidado ' + time + ' · ' + ageSeconds + 's atrás';
         freshness.className = 'source-freshness' + (ageSeconds > 300 ? ' is-stale' : '');
