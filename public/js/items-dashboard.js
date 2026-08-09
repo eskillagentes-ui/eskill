@@ -897,29 +897,53 @@ async function syncItems() {
     }
 }
 
-// Funções de seleção em massa
+// Funções de seleção e ações em massa
+//
+// updateBulkSelection(), toggleSelectAll(), bulkActivate() e bulkPause()
+// existiam duplicadas neste arquivo (duas declarações cada, uma delas
+// usando o seletor obsoleto "[data-item-id]" e outra usando o seletor
+// "#itemsGrid ... :not(#selectAll)" já usado pelo resto do módulo). Em
+// JavaScript a última declaração de function com o mesmo nome sobrescreve
+// as anteriores, então só a segunda versão de cada uma rodava de fato no
+// navegador — a primeira era código morto. Unificado em uma única versão
+// por função, usando o seletor "#itemsGrid ... :not(#selectAll)" (exclui
+// corretamente o checkbox "selecionar todos" da contagem/seleção) com a UX
+// mais completa que existia entre as duas cópias (Onda 2.1 / F2).
 function updateBulkSelection() {
-    const checkboxes = document.querySelectorAll('input[type="checkbox"][data-item-id]:checked');
-    const selectedCount = checkboxes.length;
+    const checkboxes = document.querySelectorAll('#itemsGrid input[type="checkbox"]:not(#selectAll)');
+    const checkedBoxes = document.querySelectorAll('#itemsGrid input[type="checkbox"]:checked:not(#selectAll)');
+    const bulkActionsBar = document.getElementById('bulkActionsBar');
+    const selectedCount = document.getElementById('selectedCount');
+    const selectAllCheckbox = document.getElementById('selectAll');
 
-    document.getElementById('selectedCount').textContent = selectedCount;
-    document.getElementById('bulkActionsBar').style.display = selectedCount > 0 ? 'flex' : 'none';
+    selectedCount.textContent = checkedBoxes.length;
+    bulkActionsBar.style.display = checkedBoxes.length > 0 ? 'flex' : 'none';
+
+    // Atualiza o estado do checkbox "selecionar todos"
+    selectAllCheckbox.checked = checkedBoxes.length === checkboxes.length && checkboxes.length > 0;
+    selectAllCheckbox.indeterminate = checkedBoxes.length > 0 && checkedBoxes.length < checkboxes.length;
+
+    // Feedback visual nas linhas selecionadas
+    checkboxes.forEach(checkbox => {
+        const row = checkbox.closest('tr');
+        if (!row) return;
+        row.classList.toggle('selected', checkbox.checked);
+    });
 }
 
 function toggleSelectAll() {
     const selectAllCheckbox = document.getElementById('selectAll');
-    const itemCheckboxes = document.querySelectorAll('input[type="checkbox"][data-item-id]');
+    const checkboxes = document.querySelectorAll('#itemsGrid input[type="checkbox"]:not(#selectAll)');
 
-    itemCheckboxes.forEach(checkbox => {
+    checkboxes.forEach(checkbox => {
         checkbox.checked = selectAllCheckbox.checked;
     });
 
     updateBulkSelection();
 }
 
-// Funções de ações em massa
 async function bulkActivate() {
-    const checkboxes = document.querySelectorAll('input[type="checkbox"][data-item-id]:checked');
+    const checkboxes = document.querySelectorAll('#itemsGrid input[type="checkbox"]:checked:not(#selectAll)');
     const itemIds = Array.from(checkboxes).map(cb => cb.value);
 
     if (itemIds.length === 0) {
@@ -944,10 +968,8 @@ async function bulkActivate() {
 
         await Promise.all(promises);
 
-        // Recarregar lista
         await loadItems();
 
-        // Limpar seleção
         document.getElementById('selectAll').checked = false;
         updateBulkSelection();
 
@@ -959,7 +981,7 @@ async function bulkActivate() {
 }
 
 async function bulkPause() {
-    const checkboxes = document.querySelectorAll('input[type="checkbox"][data-item-id]:checked');
+    const checkboxes = document.querySelectorAll('#itemsGrid input[type="checkbox"]:checked:not(#selectAll)');
     const itemIds = Array.from(checkboxes).map(cb => cb.value);
 
     if (itemIds.length === 0) {
@@ -984,10 +1006,8 @@ async function bulkPause() {
 
         await Promise.all(promises);
 
-        // Recarregar lista
         await loadItems();
 
-        // Limpar seleção
         document.getElementById('selectAll').checked = false;
         updateBulkSelection();
 
@@ -996,71 +1016,6 @@ async function bulkPause() {
         console.error('Error bulk pausing:', e);
         alert('Erro ao pausar itens. Tente novamente.');
     }
-}
-
-// Bulk Operations
-function updateBulkSelection() {
-    const checkboxes = document.querySelectorAll('#itemsGrid input[type="checkbox"]:not(#selectAll)');
-    const checkedBoxes = document.querySelectorAll('#itemsGrid input[type="checkbox"]:checked:not(#selectAll)');
-    const bulkActionsBar = document.getElementById('bulkActionsBar');
-    const selectedCount = document.getElementById('selectedCount');
-    const selectAllCheckbox = document.getElementById('selectAll');
-
-    selectedCount.textContent = checkedBoxes.length;
-    bulkActionsBar.style.display = checkedBoxes.length > 0 ? 'block' : 'none';
-
-    // Update select all checkbox state
-    selectAllCheckbox.checked = checkedBoxes.length === checkboxes.length && checkboxes.length > 0;
-    selectAllCheckbox.indeterminate = checkedBoxes.length > 0 && checkedBoxes.length < checkboxes.length;
-
-    // Visual feedback for selected rows
-    checkboxes.forEach(checkbox => {
-        const row = checkbox.closest('tr');
-        if (checkbox.checked) {
-            row.classList.add('selected');
-        } else {
-            row.classList.remove('selected');
-        }
-    });
-}
-
-function toggleSelectAll() {
-    const selectAllCheckbox = document.getElementById('selectAll');
-    const checkboxes = document.querySelectorAll('#itemsGrid input[type="checkbox"]:not(#selectAll)');
-
-    checkboxes.forEach(checkbox => {
-        checkbox.checked = selectAllCheckbox.checked;
-    });
-
-    updateBulkSelection();
-}
-
-async function bulkActivate() {
-    const items = Array.from(document.querySelectorAll('#itemsGrid input[type="checkbox"]:checked:not(#selectAll)')).map(cb => cb.value);
-    if (items.length === 0) return;
-
-    if (!confirm(`Ativar ${items.length} anúncio(s)?`)) return;
-
-    try {
-        await Promise.all(items.map(itemId =>
-            requestJson(`/api/items/${itemId}/activate`, { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } })
-        ));
-        loadItems();
-    } catch (e) { alert('Erro ao ativar anúncios'); }
-}
-
-async function bulkPause() {
-    const items = Array.from(document.querySelectorAll('#itemsGrid input[type="checkbox"]:checked:not(#selectAll)')).map(cb => cb.value);
-    if (items.length === 0) return;
-
-    if (!confirm(`Pausar ${items.length} anúncio(s)?`)) return;
-
-    try {
-        await Promise.all(items.map(itemId =>
-            requestJson(`/api/items/${itemId}/pause`, { method: 'POST', headers: { 'X-CSRF-Token': csrfToken } })
-        ));
-        loadItems();
-    } catch (e) { alert('Erro ao pausar anúncios'); }
 }
 
 // ========================================
