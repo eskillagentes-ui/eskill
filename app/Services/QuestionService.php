@@ -145,25 +145,46 @@ class QuestionService
         return $stats;
     }
 
+    /**
+     * Lista perguntas SEMPRE a partir do cache local (ml_questions), nunca da
+     * API live do ML. Esta é a fonte única usada tanto pela tabela de
+     * /dashboard/questions quanto pelos contadores de stats() (Onda 2.1 / F1).
+     * Antes desta extração, a tabela (index()) e os contadores (stats())
+     * chegavam à mesma query por caminhos de código diferentes e dependiam de
+     * um valor exato de account_id vindo do front-end ('all'); qualquer outro
+     * valor (ex.: "" para "Conta Atual") desviava a tabela para a API live do
+     * ML, que pode retornar vazio/erro e nunca cair no fallback local
+     * (allow_local_cache não é enviado pelo front-end), causando divergência
+     * entre tabela vazia e contadores populados.
+     */
+    public function getQuestionsLocal(array $filters = []): array
+    {
+        $limit = max(1, min(200, (int)($filters['limit'] ?? 50)));
+        $offset = max(0, (int)($filters['offset'] ?? 0));
+
+        $local = $this->getQuestionsFromDatabase([
+            'status' => $filters['status'] ?? null,
+            'item_id' => $filters['item_id'] ?? null,
+            'limit' => $limit,
+            'offset' => $offset,
+            'account_id' => $filters['account_id'] ?? 'all',
+        ]);
+
+        if (!isset($local['error'])) {
+            $local['success'] = true;
+            $local['source'] = 'local';
+        }
+
+        return $local;
+    }
+
     public function getQuestions(array $filters = []): array
     {
         $limit = max(1, min(200, (int)($filters['limit'] ?? 50)));
         $offset = max(0, (int)($filters['offset'] ?? 0));
 
         if (isset($filters['account_id']) && $filters['account_id'] === 'all') {
-            $local = $this->getQuestionsFromDatabase([
-                'status' => $filters['status'] ?? null,
-                'limit' => $limit,
-                'offset' => $offset,
-                'account_id' => 'all',
-            ]);
-
-            if (!isset($local['error'])) {
-                $local['success'] = true;
-                $local['source'] = 'local';
-            }
-
-            return $local;
+            return $this->getQuestionsLocal($filters);
         }
 
         $params = [
@@ -591,6 +612,11 @@ class QuestionService
         } elseif ($this->accountId !== null && $this->accountId > 0) {
             $where[] = "account_id = ?";
             $params[] = $this->accountId;
+        }
+
+        if (!empty($filters['item_id'])) {
+            $where[] = "item_id = ?";
+            $params[] = (string)$filters['item_id'];
         }
 
         $offset = max(0, (int)($filters['offset'] ?? 0));

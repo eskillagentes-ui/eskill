@@ -40,24 +40,32 @@ class QuestionController extends BaseController
     {
         header('Content-Type: application/json');
 
+        $requestedAccountId = $this->request->get('account_id');
+
         $filters = [
             'status' => $this->request->get('status'),
             'item_id' => $this->request->get('item_id'),
             'limit' => $this->request->getInt('limit', 50),
             'offset' => $this->request->getInt('offset', 0),
-            'account_id' => $this->request->get('account_id'),
+            'account_id' => $requestedAccountId,
             'allow_local_cache' => $this->request->get('allow_local_cache'),
             'source' => $this->request->get('source')
         ];
 
         // Se não for "all" e não tiver conta selecionada, erro
-        if (($filters['account_id'] !== 'all') && !$this->accountId) {
+        if (($requestedAccountId !== 'all') && !$this->accountId) {
             http_response_code(400);
             echo json_encode(['error' => 'Conta ML não selecionada']);
             return;
         }
 
-        $result = $this->service->getQuestions($filters);
+        // A listagem da tabela usa SEMPRE o cache local (ml_questions) — mesma
+        // fonte de stats() — para nunca divergir dos contadores exibidos no
+        // topo da tela de Perguntas (Onda 2.1 / F1). "item_id" continua sendo
+        // um filtro válido do cache local; apenas o roteamento para a API
+        // live do ML (antes condicionado a account_id === 'all') foi
+        // removido desta rota de listagem.
+        $result = $this->service->getQuestionsLocal($filters);
 
         if (isset($result['error'])) {
             $error = (string)$result['error'];
@@ -84,12 +92,11 @@ class QuestionController extends BaseController
         header('Content-Type: application/json');
 
         try {
-            // Usa cache local para não depender da API ML em tela inicial do dashboard.
-            $all = $this->service->getQuestions([
-                'account_id' => 'all',
+            // Usa cache local (mesma fonte da tabela em index(), Onda 2.1 / F1)
+            // para não depender da API ML em tela inicial do dashboard.
+            $all = $this->service->getQuestionsLocal([
                 'limit' => 200,
                 'offset' => 0,
-                'allow_local_cache' => true,
             ]);
 
             $questions = is_array($all['questions'] ?? null) ? $all['questions'] : [];
