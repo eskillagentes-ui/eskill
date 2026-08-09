@@ -19,9 +19,10 @@ final class FinanceiroAgent extends LegacyReadOnlyAgentAdapter
 
     /** @var list<string> */
     private const PNL_KEYS = [
-        'total_orders', 'gross_revenue', 'taxes', 'net_revenue', 'cogs',
+        'total_orders', 'gross_revenue', 'taxes', 'net_revenue', 'cogs', 'cogs_source',
         'commissions', 'payment_fees', 'fixed_fees', 'shipping_cost', 'discounts',
-        'net_profit', 'avg_margin', 'period',
+        'advertising_expenses', 'net_profit', 'avg_margin', 'units_sold', 'source',
+        'cash', 'period',
     ];
 
     /** @var list<string> */
@@ -29,9 +30,21 @@ final class FinanceiroAgent extends LegacyReadOnlyAgentAdapter
 
     /** @var list<string> */
     private const METRICS_KEYS = [
-        'total_orders', 'gross_revenue', 'net_profit', 'avg_ticket',
-        'avg_margin', 'cost_rate', 'roi',
+        'total_orders', 'gross_revenue', 'net_profit', 'advertising_expenses',
+        'avg_ticket', 'avg_margin', 'cost_rate', 'roi', 'cash',
     ];
+
+    /** @var list<string> */
+    private const CASH_KEYS = [
+        'released_amount', 'pending_release_amount', 'withdrawn_amount',
+        'hold_amount', 'released_not_withdrawn', 'marketplace_net', 'entries_count',
+    ];
+
+    /** @var list<string> */
+    private const COGS_SOURCES = ['ml_orders', 'none', 'sku_custos'];
+
+    /** @var list<string> */
+    private const PNL_SOURCES = ['ml_orders', 'ledger'];
 
     public function name(): string
     {
@@ -114,17 +127,26 @@ final class FinanceiroAgent extends LegacyReadOnlyAgentAdapter
         if ($keys !== $expected) {
             return false;
         }
-        if (!is_int($pnl['total_orders'])) {
+        if (!is_int($pnl['total_orders']) || !is_int($pnl['units_sold'])) {
             return false;
         }
         foreach ([
             'gross_revenue', 'taxes', 'net_revenue', 'cogs', 'commissions',
             'payment_fees', 'fixed_fees', 'shipping_cost', 'discounts',
-            'net_profit', 'avg_margin',
+            'advertising_expenses', 'net_profit', 'avg_margin',
         ] as $numeric) {
             if (!is_int($pnl[$numeric]) && !is_float($pnl[$numeric])) {
                 return false;
             }
+        }
+        if (!is_string($pnl['cogs_source']) || !in_array($pnl['cogs_source'], self::COGS_SOURCES, true)) {
+            return false;
+        }
+        if (!is_string($pnl['source']) || !in_array($pnl['source'], self::PNL_SOURCES, true)) {
+            return false;
+        }
+        if (!$this->isCash($pnl['cash'])) {
+            return false;
         }
         if (!is_array($pnl['period'])
             || !$this->hasExactKeys($pnl['period'], ['start', 'end'])
@@ -135,6 +157,20 @@ final class FinanceiroAgent extends LegacyReadOnlyAgentAdapter
         }
 
         return true;
+    }
+
+    private function isCash(mixed $cash): bool
+    {
+        if (!is_array($cash) || !$this->hasExactKeys($cash, self::CASH_KEYS)) {
+            return false;
+        }
+        foreach (array_diff(self::CASH_KEYS, ['entries_count']) as $numeric) {
+            if (!is_int($cash[$numeric]) && !is_float($cash[$numeric])) {
+                return false;
+            }
+        }
+
+        return is_int($cash['entries_count']);
     }
 
     /** @param array<array-key, mixed> $metrics */
@@ -150,13 +186,13 @@ final class FinanceiroAgent extends LegacyReadOnlyAgentAdapter
         if (!is_int($metrics['total_orders'])) {
             return false;
         }
-        foreach (['gross_revenue', 'net_profit', 'avg_ticket', 'avg_margin', 'cost_rate', 'roi'] as $numeric) {
+        foreach (['gross_revenue', 'net_profit', 'advertising_expenses', 'avg_ticket', 'avg_margin', 'cost_rate', 'roi'] as $numeric) {
             if (!is_int($metrics[$numeric]) && !is_float($metrics[$numeric])) {
                 return false;
             }
         }
 
-        return true;
+        return $this->isCash($metrics['cash']);
     }
 
     /** @param array<string, mixed> $value @param list<string> $keys */

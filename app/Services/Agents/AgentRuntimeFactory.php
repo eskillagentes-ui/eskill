@@ -28,15 +28,22 @@ final class AgentRuntimeFactory
         'pct_of_limit', 'status', 'reason', 'source', 'meta', 'collected_at',
     ];
     private const PNL_KEYS = [
-        'total_orders', 'gross_revenue', 'taxes', 'net_revenue', 'cogs',
+        'total_orders', 'gross_revenue', 'taxes', 'net_revenue', 'cogs', 'cogs_source',
         'commissions', 'payment_fees', 'fixed_fees', 'shipping_cost', 'discounts',
-        'net_profit', 'avg_margin', 'period',
+        'advertising_expenses', 'net_profit', 'avg_margin', 'units_sold', 'source',
+        'cash', 'period',
     ];
     private const VARIATION_KEYS = ['gross_revenue', 'net_profit', 'total_orders', 'avg_margin'];
     private const METRICS_KEYS = [
-        'total_orders', 'gross_revenue', 'net_profit', 'avg_ticket',
-        'avg_margin', 'cost_rate', 'roi',
+        'total_orders', 'gross_revenue', 'net_profit', 'advertising_expenses',
+        'avg_ticket', 'avg_margin', 'cost_rate', 'roi', 'cash',
     ];
+    private const CASH_KEYS = [
+        'released_amount', 'pending_release_amount', 'withdrawn_amount',
+        'hold_amount', 'released_not_withdrawn', 'marketplace_net', 'entries_count',
+    ];
+    private const COGS_SOURCES = ['ml_orders', 'none', 'sku_custos'];
+    private const PNL_SOURCES = ['ml_orders', 'ledger'];
     private const ADS_SKU_FIELDS = [
         'mlb_id', 'gasto', 'impressoes', 'cliques', 'cpc', 'vendas_atribuidas',
         'acos', 'roas_real', 'roas_objetivo', 'roas_breakeven', 'roas_escala',
@@ -623,18 +630,32 @@ final class AgentRuntimeFactory
     {
         if (!is_array($pnl) || !$this->hasExactKeys($pnl, self::PNL_KEYS)
             || !is_int($pnl['total_orders']) || $pnl['total_orders'] < 0
+            || !is_int($pnl['units_sold']) || $pnl['units_sold'] < 0
         ) {
             return false;
         }
-        foreach (array_diff(self::PNL_KEYS, ['total_orders', 'period']) as $field) {
+        $numericFields = array_diff(
+            self::PNL_KEYS,
+            ['total_orders', 'units_sold', 'cogs_source', 'source', 'cash', 'period']
+        );
+        foreach ($numericFields as $field) {
             if (!$this->isFiniteNumber($pnl[$field])) {
                 return false;
             }
         }
-        foreach (['gross_revenue', 'taxes', 'cogs', 'commissions', 'payment_fees', 'fixed_fees', 'shipping_cost', 'discounts'] as $field) {
+        foreach (['gross_revenue', 'taxes', 'cogs', 'commissions', 'payment_fees', 'fixed_fees', 'shipping_cost', 'discounts', 'advertising_expenses'] as $field) {
             if ((float) $pnl[$field] < 0) {
                 return false;
             }
+        }
+        if (!is_string($pnl['cogs_source']) || !in_array($pnl['cogs_source'], self::COGS_SOURCES, true)) {
+            return false;
+        }
+        if (!is_string($pnl['source']) || !in_array($pnl['source'], self::PNL_SOURCES, true)) {
+            return false;
+        }
+        if (!$this->isValidCash($pnl['cash'])) {
+            return false;
         }
         if (!is_array($pnl['period'])
             || !$this->hasExactKeys($pnl['period'], ['start', 'end'])
@@ -646,6 +667,21 @@ final class AgentRuntimeFactory
         $start = $this->parseStrictDate($pnl['period']['start']);
         $end = $this->parseStrictDate($pnl['period']['end']);
         return $start !== null && $end !== null && $start <= $end;
+    }
+
+    /** @param array<string, mixed>|mixed $cash */
+    private function isValidCash(mixed $cash): bool
+    {
+        if (!is_array($cash) || !$this->hasExactKeys($cash, self::CASH_KEYS)) {
+            return false;
+        }
+        foreach (array_diff(self::CASH_KEYS, ['entries_count']) as $field) {
+            if (!$this->isFiniteNumber($cash[$field])) {
+                return false;
+            }
+        }
+
+        return is_int($cash['entries_count']) && $cash['entries_count'] >= 0;
     }
 
     private function parseStrictDate(string $value): ?DateTimeImmutable
@@ -697,14 +733,18 @@ final class AgentRuntimeFactory
         ) {
             return false;
         }
-        foreach (array_diff(self::METRICS_KEYS, ['total_orders']) as $field) {
+        foreach (array_diff(self::METRICS_KEYS, ['total_orders', 'cash']) as $field) {
             if (!$this->isFiniteNumber($metrics[$field])) {
                 return false;
             }
         }
+        if (!$this->isValidCash($metrics['cash'])) {
+            return false;
+        }
         return (float) $metrics['gross_revenue'] >= 0
             && (float) $metrics['avg_ticket'] >= 0
-            && (float) $metrics['cost_rate'] >= 0;
+            && (float) $metrics['cost_rate'] >= 0
+            && (float) $metrics['advertising_expenses'] >= 0;
     }
 
     /** @param array<string, mixed> $variations @return array<string, float> */
@@ -717,18 +757,32 @@ final class AgentRuntimeFactory
         return $out;
     }
 
-    /** @param array<string, mixed> $metrics @return array<string, int|float> */
+    /** @param array<string, mixed> $metrics @return array<string, int|float|array<string, int|float>> */
     private function normalizeMetrics(array $metrics): array
     {
         return [
             'total_orders' => $metrics['total_orders'],
             'gross_revenue' => (float) $metrics['gross_revenue'],
             'net_profit' => (float) $metrics['net_profit'],
+            'advertising_expenses' => (float) $metrics['advertising_expenses'],
             'avg_ticket' => (float) $metrics['avg_ticket'],
             'avg_margin' => (float) $metrics['avg_margin'],
             'cost_rate' => (float) $metrics['cost_rate'],
             'roi' => (float) $metrics['roi'],
+            'cash' => self::normalizeCash($metrics['cash']),
         ];
+    }
+
+    /** @param array<string, mixed> $cash @return array<string, int|float> */
+    private static function normalizeCash(array $cash): array
+    {
+        $out = [];
+        foreach (array_diff(self::CASH_KEYS, ['entries_count']) as $field) {
+            $out[$field] = (float) $cash[$field];
+        }
+        $out['entries_count'] = (int) $cash['entries_count'];
+
+        return $out;
     }
 
     private function logReadFailure(string $source, int $accountId, Throwable $error): void
@@ -815,13 +869,18 @@ final class AgentRuntimeFactory
             'taxes' => (float) $row['taxes'],
             'net_revenue' => (float) $row['net_revenue'],
             'cogs' => (float) $row['cogs'],
+            'cogs_source' => $row['cogs_source'],
             'commissions' => (float) $row['commissions'],
             'payment_fees' => (float) $row['payment_fees'],
             'fixed_fees' => (float) $row['fixed_fees'],
             'shipping_cost' => (float) $row['shipping_cost'],
             'discounts' => (float) $row['discounts'],
+            'advertising_expenses' => (float) $row['advertising_expenses'],
             'net_profit' => (float) $row['net_profit'],
             'avg_margin' => (float) $row['avg_margin'],
+            'units_sold' => $row['units_sold'],
+            'source' => $row['source'],
+            'cash' => self::normalizeCash($row['cash']),
             'period' => ['start' => $row['period']['start'], 'end' => $row['period']['end']],
         ];
     }
@@ -831,9 +890,11 @@ final class AgentRuntimeFactory
     {
         return [
             'total_orders' => 0, 'gross_revenue' => 0.0, 'taxes' => 0.0,
-            'net_revenue' => 0.0, 'cogs' => 0.0, 'commissions' => 0.0,
-            'payment_fees' => 0.0, 'fixed_fees' => 0.0, 'shipping_cost' => 0.0,
-            'discounts' => 0.0, 'net_profit' => 0.0, 'avg_margin' => 0.0,
+            'net_revenue' => 0.0, 'cogs' => 0.0, 'cogs_source' => 'none',
+            'commissions' => 0.0, 'payment_fees' => 0.0, 'fixed_fees' => 0.0,
+            'shipping_cost' => 0.0, 'discounts' => 0.0, 'advertising_expenses' => 0.0,
+            'net_profit' => 0.0, 'avg_margin' => 0.0, 'units_sold' => 0,
+            'source' => 'ml_orders', 'cash' => self::emptyCash(),
             'period' => ['start' => '1970-01-01', 'end' => '1970-01-01'],
         ];
     }
@@ -843,7 +904,19 @@ final class AgentRuntimeFactory
     {
         return [
             'total_orders' => 0, 'gross_revenue' => 0.0, 'net_profit' => 0.0,
-            'avg_ticket' => 0.0, 'avg_margin' => 0.0, 'cost_rate' => 0.0, 'roi' => 0.0,
+            'advertising_expenses' => 0.0, 'avg_ticket' => 0.0, 'avg_margin' => 0.0,
+            'cost_rate' => 0.0, 'roi' => 0.0, 'cash' => self::emptyCash(),
+        ];
+    }
+
+    /** @return array<string, int|float> */
+    private static function emptyCash(): array
+    {
+        return [
+            'released_amount' => 0.0, 'pending_release_amount' => 0.0,
+            'withdrawn_amount' => 0.0, 'hold_amount' => 0.0,
+            'released_not_withdrawn' => 0.0, 'marketplace_net' => 0.0,
+            'entries_count' => 0,
         ];
     }
 }
