@@ -1,10 +1,10 @@
 ---
 description: "Prompt escopado — repricing automático governado (simulação → staging → prod com tetos)"
 agent: Implementador
-status: draft
+status: approved
 owner: Jesse
 created: 2026-08-08
-approved: ~
+approved: 2026-08-08
 implemented: ~
 account_impact: "Fase 0 read-only (simulação). Fases 1-2 escrevem preço no ML — staging 1336 primeiro; 1335 só com OK explícito por lote"
 depends_on: "SniperAgent (app/Agents/SniperAgent.php), AdvancedPricingEngine, PricingScenarioService, jobs-once-worker (cron 1min), Pregão/Sentinela para observação"

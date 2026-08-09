@@ -1,3 +1,10 @@
+## 2026-08-08 (5ª parte) — MARCO: primeiro apply governado em produção (1335)
+
+- Dono aprovou o lote EGR. Ritual executado: `approve --attribute=EMPTY_GTIN_REASON --limit=5` → revertido MLB4564086941 para pending (tinha EGR="Outro motivo"; princípio conservador: só preencher lacuna, nunca sobrescrever valor existente sem decisão explícita) → `apply --dry-run` (4 itens) → `apply --i-understand-prod`.
+- **Aplicados 4/4, 0 erros**: MLB4564086551, MLB6574546320, MLB6574499014, MLB6574452378 → EMPTY_GTIN_REASON="O produto não tem código cadastrado" (value_id 17055160). Verificado via GET /items: todos active com o atributo correto.
+- Observação 48–72h: moderação/quality no Pregão + `bin/tech-sheet performance` nos 4 itens.
+- Prompt repricing **aprovado** (frontmatter atualizado); Fase 0 (simulação read-only) em implementação.
+
 ## 2026-08-08 (4ª parte) — Lote-5 EGR revisado + prompt repricing + ritual apply ensaiado
 
 - Relatório read-only do lote-5 EMPTY_GTIN na 1335: `storage/reports/revisao-lote5-empty-gtin-1335-20260808-203749.json`. 4/5 aptos (GTIN+EGR ausentes); **MLB4564086941 já tem EGR="Outro motivo"** — apply mudaria valor, decisão do dono.

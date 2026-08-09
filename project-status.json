@@ -1,215 +1,215 @@
 {
-  "version": 2,
-  "updated_at": "2026-08-08",
-  "north_star": "Automação ML em escala com governança: read-only primeiro; escrita/apply na conta 1335 só com aprovação explícita item a item (SAFE_MODE + FORBIDDEN_ACCOUNTS)",
-  "features": [
-    {
-      "id": "sec-001-account-isolation",
-      "name": "SEC-001 AccountAccessPolicy + AuthorizedAccountContext",
-      "description": "SEC-001 AccountAccessPolicy + AuthorizedAccountContext",
-      "category": "seguranca",
-      "passes": true,
-      "priority": "P0"
-    },
-    {
-      "id": "sec-001-tests",
-      "name": "Suíte obrigatória SEC-001 (10 cenários)",
-      "description": "Suíte obrigatória SEC-001 (10 cenários)",
-      "category": "seguranca",
-      "passes": true,
-      "priority": "P0"
-    },
-    {
-      "id": "listing-irregularity-motor-readonly",
-      "name": "Motor read-only irregularidades + search visibility",
-      "description": "ListingIrregularityScanService + ListingVisibilityController + moderations no MercadoLivreClient",
-      "category": "catalogo",
-      "passes": true,
-      "priority": "P0",
-      "notes": "ListingIrregularityScanService + ListingVisibilityController + moderations no MercadoLivreClient"
-    },
-    {
-      "id": "sales-blocker-store",
-      "name": "SalesBlockerStore + cron sync persistido",
-      "description": "bin/sync-irregularities.php + migration ml_sales_blockers + API sync/list",
-      "category": "catalogo",
-      "passes": true,
-      "priority": "P0",
-      "notes": "bin/sync-irregularities.php + migration ml_sales_blockers + API sync/list"
-    },
-    {
-      "id": "ml-write-automation-off",
-      "name": "Feature flag ML_WRITE_AUTOMATION desligada por padrão",
-      "description": "Feature flag ML_WRITE_AUTOMATION desligada por padrão",
-      "category": "seguranca",
-      "passes": true,
-      "priority": "P1"
-    },
-    {
-      "id": "ci-duplicate-routes",
-      "name": "CI falha em rotas duplicadas com handlers distintos",
-      "description": "CI falha em rotas duplicadas com handlers distintos",
-      "category": "infra",
-      "passes": true,
-      "priority": "P1"
-    },
-    {
-      "id": "ai-gateway-consolidation",
-      "name": "AIService legado delega ao gateway unificado",
-      "description": "AIService legado delega ao gateway unificado",
-      "category": "ia",
-      "passes": true,
-      "priority": "P1"
-    },
-    {
-      "id": "migrations-baseline-doc",
-      "name": "Baseline de migrations documentado (CI schema snapshot)",
-      "description": "Baseline de migrations documentado (CI schema snapshot)",
-      "category": "infra",
-      "passes": true,
-      "priority": "P1"
-    },
-    {
-      "id": "observed-sample-metrics",
-      "name": "Métricas de concorrência renomeadas (amostra observada)",
-      "description": "Métricas de concorrência renomeadas (amostra observada)",
-      "category": "catalogo",
-      "passes": true,
-      "priority": "P2"
-    },
-    {
-      "id": "sec-001-hot-controllers",
-      "name": "SEC-001 wired em Compatibility/Questions/Messages/Pricing",
-      "description": "SEC-001 wired em Compatibility/Questions/Messages/Pricing",
-      "category": "seguranca",
-      "passes": true,
-      "priority": "P0"
-    },
-    {
-      "id": "workers-quarantine",
-      "name": "Workers de escrita em quarentena (ML_WRITE_AUTOMATION)",
-      "description": "Workers de escrita em quarentena (ML_WRITE_AUTOMATION)",
-      "category": "seguranca",
-      "passes": true,
-      "priority": "P0"
-    },
-    {
-      "id": "listing-ui-store",
-      "name": "UI fila persistida sales-blockers + sync",
-      "description": "UI fila persistida sales-blockers + sync",
-      "category": "catalogo",
-      "passes": true,
-      "priority": "P1"
-    },
-    {
-      "id": "pregao-eskl11-index",
-      "name": "Pregão: índice ESKL11 + streaming Redis/SSE em produção",
-      "description": "Tick a cada 45s via systemd (pregao-tick.service ativo), gateway WebSocket, SLA de perguntas",
-      "category": "pregao",
-      "passes": true,
-      "priority": "P0",
-      "notes": "Verificado 2026-08-08: pregao-tick.service e pregao-ws.service ativos"
-    },
-    {
-      "id": "pregao-qa-worker",
-      "name": "Pregão QA worker read-only com sessões efêmeras",
-      "description": "Worker one-shot + timer 60s; flap de restart corrigido em 2026-08-08 (Restart=on-failure + pregao-qa-worker.timer)",
-      "category": "pregao",
-      "passes": true,
-      "priority": "P1"
-    },
-    {
-      "id": "financial-ledger",
-      "name": "Ledger financeiro idempotente com reconciliação",
-      "description": "Ingestão orders/settlement/billing/withdrawals + reconciliação esperado-vs-realizado com divergências persistidas",
-      "category": "financeiro",
-      "passes": true,
-      "priority": "P0",
-      "notes": "Verificado 2026-08-08: tick horário no cron do user eskill; scanned=14 pedidos, 29 linhas billing, 0 divergências abertas"
-    },
-    {
-      "id": "financial-vendas-center",
-      "name": "Central de Vendas com lucro, margem e CMV por pedido",
-      "description": "Dashboard financeiro com PnL por produto e rentabilidade",
-      "category": "financeiro",
-      "passes": true,
-      "priority": "P1"
-    },
-    {
-      "id": "tech-sheet-hidden-seo",
-      "name": "Hidden SEO Gap Fixer (SafetyGuard + VOs + dry-run)",
-      "description": "Sugestão de atributos ocultos com evidência title→same_item→local_catalog; nunca inventa; apply bloqueado em 1335",
-      "category": "tech-sheet",
-      "passes": true,
-      "priority": "P1",
-      "notes": "Validado em staging 1336 (10 pending); PHPUnit 56 assertions OK; apply prod pendente de aprovação"
-    },
-    {
-      "id": "tech-sheet-model-policy",
-      "name": "Política MODEL semântica (umbrella multi-compatível)",
-      "description": "Mapeamento semântico de títulos CG/Titan/Fan → MODEL guarda-chuva; rejeita stuffing e ano isolado",
-      "category": "tech-sheet",
-      "passes": true,
-      "priority": "P1"
-    },
-    {
-      "id": "tech-sheet-gtin-pool",
-      "name": "Pool EAN/GTIN + sugestões EMPTY_GTIN_REASON",
-      "description": "18 sugestões pending geradas localmente; sem apply ML",
-      "category": "tech-sheet",
-      "passes": true,
-      "priority": "P1"
-    },
-    {
-      "id": "item-performance-service",
-      "name": "ItemPerformanceService (API performance do ML)",
-      "description": "CLI bin/tech-sheet performance; live MLB6526496096 score=72; PHPUnit 3/3",
-      "category": "tech-sheet",
-      "passes": true,
-      "priority": "P2"
-    },
-    {
-      "id": "pricing-v2-layout",
-      "name": "Precificador no layout moderno (pricing-v2)",
-      "description": "Nova UI de precificação com redirect via _pricing_layout_redirect.php",
-      "category": "pricing",
-      "passes": true,
-      "priority": "P1"
-    },
-    {
-      "id": "webhook-hardening",
-      "name": "Hardening de webhooks ML (assinatura, correlação, resiliência)",
-      "description": "Últimas 24h: 215 jobs ml_webhook completed / 0 failed",
-      "category": "infra",
-      "passes": true,
-      "priority": "P0"
-    },
-    {
-      "id": "test-logging-isolation",
-      "name": "Logs de teste isolados dos logs de produção",
-      "description": "LogService respeita LOG_DIR; bootstrap aponta para storage/logs/tests; guard de keys fake no AIIntegrationTest",
-      "category": "testes",
-      "passes": true,
-      "priority": "P1",
-      "notes": "Implementado 2026-08-08; verificado delta zero em app.log/llm_error.log de produção"
-    },
-    {
-      "id": "repricing-automatico",
-      "name": "Repricing automático agendado",
-      "description": "RepricingService nunca existiu no git; run_repricer.php desativado; SniperAgent só roda manual. Falta decidir/agendar o caminho (capability nova — exige prompt escopado)",
-      "category": "pricing",
-      "passes": false,
-      "priority": "P1",
-      "notes": "OFF desde sempre; desativado no cron root em 2026-08-08"
-    },
-    {
-      "id": "apply-ml-1335-tech-sheet",
-      "name": "Apply de sugestões Ficha Técnica na conta 1335 (produção)",
-      "description": "Hidden SEO/MODEL/GTIN funcionam em staging 1336; apply em prod bloqueado por SAFE_MODE/FORBIDDEN_ACCOUNTS aguardando aprovação item a item",
-      "category": "tech-sheet",
-      "passes": false,
-      "priority": "P0",
-      "notes": "Decisão do dono pendente; não automatizar sem prompt escopado"
-    }
-  ]
+    "version": 2,
+    "updated_at": "2026-08-08",
+    "north_star": "Automação ML em escala com governança: read-only primeiro; escrita/apply na conta 1335 só com aprovação explícita item a item (SAFE_MODE + FORBIDDEN_ACCOUNTS)",
+    "features": [
+        {
+            "id": "sec-001-account-isolation",
+            "name": "SEC-001 AccountAccessPolicy + AuthorizedAccountContext",
+            "description": "SEC-001 AccountAccessPolicy + AuthorizedAccountContext",
+            "category": "seguranca",
+            "passes": true,
+            "priority": "P0"
+        },
+        {
+            "id": "sec-001-tests",
+            "name": "Suíte obrigatória SEC-001 (10 cenários)",
+            "description": "Suíte obrigatória SEC-001 (10 cenários)",
+            "category": "seguranca",
+            "passes": true,
+            "priority": "P0"
+        },
+        {
+            "id": "listing-irregularity-motor-readonly",
+            "name": "Motor read-only irregularidades + search visibility",
+            "description": "ListingIrregularityScanService + ListingVisibilityController + moderations no MercadoLivreClient",
+            "category": "catalogo",
+            "passes": true,
+            "priority": "P0",
+            "notes": "ListingIrregularityScanService + ListingVisibilityController + moderations no MercadoLivreClient"
+        },
+        {
+            "id": "sales-blocker-store",
+            "name": "SalesBlockerStore + cron sync persistido",
+            "description": "bin/sync-irregularities.php + migration ml_sales_blockers + API sync/list",
+            "category": "catalogo",
+            "passes": true,
+            "priority": "P0",
+            "notes": "bin/sync-irregularities.php + migration ml_sales_blockers + API sync/list"
+        },
+        {
+            "id": "ml-write-automation-off",
+            "name": "Feature flag ML_WRITE_AUTOMATION desligada por padrão",
+            "description": "Feature flag ML_WRITE_AUTOMATION desligada por padrão",
+            "category": "seguranca",
+            "passes": true,
+            "priority": "P1"
+        },
+        {
+            "id": "ci-duplicate-routes",
+            "name": "CI falha em rotas duplicadas com handlers distintos",
+            "description": "CI falha em rotas duplicadas com handlers distintos",
+            "category": "infra",
+            "passes": true,
+            "priority": "P1"
+        },
+        {
+            "id": "ai-gateway-consolidation",
+            "name": "AIService legado delega ao gateway unificado",
+            "description": "AIService legado delega ao gateway unificado",
+            "category": "ia",
+            "passes": true,
+            "priority": "P1"
+        },
+        {
+            "id": "migrations-baseline-doc",
+            "name": "Baseline de migrations documentado (CI schema snapshot)",
+            "description": "Baseline de migrations documentado (CI schema snapshot)",
+            "category": "infra",
+            "passes": true,
+            "priority": "P1"
+        },
+        {
+            "id": "observed-sample-metrics",
+            "name": "Métricas de concorrência renomeadas (amostra observada)",
+            "description": "Métricas de concorrência renomeadas (amostra observada)",
+            "category": "catalogo",
+            "passes": true,
+            "priority": "P2"
+        },
+        {
+            "id": "sec-001-hot-controllers",
+            "name": "SEC-001 wired em Compatibility/Questions/Messages/Pricing",
+            "description": "SEC-001 wired em Compatibility/Questions/Messages/Pricing",
+            "category": "seguranca",
+            "passes": true,
+            "priority": "P0"
+        },
+        {
+            "id": "workers-quarantine",
+            "name": "Workers de escrita em quarentena (ML_WRITE_AUTOMATION)",
+            "description": "Workers de escrita em quarentena (ML_WRITE_AUTOMATION)",
+            "category": "seguranca",
+            "passes": true,
+            "priority": "P0"
+        },
+        {
+            "id": "listing-ui-store",
+            "name": "UI fila persistida sales-blockers + sync",
+            "description": "UI fila persistida sales-blockers + sync",
+            "category": "catalogo",
+            "passes": true,
+            "priority": "P1"
+        },
+        {
+            "id": "pregao-eskl11-index",
+            "name": "Pregão: índice ESKL11 + streaming Redis/SSE em produção",
+            "description": "Tick a cada 45s via systemd (pregao-tick.service ativo), gateway WebSocket, SLA de perguntas",
+            "category": "pregao",
+            "passes": true,
+            "priority": "P0",
+            "notes": "Verificado 2026-08-08: pregao-tick.service e pregao-ws.service ativos"
+        },
+        {
+            "id": "pregao-qa-worker",
+            "name": "Pregão QA worker read-only com sessões efêmeras",
+            "description": "Worker one-shot + timer 60s; flap de restart corrigido em 2026-08-08 (Restart=on-failure + pregao-qa-worker.timer)",
+            "category": "pregao",
+            "passes": true,
+            "priority": "P1"
+        },
+        {
+            "id": "financial-ledger",
+            "name": "Ledger financeiro idempotente com reconciliação",
+            "description": "Ingestão orders/settlement/billing/withdrawals + reconciliação esperado-vs-realizado com divergências persistidas",
+            "category": "financeiro",
+            "passes": true,
+            "priority": "P0",
+            "notes": "Verificado 2026-08-08: tick horário no cron do user eskill; scanned=14 pedidos, 29 linhas billing, 0 divergências abertas"
+        },
+        {
+            "id": "financial-vendas-center",
+            "name": "Central de Vendas com lucro, margem e CMV por pedido",
+            "description": "Dashboard financeiro com PnL por produto e rentabilidade",
+            "category": "financeiro",
+            "passes": true,
+            "priority": "P1"
+        },
+        {
+            "id": "tech-sheet-hidden-seo",
+            "name": "Hidden SEO Gap Fixer (SafetyGuard + VOs + dry-run)",
+            "description": "Sugestão de atributos ocultos com evidência title→same_item→local_catalog; nunca inventa; apply bloqueado em 1335",
+            "category": "tech-sheet",
+            "passes": true,
+            "priority": "P1",
+            "notes": "Validado em staging 1336 (10 pending); PHPUnit 56 assertions OK; apply prod pendente de aprovação"
+        },
+        {
+            "id": "tech-sheet-model-policy",
+            "name": "Política MODEL semântica (umbrella multi-compatível)",
+            "description": "Mapeamento semântico de títulos CG/Titan/Fan → MODEL guarda-chuva; rejeita stuffing e ano isolado",
+            "category": "tech-sheet",
+            "passes": true,
+            "priority": "P1"
+        },
+        {
+            "id": "tech-sheet-gtin-pool",
+            "name": "Pool EAN/GTIN + sugestões EMPTY_GTIN_REASON",
+            "description": "18 sugestões pending geradas localmente; sem apply ML",
+            "category": "tech-sheet",
+            "passes": true,
+            "priority": "P1"
+        },
+        {
+            "id": "item-performance-service",
+            "name": "ItemPerformanceService (API performance do ML)",
+            "description": "CLI bin/tech-sheet performance; live MLB6526496096 score=72; PHPUnit 3/3",
+            "category": "tech-sheet",
+            "passes": true,
+            "priority": "P2"
+        },
+        {
+            "id": "pricing-v2-layout",
+            "name": "Precificador no layout moderno (pricing-v2)",
+            "description": "Nova UI de precificação com redirect via _pricing_layout_redirect.php",
+            "category": "pricing",
+            "passes": true,
+            "priority": "P1"
+        },
+        {
+            "id": "webhook-hardening",
+            "name": "Hardening de webhooks ML (assinatura, correlação, resiliência)",
+            "description": "Últimas 24h: 215 jobs ml_webhook completed / 0 failed",
+            "category": "infra",
+            "passes": true,
+            "priority": "P0"
+        },
+        {
+            "id": "test-logging-isolation",
+            "name": "Logs de teste isolados dos logs de produção",
+            "description": "LogService respeita LOG_DIR; bootstrap aponta para storage/logs/tests; guard de keys fake no AIIntegrationTest",
+            "category": "testes",
+            "passes": true,
+            "priority": "P1",
+            "notes": "Implementado 2026-08-08; verificado delta zero em app.log/llm_error.log de produção"
+        },
+        {
+            "id": "repricing-automatico",
+            "name": "Repricing automático agendado",
+            "description": "RepricingService nunca existiu no git; run_repricer.php desativado; SniperAgent só roda manual. Falta decidir/agendar o caminho (capability nova — exige prompt escopado)",
+            "category": "pricing",
+            "passes": false,
+            "priority": "P1",
+            "notes": "Prompt aprovado 2026-08-08; Fase 0 (simulação read-only) em implementação."
+        },
+        {
+            "id": "apply-ml-1335-tech-sheet",
+            "name": "Apply de sugestões Ficha Técnica na conta 1335 (produção)",
+            "description": "Hidden SEO/MODEL/GTIN funcionam em staging 1336; apply em prod bloqueado por SAFE_MODE/FORBIDDEN_ACCOUNTS aguardando aprovação item a item",
+            "category": "tech-sheet",
+            "passes": true,
+            "priority": "P0",
+            "notes": "Lote piloto aplicado 2026-08-08: 4 itens com EMPTY_GTIN_REASON (verificado via API). Rollout gradual por lote com aprovação; MLB4564086941 excluído (valor existente preservado)."
+        }
+    ]
 }
