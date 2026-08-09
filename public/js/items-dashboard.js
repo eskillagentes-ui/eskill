@@ -998,14 +998,6 @@ async function bulkPause() {
     }
 }
 
-function clearFilters() {
-    document.getElementById('statusFilter').value = '';
-    document.getElementById('categoryFilter').value = '';
-    document.getElementById('searchInput').value = '';
-    currentPage = 1;
-    loadItems();
-}
-
 // Bulk Operations
 function updateBulkSelection() {
     const checkboxes = document.querySelectorAll('#itemsGrid input[type="checkbox"]:not(#selectAll)');
