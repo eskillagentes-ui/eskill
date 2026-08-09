@@ -1,3 +1,11 @@
+## 2026-08-08 (4ª parte) — Lote-5 EGR revisado + prompt repricing + ritual apply ensaiado
+
+- Relatório read-only do lote-5 EMPTY_GTIN na 1335: `storage/reports/revisao-lote5-empty-gtin-1335-20260808-203749.json`. 4/5 aptos (GTIN+EGR ausentes); **MLB4564086941 já tem EGR="Outro motivo"** — apply mudaria valor, decisão do dono.
+- Bug: `bin/tech-sheet approve` usava coluna `notes` inexistente (SQL error no ritual) — corrigido; novo filtro `--attribute` (min-confidence=85 pegava MODEL 95%). Dry-run valida exatamente os 5 itens revisados. Commit `485a1218`.
+- Prompt escopado repricing em `.github/prompts/repricing-automatico.prompt.md` — **draft, aguarda aprovação** (F0 simulação → F1 staging → F2 prod com tetos ±5%/5 itens/1x-dia).
+- Staging `--check` verde (OAuth ML staging ainda pendente — pré-req humano). E2E readonly prod: 15/15. TechSheet suite: 88/88.
+- **Nada aplicado no ML 1335.** Ritual quando aprovado: `approve --account=1335 --attribute=EMPTY_GTIN_REASON --limit=5` → `apply --account=1335 --limit=5 --dry-run` → `apply ... --i-understand-prod` → observar 48-72h.
+
 ## 2026-08-08 (3ª parte) — Stash recuperado + harness 0 avisos
 
 - Stash `wip-pre-recovery` (05/08) recuperado e commitado (`595d7aa3`): logging fail-soft (sem 500 em request quando log bloqueado) + chmod 0660 (ACL eskill/root). Stash dropado após commit.
