@@ -700,9 +700,24 @@
 
     function formatDate(dateStr) {
         if (!dateStr) return '';
+        // Timezone único (America/Sao_Paulo) — Onda 1.1/F1: valores
+        // "YYYY-MM-DD HH:mm:ss" sem offset (ex.: ml_orders.date_created) já
+        // vêm em wall-clock do fuso da aplicação; exibir os números como
+        // estão evita que o navegador reinterprete a string via Date() no
+        // seu próprio timezone, causando o mesmo pedido exibir horas
+        // diferentes entre o widget "Pedidos Recentes" do Dashboard e
+        // /dashboard/orders (bug real: delta de +11h observado em produção).
+        const naive = String(dateStr).match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})(?::(\d{2}))?\s*$/);
+        if (naive) {
+            const [, y, mo, d, h, mi] = naive;
+            return `${d}/${mo}/${y} ${h}:${mi}`;
+        }
+        // Strings com offset explícito (ex.: API do ML) são convertidas de
+        // forma inequívoca e sempre exibidas no fuso único da aplicação.
         const date = new Date(dateStr);
         if (isNaN(date.getTime())) return dateStr;
         return date.toLocaleDateString('pt-BR', {
+            timeZone: 'America/Sao_Paulo',
             day: '2-digit',
             month: '2-digit',
             year: 'numeric',
