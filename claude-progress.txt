@@ -1,11 +1,11 @@
 ## 2026-08-10 (24ª parte) — Onda 4.1 verificação UI + QA Pregão
 
-Branch `fix/onda4-1-rank` tip `…` (commit desta parte). **NÃO mergear.**
-- Pregão UI: Posição orgânica **DISPONÍVEL** `collector_local`; fita com #9/#12;
-  QA card **APROVADO** (fallback `pregao_events` quando Redis sem receipt).
-- Governança: checklist QA **OK · última execução…**; kill switch OFF; 2/7.
-- JS unit: 31/31 (teste semáforo alinhado a Operação/Catálogo).
-- `ML_WRITE_AUTOMATION=false`.
+Branch `fix/onda4-1-rank`. **NÃO mergear.**
+- Pregão UI: Posição **DISPONÍVEL** (após limpar smoke → `trends_partial`); QA **APROVADO**.
+- T3 browser: `/auth/authorize` → `auth.mercadolibre.com` PKCE (OAuth não completado).
+- Governança: QA OK; kill switch OFF; 2/7.
+- JS unit 31/31. `ML_WRITE_AUTOMATION=false`.
+- Evidência: `docs/ops/evidence/onda4-1-ui-verify-20260810.json`.
 
 ---
 
