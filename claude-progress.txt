@@ -1,3 +1,17 @@
+## 2026-08-10 (25ª parte) — MERGE Onda 4.1 em master
+
+Autorização: usuário **GO**.
+Branch `fix/onda4-1-rank` FF-merge em `master` (tip `1b676bd7`).
+Branch **preservada**.
+
+- PHPUnit Unit: **4452 / 0 falhas** (27 skipped)
+- `ML_WRITE_AUTOMATION=false` intacto
+- Workers: `bin/deploy.sh --workers`
+- Sem push origin (SSH key ausente / H2)
+- Evidência: `docs/ops/evidence/onda4-1-*.json`
+
+---
+
 ## 2026-08-10 (24ª parte) — Onda 4.1 verificação UI + QA Pregão
 
 Branch `fix/onda4-1-rank`. **NÃO mergear.**

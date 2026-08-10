@@ -291,7 +291,16 @@
             "category": "negocio",
             "passes": true,
             "priority": "P0",
-            "notes": "2026-08-10 branch fix/onda4-1-rank (NÃO mergear master). T1a AUTH search 403. T1b collector+ingest. T1c trends/highlights; UI Posição=trends_partial após limpar smoke. T2 QA checklist+Pregão alinhados (pregao_events) → APROVADO/OK. T3 UI Contas→/auth/authorize→auth.mercadolibre.com PKCE (OAuth não completado). PHPUnit 4452/0; JS 31/31. ML_WRITE_AUTOMATION=false."
+            "notes": "2026-08-10 MERGED em master (tip 1b676bd7). T1a AUTH search 403. T1b collector+ingest. T1c trends_partial. T2 QA alinhado. T3 OAuth redirect verificado. PHPUnit 4452/0. ML_WRITE_AUTOMATION=false. Branch fix/onda4-1-rank preservada."
+        },
+        {
+            "id": "merge-master-onda4-1-rank",
+            "name": "Merge Onda 4.1 (fix/onda4-1-rank) em master",
+            "description": "FF-merge rank tracker unblock + QA fonte única + T3 OAuth verificado.",
+            "category": "infra",
+            "passes": true,
+            "priority": "P0",
+            "notes": "2026-08-10. Tip 1b676bd7. PHPUnit 4452/0. ML_WRITE_AUTOMATION=false. Branch preservada. Sem push GitHub."
         }
     ]
 }
