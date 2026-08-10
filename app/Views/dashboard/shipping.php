@@ -100,6 +100,10 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
 
     const shippingManager = {
         orders: [],
+        // Status de logística (shipping_status) vs. status de pagamento (status) —
+        // o backend já filtra corretamente na origem (Onda 3.1 / F3); este filtro
+        // client-side é apenas defensivo, comparando o campo certo por tipo.
+        SHIPPING_LEVEL_STATUSES: ['pending', 'handling', 'ready_to_ship', 'shipped', 'delivered', 'not_delivered'],
         init: function() {
             this.loadOrders();
             this.setupListeners();
@@ -120,19 +124,29 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
             container.innerHTML = '<tr><td colspan="5" class="text-center py-4"><div class="spinner-border text-primary"></div></td></tr>';
 
             try {
-                // Reusing standard Orders API but filtering client-side or assume endpoint supports filter
-                // Actually, let's use the existing orders API and filter client-side for "Phase 2 MVP"
-                const data = await shippingRequestJson('/api/orders/all?status=' + status); // assuming API supports status param or we filter
+                const data = await shippingRequestJson('/api/orders/all?status=' + encodeURIComponent(status));
 
-                this.orders = data.results || [];
+                if (data && data.error) {
+                    throw new Error(data.message || data.error);
+                }
 
-                // Client-side filter if API ignores param (defensive coding)
-                const filtered = this.orders.filter(o => o.status === status);
+                this.orders = data.results || data.orders || [];
+
+                // O backend já filtra na origem (order.status vs shipping.status do ML).
+                // A API de busca do ML só devolve `shipping.id` (não o status de envio) por
+                // pedido, então não há como re-filtrar por shipping_status no cliente sem uma
+                // chamada extra por pedido — confiamos no filtro já aplicado no servidor.
+                // Para status de PAGAMENTO ainda re-filtramos (campo `status` vem completo).
+                const isShippingLevel = this.SHIPPING_LEVEL_STATUSES.includes(status);
+                const filtered = isShippingLevel
+                    ? this.orders
+                    : this.orders.filter(o => o.status === status);
 
                 this.renderOrders(filtered);
             } catch (error) {
                 console.error(error);
-                container.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Erro ao carregar pedidos</td></tr>';
+                container.innerHTML = '<tr><td colspan="5" class="text-center text-danger">Erro ao carregar pedidos: ' +
+                    (error && error.message ? String(error.message) : 'falha na requisição') + '</td></tr>';
             }
         },
 
@@ -145,7 +159,10 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
 
             let html = '';
             orders.forEach(order => {
-                const date = new Date(order.date_created).toLocaleDateString('pt-BR');
+                const parsedDate = order.date_created ? new Date(order.date_created) : null;
+                const date = (parsedDate && !Number.isNaN(parsedDate.getTime()))
+                    ? parsedDate.toLocaleDateString('pt-BR')
+                    : '—';
                 let orderItems = [];
 
                 if (Array.isArray(order.order_items)) {
@@ -171,7 +188,7 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
                         </td>
                         <td>${itemsCount} item(s)</td>
                         <td>${date}</td>
-                        <td><span class="badge bg-secondary">${order.status}</span></td>
+                        <td><span class="badge bg-secondary">${order.shipping_status || order.status || '—'}</span></td>
                     </tr>
                 `;
             });

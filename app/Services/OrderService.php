@@ -12,6 +12,17 @@ use Throwable;
 
 class OrderService
 {
+    /** Valores aceitos por `order.status` em GET /orders/search (estado de pagamento). */
+    private const ML_ORDER_STATUSES = [
+        'confirmed', 'payment_required', 'payment_in_process', 'partially_paid',
+        'paid', 'cancelled', 'invalid',
+    ];
+
+    /** Valores aceitos por `shipping.status` em GET /orders/search (estado de logística). */
+    private const ML_SHIPPING_STATUSES = [
+        'pending', 'handling', 'ready_to_ship', 'shipped', 'delivered', 'not_delivered', 'cancelled',
+    ];
+
     private MercadoLivreClient $client;
     private ?PDO $db;
     private ?int $accountId;
@@ -70,8 +81,16 @@ class OrderService
 
         if (!empty($filters['status'])) {
             $status = (string)$filters['status'];
-            $params['status'] = $status;
-            $params['order.status'] = $status;
+            // A API de busca de pedidos do ML só aceita filtro nativo em `order.status`
+            // (pagamento: confirmed/payment_required/payment_in_process/paid/cancelled/invalid).
+            // Estados de logística (ready_to_ship/shipped/delivered/handling/not_delivered) são
+            // filtrados via `shipping.status` — enviar um valor de shipping como order.status
+            // resulta em HTTP 400 "Invalid filters" (bug corrigido na Onda 3.1 / F3).
+            if (in_array($status, self::ML_ORDER_STATUSES, true)) {
+                $params['order.status'] = $status;
+            } elseif (in_array($status, self::ML_SHIPPING_STATUSES, true)) {
+                $params['shipping.status'] = $status;
+            }
         }
 
         if (!empty($filters['date_from'])) {
@@ -864,8 +883,19 @@ class OrderService
         }
 
         if (!empty($filters['status'])) {
-            $where[] = 'status = :status';
-            $params['status'] = $filters['status'];
+            $status = (string)$filters['status'];
+            if (in_array($status, self::ML_SHIPPING_STATUSES, true)
+                && !in_array($status, self::ML_ORDER_STATUSES, true)
+            ) {
+                // status é de logística (ready_to_ship/shipped/...): a coluna `status` do
+                // cache local guarda o status de PAGAMENTO do pedido (ver saveOrder()),
+                // não o de envio — filtrar pelo JSON persistido em order_data.shipping.status
+                // (Onda 3.1 / F3: evita "0 resultados" silencioso no fallback de cache local).
+                $where[] = "JSON_UNQUOTE(JSON_EXTRACT(order_data, '$.shipping.status')) = :status";
+            } else {
+                $where[] = 'status = :status';
+            }
+            $params['status'] = $status;
         }
 
         if (!empty($filters['date_from'])) {
@@ -945,15 +975,17 @@ class OrderService
                 $orderData = [];
             }
 
+            $shipping = $orderData['shipping'] ?? null;
             $orders[] = [
                 'id' => $row['ml_order_id'],
                 'status' => $row['status'],
+                'shipping_status' => is_array($shipping) ? ($shipping['status'] ?? null) : null,
                 'total_amount' => (float)$row['total_amount'],
                 'date_created' => $row['date_created'],
                 'synced_at' => $row['synced_at'],
                 'buyer' => $orderData['buyer'] ?? null,
                 'order_items' => $orderData['order_items'] ?? [],
-                'shipping' => $orderData['shipping'] ?? null,
+                'shipping' => $shipping,
                 'payments' => $orderData['payments'] ?? [],
                 'account_nickname' => $this->getAccountNickname((int)$row['ml_account_id']),
             ];
@@ -1091,14 +1123,19 @@ class OrderService
 
     private function normalizeOrderSummary(array $orderData): array
     {
+        $shipping = $orderData['shipping'] ?? null;
+
         return [
             'id' => $orderData['id'] ?? null,
             'status' => $orderData['status'] ?? null,
+            // Estado de logística (ready_to_ship/shipped/delivered/...), distinto do status de
+            // pagamento acima — necessário para telas como /dashboard/shipping (Onda 3.1 / F3).
+            'shipping_status' => is_array($shipping) ? ($shipping['status'] ?? null) : null,
             'total_amount' => isset($orderData['total_amount']) ? (float)$orderData['total_amount'] : 0.0,
             'date_created' => $orderData['date_created'] ?? null,
             'buyer' => $orderData['buyer'] ?? null,
             'order_items' => $orderData['order_items'] ?? [],
-            'shipping' => $orderData['shipping'] ?? null,
+            'shipping' => $shipping,
             'payments' => $orderData['payments'] ?? [],
             'account_nickname' => $this->accountId ? $this->getAccountNickname($this->accountId) : null,
         ];
