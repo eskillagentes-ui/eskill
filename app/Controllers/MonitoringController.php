@@ -500,18 +500,51 @@ class MonitoringController extends BaseController
     /**
      * Comprehensive Performance Metrics API (Phase 4)
      * GET /api/monitoring/metrics
+     *
+     * Formato consumido por app/Views/dashboard/monitoring.php (chaves no
+     * nível raiz: cpu/memory/disk/db/cache/requests_by_hour/response_times/
+     * recent_errors). Antes desta correção o payload real era
+     * {success, metrics: {cache, queue, llm, database, system}} — o front
+     * lia data.cpu/data.memory/data.disk/data.db/... diretamente (undefined)
+     * e mostrava tudo zerado (CPU 0%, Memória 0%, Disco 0%, DB 0 conexões).
      */
     public function metrics(): void
     {
         header('Content-Type: application/json');
 
         try {
+            $system = $this->advancedMonitoring->collectSystemMetrics();
             $metricsService = new \App\Services\PerformanceMetricsService();
-            $metrics = $metricsService->getMetrics();
+            $raw = $metricsService->getMetrics();
+            $cache = $raw['cache'] ?? [];
+            $database = $raw['database'] ?? [];
+
+            $queriesPerSec = (float)($database['queries_per_sec'] ?? 0);
 
             echo json_encode([
                 'success' => true,
-                'metrics' => $metrics
+                'cpu' => (float)($system['cpu_usage'] ?? 0),
+                'memory' => (float)($system['memory_usage'] ?? 0),
+                'disk' => (float)($system['disk_usage'] ?? 0),
+                'uptime' => isset($database['uptime_seconds'])
+                    ? $this->formatUptime((int)$database['uptime_seconds'])
+                    : '-',
+                'last_restart' => null,
+                'db' => [
+                    'connections' => (int)($system['db_connections'] ?? 0),
+                    'queries_per_min' => (int)round($queriesPerSec * 60),
+                    'slow_queries' => (int)($system['db_slow_queries'] ?? 0),
+                    'size' => round((float)($system['db_size_mb'] ?? 0), 1) . ' MB',
+                ],
+                'cache' => [
+                    'hit_rate' => round((float)($cache['hit_rate'] ?? 0) * 100, 1),
+                    'items' => (int)($cache['total_keys'] ?? 0),
+                    'memory' => $cache['used_memory_human'] ?? '0 MB',
+                ],
+                'requests_by_hour' => $this->requestsByHourLast24h(),
+                'response_times' => $this->responseTimesLast24h(),
+                'recent_errors' => $this->recentSystemAlerts(),
+                'timestamp' => time(),
             ]);
         } catch (\Exception $e) {
             http_response_code(500);
@@ -519,6 +552,87 @@ class MonitoringController extends BaseController
                 'success' => false,
                 'error' => $e->getMessage()
             ]);
+        }
+    }
+
+    private function formatUptime(int $seconds): string
+    {
+        $days = intdiv($seconds, 86400);
+        $hours = intdiv($seconds % 86400, 3600);
+        if ($days > 0) {
+            return "{$days}d {$hours}h";
+        }
+        $minutes = intdiv($seconds % 3600, 60);
+
+        return "{$hours}h {$minutes}min";
+    }
+
+    /** @return list<array{hour: string, count: int}> */
+    private function requestsByHourLast24h(): array
+    {
+        try {
+            $db = \App\Database::getInstance();
+            $stmt = $db->query("
+                SELECT DATE_FORMAT(timestamp, '%H:00') as hour, COUNT(*) as count
+                FROM performance_logs
+                WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                GROUP BY hour
+                ORDER BY hour ASC
+            ");
+
+            return array_map(
+                static fn (array $row): array => ['hour' => (string)$row['hour'], 'count' => (int)$row['count']],
+                $stmt->fetchAll(\PDO::FETCH_ASSOC)
+            );
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /** @return list<array{time: string, avg: float}> */
+    private function responseTimesLast24h(): array
+    {
+        try {
+            $db = \App\Database::getInstance();
+            $stmt = $db->query("
+                SELECT DATE_FORMAT(timestamp, '%H:00') as time, AVG(response_time) as avg
+                FROM performance_logs
+                WHERE timestamp >= DATE_SUB(NOW(), INTERVAL 24 HOUR)
+                GROUP BY time
+                ORDER BY time ASC
+            ");
+
+            return array_map(
+                static fn (array $row): array => ['time' => (string)$row['time'], 'avg' => round((float)$row['avg'], 1)],
+                $stmt->fetchAll(\PDO::FETCH_ASSOC)
+            );
+        } catch (\Throwable) {
+            return [];
+        }
+    }
+
+    /** @return list<array{message: string, time: string}> */
+    private function recentSystemAlerts(): array
+    {
+        try {
+            $db = \App\Database::getInstance();
+            $stmt = $db->query("
+                SELECT title, message, created_at
+                FROM system_alerts
+                WHERE status = 'active'
+                ORDER BY created_at DESC
+                LIMIT 10
+            ");
+
+            return array_map(
+                static fn (array $row): array => [
+                    'message' => (string)$row['title'] . ': ' . (string)$row['message'],
+                    'time' => (string)$row['created_at'],
+                ],
+                $stmt->fetchAll(\PDO::FETCH_ASSOC)
+            );
+        } catch (\Throwable) {
+            return [];
         }
     }
 
