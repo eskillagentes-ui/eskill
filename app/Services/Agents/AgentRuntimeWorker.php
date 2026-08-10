@@ -66,6 +66,10 @@ final class AgentRuntimeWorker
                 }
             } while ($result->status() === 'failed' && $attempts < $maxAttempts);
 
+            if ($result->status() === 'failed') {
+                $this->logAggregateFailure($accountId, $correlationId, $result, $attempts);
+            }
+
             if ($this->reporter !== null) {
                 try {
                     $this->reporter->report($accountId, $correlationId, $result, $attempts);
@@ -88,6 +92,44 @@ final class AgentRuntimeWorker
         }
 
         return $records;
+    }
+
+    /**
+     * Loga a causa raiz de uma falha agregada do orquestrador (ou do runtime em si),
+     * listando qual(is) sub-agente(s) falharam e com que motivo — "agent failed" sozinho
+     * não é auto-diagnosticável.
+     */
+    private function logAggregateFailure(
+        int $accountId,
+        string $correlationId,
+        AgentResult $result,
+        int $attempts
+    ): void {
+        $breakdown = [];
+        $children = $result->data()['results'] ?? null;
+        if (is_array($children)) {
+            foreach ($children as $child) {
+                if ($child instanceof AgentResult) {
+                    $breakdown[] = [
+                        'agent' => $child->agent(),
+                        'status' => $child->status(),
+                        'reason' => $child->reason(),
+                    ];
+                }
+            }
+        }
+
+        log_warning('AgentRuntimeWorker: ciclo de agente falhou', [
+            'account_id' => $accountId,
+            'correlation_id' => $correlationId,
+            'agent' => $result->agent(),
+            'reason' => $result->reason(),
+            'attempts' => $attempts,
+            'failed_children' => array_values(array_filter(
+                $breakdown,
+                static fn (array $entry): bool => $entry['status'] === 'failed'
+            )),
+        ]);
     }
 
     /** @param array<array-key, mixed> $accountIds */

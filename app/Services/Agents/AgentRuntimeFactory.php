@@ -240,10 +240,11 @@ final class AgentRuntimeFactory
             $end = $period->format('Y-m-t 23:59:59');
             $summary = $this->gateway->financialDashboardSummary($accountId);
             $metrics = $this->gateway->financialMetrics($accountId, $start, $end);
-            if ($this->isValidFinancialSummary($summary, $start, $end)
-                && $this->isValidMetrics($metrics)
-                && $this->metricsMatchCurrentMonth($metrics, $summary['current_month'])
-            ) {
+            $summaryValid = $this->isValidFinancialSummary($summary, $start, $end);
+            $metricsValid = $this->isValidMetrics($metrics);
+            $metricsMatch = $summaryValid && $metricsValid
+                && $this->metricsMatchCurrentMonth($metrics, $summary['current_month']);
+            if ($summaryValid && $metricsValid && $metricsMatch) {
                 $payload = [
                     'ok' => true,
                     'resumo' => [
@@ -254,6 +255,8 @@ final class AgentRuntimeFactory
                     ],
                     'metrics' => $this->normalizeMetrics($metrics),
                 ];
+            } else {
+                $this->logFinanceiroValidationFailure($accountId, $summaryValid, $metricsValid, $metricsMatch);
             }
         } catch (Throwable $error) {
             $this->logReadFailure('financeiro', $accountId, $error);
@@ -791,6 +794,46 @@ final class AgentRuntimeFactory
             'source' => $source,
             'account_id' => $accountId,
             'exception_class' => $error::class,
+            'exception_message' => $error->getMessage(),
+            'file' => $error->getFile() . ':' . $error->getLine(),
+            'trace' => $this->shortTrace($error),
+        ]);
+    }
+
+    /** Resumo de até 3 frames do stack trace, sem argumentos (evita vazar dados sensíveis). */
+    private function shortTrace(Throwable $error): string
+    {
+        $frames = [];
+        foreach (array_slice($error->getTrace(), 0, 3) as $frame) {
+            $location = ($frame['file'] ?? '?') . ':' . ($frame['line'] ?? '?');
+            $callee = ($frame['class'] ?? '') . ($frame['type'] ?? '') . ($frame['function'] ?? '?');
+            $frames[] = $callee . ' (' . $location . ')';
+        }
+
+        return implode(' <- ', $frames);
+    }
+
+    /**
+     * Loga por que a validação fail-closed do snapshot financeiro rejeitou os dados lidos,
+     * quando NENHUMA exceção foi lançada (schema drift silencioso entre PnlReportService e
+     * este allowlist). Sem isso, "financeiro_unavailable" fica sem causa raiz rastreável.
+     */
+    private function logFinanceiroValidationFailure(
+        int $accountId,
+        bool $summaryValid,
+        bool $metricsValid,
+        bool $metricsMatch
+    ): void {
+        $failedChecks = array_keys(array_filter([
+            'summary_schema' => !$summaryValid,
+            'metrics_schema' => !$metricsValid,
+            'metrics_vs_current_month_mismatch' => $summaryValid && $metricsValid && !$metricsMatch,
+        ]));
+
+        log_warning('AgentRuntimeFactory: financeiro snapshot rejeitado por validação fail-closed', [
+            'source' => 'financeiro',
+            'account_id' => $accountId,
+            'failed_checks' => $failedChecks,
         ]);
     }
 
