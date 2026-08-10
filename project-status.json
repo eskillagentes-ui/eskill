@@ -211,6 +211,15 @@
             "passes": true,
             "priority": "P0",
             "notes": "Lote piloto aplicado 2026-08-08: 4 itens com EMPTY_GTIN_REASON (verificado via API). Rollout gradual por lote com aprovação; MLB4564086941 excluído (valor existente preservado)."
+        },
+        {
+            "id": "onda3-operacional-fixes",
+            "name": "Onda 3: correções de bug pós-auditoria (agentes runtime, monitoramento)",
+            "description": "Investigação profunda externa (09/08) apontou várias falhas; cruzado com o código real, Onda 1/2 (token/claims/returns/timezone/duplicações JS/promoções) já estavam corrigidas em fix/onda2-consistencia. Onda 3 tratou o restante.",
+            "category": "qualidade",
+            "passes": true,
+            "priority": "P2",
+            "notes": "2026-08-09: FINANCEIRO/ORQUESTRADOR do Pregão mostravam FALHOU — causa raiz: allowlist de schema em AgentRuntimeFactory/FinanceiroAgent desatualizado vs PnlReportService (faltavam cogs_source/advertising_expenses/units_sold/source/cash); corrigido e verificado via bin/agent-runtime.php (financeiro: failed->success). /dashboard/monitoring mostrava CPU/Memória/Disco/DB/Cache sempre 0% — causa raiz: contrato quebrado entre app/Views/dashboard/monitoring.php (lê data.cpu/memory/disk/db/cache no nível raiz) e MonitoringController::metrics() (retornava {metrics:{cache,queue,llm,database,system}}); corrigido reaproveitando AdvancedMonitoringService::collectSystemMetrics() (real) — verificado CPU 36.66%, Disco 61.66%, DB 3 conexões, cache 66.3%. Full Restock NaN e link Promoções 404: já estavam corrigidos na Onda 2 (comentário 'Onda 2 / T5' no código), confirmado ao vivo. Veto do Sentinela (MLB7346643828 moderação + 3 itens catálogo 2.5%) e '15 anúncios sem CMV': confirmados REAIS e corretos (governança funcionando) — exigem ação manual do dono no catálogo/custos, não são bugs de código. Card QA do Pregão sempre falha por design: QaMergeGate::assertPasses() só lê env vars QA_GATE_* setadas transientemente pelo job de CI (.github/workflows/deploy.yml) — nunca existem no processo PHP-FPM de produção. Persistir evidência de CI para leitura em runtime é decisão de arquitetura pendente, não implementada (fora do escopo de housekeeping). Suite Unit completa (4429 testes) OK após as mudanças. Achado de segurança à parte: reset de clpctl system:permissions:reset corrigiu 199 arquivos root:root para eskill:eskill (bloqueavam edição)."
         }
     ]
 }

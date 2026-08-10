@@ -1,3 +1,98 @@
+## 2026-08-09 (15ª parte) — Onda 3: cruzamento do relatório de investigação com o código real
+
+### Contexto
+Usuário trouxe um relatório de investigação profunda de outra sessão/agente sobre
+eskill.com.br (produção), listando ~20 achados (token OAuth expirado, claims sem
+filtro, returns 500, timezones divergentes, itens duplicados em JS, promoções 404,
+monitoramento zerado, Full Restock NaN, agentes FINANCEIRO/ORQUESTRADOR falhando,
+CMV faltante, veto do Sentinela, QA interno falhando).
+
+### Descoberta: Onda 1 e Onda 2 já estavam corrigidas
+A pasta de produção estava no branch `fix/onda2-consistencia` (não master) com
+commits de hoje (16h36–19h37 UTC) que já cobriam token/claims/returns/timezone
+(`2ee23662`), duplicações JS em itens/perguntas (`0ec92bef`, `d5986a0f`,
+`910a7545`), reconciliação Dashboard/Analytics/Vendas (`645b3aee`, T1–T9) e o link
+de Promoções (`8f569a4c`). Confirmado ao vivo: token ativo até 10/08 03:29, rota
+`/dashboard/marketing/promotions` correta. Branch nunca foi mergeada em master nem
+documentada no claude-progress.txt por quem fez — risco de auditoria registrado.
+
+### Onda 3 — trabalho desta sessão (branch fix/onda3-operacional)
+
+**fix(agents) `5157525f`** — FINANCEIRO/ORQUESTRADOR do Pregão mostravam FALHOU.
+Causa raiz: `PnlReportService::getPnL()/getMetrics()` ganharam campos novos
+(`cogs_source`, `advertising_expenses`, `units_sold`, `source`, `cash`) em mudança
+anterior, mas o allowlist estrito fail-closed de `AgentRuntimeFactory`/
+`FinanceiroAgent` (que valida snapshot antes de expor no card) não foi atualizado
+— toda leitura caía em `invalid_legacy_payload`/`financeiro_unavailable`, e
+ORQUESTRADOR falha em cascata se qualquer sub-agente falha. Atualizado schema nos
+dois arquivos (PNL_KEYS, METRICS_KEYS, CASH_KEYS, validação e normalização).
+Verificado via `bin/agent-runtime.php --account-id=1335 --mode=all` (read-only):
+financeiro passou de `failed/financeiro_unavailable` para
+`success/legacy_read_complete`.
+
+**fix(monitoring) `dcd977da`** — `/dashboard/monitoring` mostrava CPU/Memória/
+Disco/DB/Cache sempre 0%. Causa raiz: contrato quebrado entre o JS da view (lê
+`data.cpu`/`data.memory`/`data.disk`/`data.db.*`/`data.cache.*` no nível raiz da
+resposta) e `MonitoringController::metrics()` (retornava
+`{success, metrics: {cache, queue, llm, database, system}}` — nada batia).
+Reescrito para montar o payload exatamente na forma esperada, reaproveitando
+`AdvancedMonitoringService::collectSystemMetrics()` (já real: sys_getloadavg,
+disk_total_space/disk_free_space, SHOW GLOBAL STATUS) e
+`PerformanceMetricsService::getMetrics()` (Redis real). Adicionadas queries reais
+(não mockadas) para requests_by_hour/response_times (`performance_logs`) e
+recent_errors (`system_alerts`) — hoje retornam vazio porque nada grava nessas
+tabelas ainda (gap separado: o middleware `logRequestPerformance()` existe mas não
+está registrado no pipeline de requisições — não corrigido nesta sessão, fora de
+escopo/risco maior). Verificado via reflection (sem HTTP, read-only): CPU 36.66%,
+Disco 61.66%, DB 3 conexões, cache hit_rate 66.3% — dados reais, não mais zerados.
+
+**Full Restock NaN**: já corrigido na Onda 2 (comentário no código referencia
+"Onda 2 / T5"); `days_coverage` retorna `null` (não NaN/999) quando não há vendas
+30d. Confirmado ao vivo via reflection sobre `FullController::
+calculateRestockSuggestions()` para a conta 1335 — valores corretos.
+
+**Veto do Sentinela e "15 anúncios sem CMV"**: confirmados REAIS e corretos.
+`Sentinela::getDashboard(1335)` retorna exatamente o que o relatório descreveu —
+MLB7346643828 em `under_review` + 3 itens de catálogo `inactive` (2,52%, dentro do
+limite 5%, semáforo amarelo). Isso é a governança funcionando como desenhado, não
+um bug — exige ação manual do dono (contestar moderação, corrigir/mesclar catálogo
+duplicado). O alerta "N anúncios sem CMV" com link "Cadastrar custos" já existe em
+`orders-content.php`; "enforcement" (bloquear algo) seria capability nova, não
+implementado sem prompt escopado.
+
+**Card QA do Pregão sempre falha (`invalid_qa_results_snapshot` /
+`qa_merge_gate_rejected`)**: por design atual, não é bug de lógica.
+`QaMergeGate::assertPasses()` só passa se 4 env vars `QA_GATE_*` estiverem
+`'passed'` — mas essas env vars só existem transientemente dentro do job do
+GitHub Actions (`.github/workflows/deploy.yml`, step que roda
+`bin/qa-merge-gate.php`), nunca no processo PHP-FPM real de produção. Não há
+persistência de evidência de CI para leitura em runtime. Corrigir isso de verdade
+exige uma decisão de arquitetura (como/onde persistir "commit X passou CI aos
+Y") — não implementado, é uma decisão do dono, não um fix mecânico.
+
+**Achado de segurança/infra à parte**: ~199 arquivos de `app/Controllers` e
+`app/Services` estavam com dono `root:root` (só leitura para o usuário `eskill`),
+bloqueando edição direta (provavelmente resíduo de deploy anterior rodado como
+root). Corrigido rodando `clpctl system:permissions:reset` (sudo NOPASSWD
+liberado para esse wrapper) — os 340 arquivos passaram a `eskill:eskill`. Comando
+demorou ~7min e imprimiu vários "chmod: invalid mode" no meio (provavelmente
+symlinks quebrados em `.worktrees`), mas terminou e resolveu o problema.
+
+### Validação
+Suite Unit completa: **4429 testes, 10488 assertions, 0 falhas** (rodada 2x,
+antes e depois do conjunto completo de mudanças). Nenhuma escrita no Mercado
+Livre em nenhum momento — todo diagnóstico foi via `bin/agent-runtime.php`
+(read-only) e reflection sobre métodos privados de leitura.
+
+### Pendente / não implementado nesta sessão (fora de escopo de housekeeping)
+- Middleware de `performance_logs` não registrado no pipeline (requests_by_hour/
+  response_times ficam vazios até isso ser ligado).
+- Persistência de evidência de CI para o QaMergeGate funcionar em runtime.
+- Merge de `fix/onda2-consistencia`/`fix/onda3-operacional` em `master` (housekeeping
+  de git pendente, não fiz porque não foi pedido explicitamente).
+
+---
+
 ## 2026-08-09 (14ª parte) — ALERTA: OAuth staging conectou a conta real FACILYTY (1335) por engano
 
 - OAuth com a app dedicada (`4716547571285773`) funcionou tecnicamente: `OAuth callback success` às 20:16:12, criou `ml_accounts.id=1337` no staging.
