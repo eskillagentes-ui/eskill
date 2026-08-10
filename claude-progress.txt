@@ -1,3 +1,13 @@
+## 2026-08-10 (26ª parte) — Pós-merge GO: coletor local ligado
+
+- `RANK_COLLECTOR_LOCAL=true` no `.env` (não commitado); assignments HTTP 200; dry-run coletor OK.
+- FPM reload: **bloqueado** (sudo pede senha) — rode: `sudo systemctl reload php8.4-fpm`
+- Push origin: **bloqueado** (`Permission denied (publickey)`) — precisa deploy key/SSH.
+- AWA OAuth: ainda ação do usuário em Contas → Conectar Nova Conta.
+- `ML_WRITE_AUTOMATION=false` intacto.
+
+---
+
 ## 2026-08-10 (25ª parte) — MERGE Onda 4.1 em master
 
 Autorização: usuário **GO**.
