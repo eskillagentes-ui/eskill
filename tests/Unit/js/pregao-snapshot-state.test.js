@@ -934,7 +934,7 @@ test('QA realtime é ignorado enquanto não existe produtor confiável', async (
     assert.strictEqual(element('qaStream').hidden, true);
 });
 
-test('semáforos são nomeados como Saúde da conta e Sentinela operacional', async () => {
+test('semáforos nomeiam Operação e Catálogo/Governança', async () => {
     await runSnapshot({
         server_ts: '2026-08-04T12:00:00-03:00',
         index: { value: null, open: null, change_pct: null },
@@ -945,7 +945,8 @@ test('semáforos são nomeados como Saúde da conta e Sentinela operacional', as
             limites: { reclamacoes_pct: 2.0, atrasos_pct: 15.0, cancelamentos_pct: 2.5 }
         }
     });
-    assert.match(element('semaText').textContent, /SAÚDE DA CONTA/, 'semáforo do header deve ser nomeado Saúde da conta');
+    assert.match(element('semaText').textContent, /Operação:/, 'header deve nomear Operação (Sentinela)');
+    assert.match(element('semaText').textContent, /Catálogo\/Governança:/, 'header deve nomear Catálogo/Governança');
 
     await runSnapshot({
         server_ts: '2026-08-04T12:00:00-03:00',
@@ -953,7 +954,7 @@ test('semáforos são nomeados como Saúde da conta e Sentinela operacional', as
         candles: [],
         semaforo: { status: null, indicadores: null, limites: {} }
     });
-    assert.match(element('semaText').textContent, /SAÚDE DA CONTA/, 'sem status também deve manter o nome do semáforo');
+    assert.match(element('semaText').textContent, /Operação:/, 'sem status também mantém o rótulo Operação');
 
     const view = fs.readFileSync(path.resolve(__dirname, '../../../app/Views/dashboard/pregao.php'), 'utf8');
     assert.match(view, /SENTINELA OPERACIONAL/, 'card do Sentinela deve ser renomeado');

@@ -539,36 +539,99 @@ final class PregaoSnapshotService
     }
 
     /**
+     * Mesma fonte do checklist 7/7 (F6 Onda 3.1): receipt Redis autoritativo,
+     * com fallback durable em pregao_events type=qa.status.
+     *
      * @return array<string, mixed>
      */
     private function loadLatestQa(int $accountId): array
     {
-        if ($accountId <= 0 || $this->qaProof === null || $this->qaRuns === null) {
+        if ($accountId <= 0) {
             return $this->emptyQaState();
         }
+
         try {
-            $receipt = $this->qaRuns->loadLatestReceipt($accountId);
-            if ($receipt === null || !is_int($receipt['event_id'] ?? null)) {
-                return $this->emptyQaState();
+            if ($this->qaProof !== null && $this->qaRuns !== null) {
+                $receipt = $this->qaRuns->loadLatestReceipt($accountId);
+                if (is_array($receipt) && is_int($receipt['event_id'] ?? null)) {
+                    $stmt = $this->db->prepare(
+                        "SELECT payload FROM pregao_events
+                         WHERE id = ? AND account_id = ? AND type = 'qa.status' AND source = 'live'
+                         LIMIT 1"
+                    );
+                    $stmt->execute([$receipt['event_id'], $accountId]);
+                    $raw = $stmt->fetchColumn();
+                    $payload = is_string($raw) ? json_decode($raw, true) : null;
+                    if (is_array($payload) && $this->qaRuns->isStatusAuthoritative($payload, $accountId)) {
+                        $projected = $this->qaProof->projectStatus($payload, $accountId);
+                        if (is_array($projected)) {
+                            return $projected;
+                        }
+                    }
+                }
             }
+        } catch (Throwable) {
+            // cai no fallback durable
+        }
+
+        return $this->loadLatestQaFromEvents($accountId);
+    }
+
+    /**
+     * Fallback quando o receipt Redis expirou — lê o último qa.status terminal.
+     *
+     * @return array<string, mixed>
+     */
+    private function loadLatestQaFromEvents(int $accountId): array
+    {
+        try {
             $stmt = $this->db->prepare(
                 "SELECT payload FROM pregao_events
-                 WHERE id = ? AND account_id = ? AND type = 'qa.status' AND source = 'live'
-                 LIMIT 1"
+                 WHERE account_id = ? AND type = 'qa.status' AND source = 'live'
+                 ORDER BY id DESC
+                 LIMIT 40"
             );
-            $stmt->execute([$receipt['event_id'], $accountId]);
-            $raw = $stmt->fetchColumn();
-            $payload = is_string($raw) ? json_decode($raw, true) : null;
-            if (!is_array($payload)) {
-                return $this->emptyQaState();
+            $stmt->execute([$accountId]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            foreach ($rows as $row) {
+                $payload = is_string($row['payload'] ?? null)
+                    ? json_decode((string) $row['payload'], true)
+                    : null;
+                if (!is_array($payload)) {
+                    continue;
+                }
+                $result = strtolower((string) ($payload['result'] ?? ''));
+                if (!in_array($result, ['passed', 'failed', 'blocked'], true)) {
+                    continue;
+                }
+                if ($this->qaProof !== null) {
+                    $projected = $this->qaProof->projectStatus($payload, $accountId);
+                    if (is_array($projected)) {
+                        return $projected;
+                    }
+                }
+                // Projeção mínima se assinatura/idade impedir projectStatus
+                return [
+                    'executed' => true,
+                    'running' => false,
+                    'suite' => $payload['suite'] ?? null,
+                    'test' => $payload['test'] ?? null,
+                    'result' => $result,
+                    'status' => $result,
+                    'video_url' => $payload['video_url'] ?? null,
+                    'stream_url' => $payload['stream_url'] ?? null,
+                    'run_id' => $payload['run_id'] ?? null,
+                    'sequence' => $payload['sequence'] ?? null,
+                    'step' => $payload['step'] ?? null,
+                    'observed_at' => $payload['observed_at'] ?? null,
+                    'log' => [],
+                    'trusted' => false,
+                ];
             }
-            if (!$this->qaRuns->isStatusAuthoritative($payload, $accountId)) {
-                return $this->emptyQaState();
-            }
-            return $this->qaProof->projectStatus($payload, $accountId) ?? $this->emptyQaState();
         } catch (Throwable) {
-            return $this->emptyQaState();
+            // empty below
         }
+        return $this->emptyQaState();
     }
 
     /** @return array<string,mixed> */

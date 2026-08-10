@@ -258,6 +258,6 @@
 </script>
 <script src="/js/pregao-chart-layout.js?v=1"></script>
 <script src="/js/pregao-qa.js?v=1" defer></script>
-<script src="/js/pregao.js?v=46" defer></script>
+<script src="/js/pregao.js?v=47" defer></script>
 <script src="/js/pregao-wall.js?v=1" defer></script>
 <script src="/js/pregao-events.js?v=1" defer></script>
