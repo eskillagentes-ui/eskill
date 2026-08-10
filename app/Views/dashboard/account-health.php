@@ -4983,7 +4983,12 @@ require __DIR__ . '/account-health-advanced.php';
                 operation: 'Operação',
                 sales: 'Vendas'
             };
-            footer.innerHTML = `Foco principal: <strong>${escapeHtml(focusNames[plan.focus_pillar.key] || plan.focus_pillar.key)}</strong> (score atual: ${plan.focus_pillar.current_score}) &mdash; Ganho estimado total: <strong class="text-success">+${plan.estimated_gain} pts</strong>`;
+            // Onda 3.1 / F5: o backend (AccountHealthService::generateWeeklyPlan) devolve o
+            // campo como `score`, não `current_score` — daí o "undefined" renderizado.
+            // Fallback '—' cobre qualquer ausência futura sem voltar a mostrar undefined/NaN.
+            const focusScore = (typeof plan.focus_pillar.score === 'number') ? plan.focus_pillar.score : '—';
+            const estimatedGain = (typeof plan.estimated_gain === 'number') ? plan.estimated_gain : 0;
+            footer.innerHTML = `Foco principal: <strong>${escapeHtml(focusNames[plan.focus_pillar.key] || plan.focus_pillar.key)}</strong> (score atual: ${focusScore}) &mdash; Ganho estimado total: <strong class="text-success">+${estimatedGain} pts</strong>`;
         }
     }
 
