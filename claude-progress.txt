@@ -1,3 +1,12 @@
+## 2026-08-10 (27ª parte) — Pacote coletor para PC
+
+- `collector/pack-for-pc.sh` gera `storage/rank-collector-pack/rank-collector-pc.zip` (+ `collector.env` gitignored).
+- FPM: `opcache.validate_timestamps=1` (workers reciclados); reload sudo ainda recomendado.
+- `RANK_COLLECTOR_LOCAL=true`; assignments OK.
+- Próximo do usuário: baixar o zip no PC residencial e rodar 1× + agendar.
+
+---
+
 ## 2026-08-10 (26ª parte) — Pós-merge GO: coletor local ligado
 
 - `RANK_COLLECTOR_LOCAL=true` no `.env` (não commitado); assignments HTTP 200; dry-run coletor OK.

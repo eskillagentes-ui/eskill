@@ -114,3 +114,4 @@ node_modules/
 /app/Services/_runtime/
 testsprite_tests/tmp/
 testsprite_tests/tmp/config.json
+storage/rank-collector-pack/
