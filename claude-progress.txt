@@ -1,3 +1,43 @@
+## 2026-08-10 (21ª parte) — Onda 4: loop de otimização (dry-run / fail-closed)
+
+Branch: `feat/onda4-loop` (a partir de `fix/pos-merge-hotfix` / `de4be68a`).
+**NÃO mergeada em master.** Backup: `storage/backups/pre-onda4-20260810_040846.sql`.
+PHPUnit Unit: **4449 / 0 falhas** (+15 novos; 27 skipped pré-existentes).
+`ML_WRITE_AUTOMATION=false` intacto; demo dry-run `api_called=no`.
+
+### T0 — Adicionar conta OAuth
+Íntegro: `/dashboard/accounts` + seletor → `/auth/authorize` → redirect ML (PKCE).
+Sem completar autorização (ação do usuário). Doc: `docs/ops/AWA_MOTOS_CONNECT.md`.
+
+### T1 — Rank tracker
+**Causa da desativação (não é scraping HTML):** `GET /sites/MLB/search` retorna
+**403 forbidden** neste host (IP datacenter / CF PolicyAgent). Flag
+`RANK_TRACKER_ENABLED=false` + comentários em `MercadoLivreClient`/`config/pregao.php`.
+Implementado `RankTrackerService` + `rank_history` / `item_rank_keywords` / circuit /
+rate limit / cache diário + `bin/rank-tracker-collect.php` (04–06h).
+Evidência CLI (`RANK_TRACKER_ENABLED=true --force`): 3 keywords com
+`error=search_forbidden`, circuit open, `rate_limit_per_min=6`. Sem posições inventadas.
+Doc: `docs/ops/RANK_TRACKER.md`.
+
+### T2 — SEO KPI
+`SeoKpiService` + tabela `seo_interventions` + aba **Resultados** no SEO Killer
+(empty state + lista). Baseline demo MLB4435358255 capturado.
+
+### T3 — MLWriteGateway
+Guardas: kill_switch → action_flag → sentinela/TRAVADA → allowlist → rate → dry-run → audit.
+Painel `/dashboard/write-governance`. Demo pause MORTO MLB7346643828 bloqueada por
+`kill_switch`; auditoria id 1–2. Legacy `updateItem` ainda existe (pré-Onda4) —
+portão novo é o único caminho para automação futura (Onda 5 migra).
+
+### T4 — Ads readiness
+Fila real: 14 itens, waste≈R$51,89; MLB6526483148 ACOS 56,61; Executar disabled.
+
+### T5 — Checklist 7/7
+1/7 verde hoje (backup <24h). TRAVADA, Sentinela amarelo, 4 críticos unlock,
+CMV 31,4%, rank 0d, QA sem runs — esperado.
+
+---
+
 ## 2026-08-10 (20ª parte) — Pós-merge hotfix (H1 CMV CSP + H2 push bloqueado + H3 backups)
 
 ### H1 — CMV "Carregando…" permanente

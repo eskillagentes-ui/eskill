@@ -43,6 +43,9 @@ final class PregaoDataSourceStatusService
         'seller_not_found_in_search',
         'unavailable',
         'watchlist_empty',
+        'circuit_open',
+        'no_captures',
+        'search_forbidden',
     ];
 
     /**

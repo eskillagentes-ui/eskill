@@ -59,8 +59,11 @@
         'sales', 'ads', 'visits', 'health', 'reputation', 'questions', 'ranks', 'watchlist'
     ]);
     const sourceReasons = {
-        rank_tracker_disabled: 'desativado por segurança',
-        ml_search_forbidden: 'busca bloqueada pelo Mercado Livre',
+        rank_tracker_disabled: 'desativado (flag off)',
+        ml_search_forbidden: 'API search 403 (datacenter)',
+        circuit_open: 'circuit breaker (falhas API)',
+        no_captures: 'sem capturas ainda',
+        search_forbidden: 'API search bloqueada',
         seller_not_found_in_search: 'seller não encontrado',
         unavailable: 'indisponível',
         watchlist_empty: 'watchlist vazia'

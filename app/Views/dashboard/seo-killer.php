@@ -42,6 +42,11 @@ $seoKillerJsVersion = @filemtime($seoKillerAssetBase . '/js/seo-killer.js') ?: t
             </button>
         </li>
         <li class="nav-item" role="presentation">
+            <button class="nav-link" id="seo-kpi-results-tab" data-bs-toggle="tab" data-bs-target="#seo-kpi-results" type="button" role="tab" aria-controls="seo-kpi-results" aria-selected="false">
+                <i class="bi bi-clipboard2-pulse me-2"></i>Resultados
+            </button>
+        </li>
+        <li class="nav-item" role="presentation">
             <button class="nav-link" id="competitor-spy-tab" data-bs-toggle="tab" data-bs-target="#competitor-spy" type="button" role="tab" aria-controls="competitor-spy" aria-selected="false">
                 <i class="bi bi-binoculars me-2"></i>Espião de Concorrentes
             </button>
@@ -312,6 +317,10 @@ $seoKillerJsVersion = @filemtime($seoKillerAssetBase . '/js/seo-killer.js') ?: t
         <!-- Technical Sheet Tab -->
         <div class="tab-pane fade" id="technical-sheet" role="tabpanel" aria-labelledby="technical-sheet-tab">
             <?php include __DIR__ . '/seo-killer/components/technical-sheet-tab.php'; ?>
+        </div>
+
+        <div class="tab-pane fade" id="seo-kpi-results" role="tabpanel" aria-labelledby="seo-kpi-results-tab">
+            <?php include __DIR__ . '/seo-killer/components/seo-kpi-results-tab.php'; ?>
         </div>
         <!-- End Technical Sheet Tab -->
 

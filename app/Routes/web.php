@@ -69,6 +69,18 @@ $router->get('api/xray/export/pdf/{reportId}', AccountXRayController::class, 'ex
 $router->get('api/xray/unlock-plan', AccountXRayController::class, 'unlockPlan');
 $router->post('api/xray/unlock-plan/{mlbId}/resolve', AccountXRayController::class, 'resolveUnlockItem');
 
+// ── Onda 4 — Governança de Escrita / Rank / SEO KPI / Ads readiness ──
+use App\Controllers\WriteGovernanceController;
+$router->get('dashboard/write-governance', WriteGovernanceController::class, 'index');
+$router->get('api/write-governance/checklist', WriteGovernanceController::class, 'checklist');
+$router->get('api/write-governance/audit', WriteGovernanceController::class, 'audit');
+$router->post('api/write-governance/dry-run', WriteGovernanceController::class, 'dryRunDemo');
+$router->get('api/ads/readiness', WriteGovernanceController::class, 'adsReadiness');
+$router->get('api/seo/kpi/interventions', WriteGovernanceController::class, 'seoKpiList');
+$router->post('api/seo/kpi/baseline', WriteGovernanceController::class, 'seoKpiBaseline');
+$router->get('api/rank/status', WriteGovernanceController::class, 'rankStatus');
+$router->get('api/rank/history/{mlbId}', WriteGovernanceController::class, 'rankHistory');
+
 // OpenSpec Module
 $router->get('dashboard/openspec', 'App\\Controllers\\OpenSpecController', 'index');
 $router->get('dashboard/openspec/changes', 'App\\Controllers\\OpenSpecController', 'listChanges');

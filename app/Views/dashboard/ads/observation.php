@@ -192,6 +192,69 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
 </div>
 
 <div class="card border-0 shadow-sm mb-4">
+    <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
+        <span>Fila de recomendações (Onda 4 — observação → recomendação)</span>
+        <span class="badge bg-secondary">execução desabilitada</span>
+    </div>
+    <div class="card-body py-2 small text-muted">
+        Ordenada por desperdício R$.
+        Resumo: <?= (int) ($adsReadiness['summary']['total'] ?? 0) ?> itens ·
+        pausar <?= (int) ($adsReadiness['summary']['pausar'] ?? 0) ?> ·
+        reduzir <?= (int) ($adsReadiness['summary']['reduzir_lance'] ?? 0) ?> ·
+        waste ≈ <?= htmlspecialchars($money($adsReadiness['summary']['waste_brl'] ?? 0), ENT_QUOTES, 'UTF-8') ?>.
+    </div>
+    <div class="table-responsive">
+        <table class="table ads-table mb-0">
+            <thead>
+                <tr>
+                    <th>MLB</th>
+                    <th>Ação</th>
+                    <th>Waste R$</th>
+                    <th>ACOS</th>
+                    <th>Margem</th>
+                    <th>CMV</th>
+                    <th>Justificativa</th>
+                    <th>Executar</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php
+            $adsReadiness = $adsReadiness ?? ['recommendations' => [], 'summary' => []];
+            $recs = $adsReadiness['recommendations'] ?? [];
+            ?>
+            <?php if ($recs === []): ?>
+                <tr><td colspan="8" class="text-muted text-center py-4">Sem recomendações — sem gasto Ads no período agregado.</td></tr>
+            <?php else: ?>
+                <?php foreach ($recs as $rec): ?>
+                    <tr>
+                        <td><code><?= htmlspecialchars((string) $rec['mlb_id'], ENT_QUOTES, 'UTF-8') ?></code></td>
+                        <td><strong><?= htmlspecialchars((string) $rec['action'], ENT_QUOTES, 'UTF-8') ?></strong></td>
+                        <td><?= htmlspecialchars($money($rec['waste_brl'] ?? 0), ENT_QUOTES, 'UTF-8') ?></td>
+                        <td><?= htmlspecialchars($nd($rec['acos'] ?? null, $pct), ENT_QUOTES, 'UTF-8') ?></td>
+                        <td><?= htmlspecialchars($nd($rec['margem_bruta_pct'] ?? null, $pct), ENT_QUOTES, 'UTF-8') ?></td>
+                        <td>
+                            <?php if (!empty($rec['has_real_cogs'])): ?>
+                                <span class="badge bg-success">real</span>
+                            <?php else: ?>
+                                <span class="badge bg-warning text-dark">estimado</span>
+                            <?php endif; ?>
+                        </td>
+                        <td class="small"><?= htmlspecialchars(implode(' · ', $rec['reasons'] ?? []), ENT_QUOTES, 'UTF-8') ?></td>
+                        <td>
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled
+                                title="<?= htmlspecialchars((string) ($rec['execute_tooltip'] ?? ''), ENT_QUOTES, 'UTF-8') ?>">
+                                Executar
+                            </button>
+                        </td>
+                    </tr>
+                <?php endforeach; ?>
+            <?php endif; ?>
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-4">
     <div class="card-header bg-white fw-semibold">Recuperação em curso — sucessores de catálogo</div>
     <div class="table-responsive">
         <table class="table ads-table mb-0">

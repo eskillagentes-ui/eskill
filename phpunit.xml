@@ -40,6 +40,13 @@
             <file>tests/Unit/Services/Agents/QaAgentTest.php</file>
             <file>tests/Unit/Services/Agents/QaMergeGateIntegrationTest.php</file>
             <file>tests/Unit/Services/Agents/QaMergeGateTest.php</file>
+            <!-- Onda 4 — loop otimização (SQLite in-memory / mocks; sem escrita ML) -->
+            <file>tests/Unit/Services/ML/MLWriteGatewayTest.php</file>
+            <file>tests/Unit/Services/ML/WriteEnablementChecklistTest.php</file>
+            <file>tests/Unit/Services/Rank/RankTrackerServiceTest.php</file>
+            <file>tests/Unit/Services/SEO/SeoKpiServiceTest.php</file>
+            <file>tests/Unit/Services/Ads/AdsReadinessServiceTest.php</file>
+            <file>tests/Unit/Architecture/MlWriteGatewayBypassTest.php</file>
             <exclude>tests/Unit/CloneAlertNotificationServiceTest.php</exclude>
             <exclude>tests/Unit/CloneDuplicateDetectionServiceTest.php</exclude>
             <exclude>tests/Unit/CloneRetryStrategyServiceTest.php</exclude>

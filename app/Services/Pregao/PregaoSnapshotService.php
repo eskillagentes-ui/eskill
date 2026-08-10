@@ -60,6 +60,7 @@ final class PregaoSnapshotService
         $available = $this->factorAvailability($meta);
         $candles = $this->loadCandles($accountId, 90);
         $ops = $this->loadRecentEvents($accountId, 'op', 50);
+        $this->enrichRankMeta($accountId, $meta);
         $ranks = $this->loadKeywordRanks($accountId, $meta);
         $qa = $this->loadLatestQa($accountId);
         $agents = $this->agentStatusService->latestForAccount(
@@ -424,6 +425,31 @@ final class PregaoSnapshotService
             ];
         }
         return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $meta
+     */
+    private function enrichRankMeta(int $accountId, array &$meta): void
+    {
+        try {
+            $rankStatus = (new \App\Services\Rank\RankTrackerService($this->db))->statusForPregao($accountId);
+            if (!isset($meta['metrics']) || !is_array($meta['metrics'])) {
+                $meta['metrics'] = [];
+            }
+            $meta['metrics']['posicao_media'] = [
+                'available' => (bool) ($rankStatus['available'] ?? false),
+                'reason' => $rankStatus['available'] ?? false
+                    ? null
+                    : (string) ($rankStatus['reason'] ?? 'no_captures'),
+                'label' => $rankStatus['label'] ?? null,
+                'freshness' => $rankStatus['freshness'] ?? null,
+                'avg_position' => $rankStatus['avg_position'] ?? null,
+                'source' => 'keyword_ranks',
+            ];
+        } catch (\Throwable) {
+            // keep previous meta
+        }
     }
 
     /**

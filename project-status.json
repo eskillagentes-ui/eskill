@@ -265,6 +265,15 @@
             "passes": true,
             "priority": "P1",
             "notes": "2026-08-10 branch fix/pos-merge-hotfix. H1: nonce CSP_NONCE em cogs.php; browser 35/11/24; sku_custos MLB4435358255=12.34. H2: known_hosts GitHub OK; falta chave privada (Permission denied publickey). H3: backups 45G→17G, disco 73%→58%; keep 3 sql + marcos gz; cron sun 04:30."
+        },
+        {
+            "id": "onda4-loop-otimizacao-dryrun",
+            "name": "Onda 4: Rank tracker API + SEO KPI + MLWriteGateway fail-closed + Ads readiness + checklist 7/7",
+            "description": "Loop de otimização em dry-run/fail-closed: rank tracker oficial, KPI Hidden SEO, gateway de escrita único, fila Ads observação→recomendação, checklist de habilitação futura.",
+            "category": "negocio",
+            "passes": true,
+            "priority": "P1",
+            "notes": "2026-08-10 branch feat/onda4-loop (NÃO mergeada). T0 OAuth Adicionar conta OK até redirect ML. T1 causa desativação=403 /sites/MLB/search datacenter (não scraping) — docs/ops/RANK_TRACKER.md; circuit abre após 3 falhas; rank_history com tentativas error=search_forbidden. T2 SeoKpiService + aba Resultados SEO Killer. T3 MLWriteGateway kill_switch→flags→sentinela/TRAVADA→allowlist→rate→dry-run; demo pause MORTO bloqueada por kill_switch, api_called=no. T4 AdsReadinessService fila real waste R$ + Executar disabled. T5 checklist 1/7 (só backup<24h). ML_WRITE_AUTOMATION=false. Legacy updateItem paths ainda existem fora do gateway — Onda 5 migra; nenhum caminho NOVO bypassa."
         }
     ]
 }

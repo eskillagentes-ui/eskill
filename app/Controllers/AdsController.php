@@ -62,6 +62,9 @@ class AdsController extends BaseController
                 'cpc_health_series' => [],
                 'recovery' => [],
             ];
+        $adsReadiness = $accountId > 0
+            ? (new \App\Services\Ads\AdsReadinessService())->recommendationQueue($accountId)
+            : ['recommendations' => [], 'summary' => ['total' => 0, 'waste_brl' => 0, 'read_only' => true]];
 
         ob_start();
         require __DIR__ . '/../Views/dashboard/ads/observation.php';

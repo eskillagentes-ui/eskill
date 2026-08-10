@@ -113,6 +113,12 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
                 <span>Raio X da Conta</span>
                 <span class="nav-badge" style="background:#dc3545;color:#fff">X</span>
             </a>
+
+            <a href="/dashboard/write-governance" class="nav-item <?= isActive('/write-governance') ? 'active' : '' ?>">
+                <i class="bi bi-shield-lock"></i>
+                <span>Governança Escrita</span>
+                <span class="nav-badge new">Onda4</span>
+            </a>
         </div>
 
         <!-- Catálogo & SEO -->
