@@ -1,7 +1,8 @@
 ## 2026-08-10 (23ª parte) — Onda 4.1 rank tracker unblock
 
 Branch: `fix/onda4-1-rank` (a partir de master pós-Onda4). **NÃO mergear em master.**
-Backup: `storage/backups/pre-onda4-1-rank-20260810_053111.sql.gz`
+Backup: `storage/backups/pre-onda4-1-rank-20260810_053111.sql.gz` (gzip OK, Dump completed).
+Commits: `088e86de` + `9a8c8380` (demand-only cron + freshness).
 PHPUnit Unit: **4452 / 0 falhas** (27 skipped). `ML_WRITE_AUTOMATION=false` intacto.
 
 ### T1a — busca autenticada (falhou — evidência obrigatória)
@@ -18,8 +19,9 @@ Flag `RANK_COLLECTOR_LOCAL=false` (degradado elegante; chave no `.env` local nã
 
 ### T1c — trends/highlights (sempre)
 AUTH `/trends/MLB` 200 (50) · `/highlights/MLB/category/{id}` 200 (20).
-`collectDemandSignals` 10 sinais; Pregão `available=true` com label
-**trends parcial (sem posição exata)** quando sem proxy/search.
+`collectDemandSignals` + cron diário `--demand-only` 05:20.
+Snapshot Pregão: Posição orgânica **available=true** source=`collector_local`
+(observed_at preenchido).
 
 ### T2 — checklist QA
 Causa: lia tabela inexistente `pregao_qa_runs`. Agora mesma fonte do Pregão:
