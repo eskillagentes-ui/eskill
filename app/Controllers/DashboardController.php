@@ -815,6 +815,19 @@ class DashboardController extends BaseController
     }
 
     /**
+     * Cadastro de CMV (custo da mercadoria) — local only.
+     */
+    public function cogs(): void
+    {
+        $currentUser = $this->userService->getCurrentUser();
+        $pageTitle = 'CMV — Custo da Mercadoria';
+        ob_start();
+        require __DIR__ . '/../Views/dashboard/cogs.php';
+        $content = ob_get_clean();
+        require __DIR__ . '/../Views/layouts/modern/app.php';
+    }
+
+    /**
      * Página de edição/otimização de um anúncio específico
      */
     public function editItem(string $itemId): void

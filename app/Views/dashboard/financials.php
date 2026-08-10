@@ -984,6 +984,9 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
             const formatMoney = (val) => {
                 return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val);
             };
+            const escapeHtml = (str) => String(str ?? '').replace(/[&<>"']/g, (c) => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+            }[c]));
 
             const row = (label, value, cssClass = '', isHeader = false) => {
                 const fw = isHeader ? 'fw-bold' : '';
@@ -999,6 +1002,13 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
             html += row('Receita Líquida', pnl.net_revenue, '', true);
             html += '<tr><td colspan="2"><hr class="my-1"></td></tr>';
             html += row('(-) Custo Produtos (CMV)', pnl.cogs, 'text-secondary');
+            if (pnl.cogs_source) {
+                const isReal = pnl.cogs_source === 'sku_custos' || pnl.cogs_source === 'ml_orders';
+                const badge = isReal
+                    ? '<span class="badge bg-success ms-2">CMV real (' + escapeHtml(pnl.cogs_source) + ')</span>'
+                    : '<span class="badge bg-warning text-dark ms-2">estimado (' + escapeHtml(pnl.cogs_source) + ')</span>';
+                html += '<tr><td colspan="2" class="small text-muted py-1">Fonte do CMV: ' + badge + ' · <a href="/dashboard/cogs">cadastrar custos</a></td></tr>';
+            }
             html += row('(-) Comissões ML', pnl.commissions, 'text-secondary');
             html += row('(-) Taxas Pagamento', pnl.payment_fees, 'text-secondary');
             html += row('(-) Fretes', pnl.shipping_cost, 'text-secondary');

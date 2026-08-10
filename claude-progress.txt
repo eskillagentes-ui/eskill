@@ -1,4 +1,53 @@
+## 2026-08-10 (18ª parte) — Onda 3.5: Dados e Negócio (CMV, Destravamento, Watchlist, Multi-conta, Narrativa)
+
+### Contexto
+Onda de dados/negócio (não bugs). Conta FACILYTY TRAVADA (score 34), Sentinela
+verde operacional, loop de otimização bloqueado até CMV confiável + conta
+destravada. Branch `feat/onda3-5-dados` a partir de `fix/onda2-1-pendencias`.
+Backup: `storage/backups/pre-onda3.5-20260810_021625.sql` (5.49GB).
+`ML_WRITE_AUTOMATION=false` intacto — planos manuais apenas.
+
+### T1 — CMV
+- Auditoria real: 35 anúncios com venda/90d; 10 com CMV real (`sku_custos`);
+  25 faltando (lista no `/dashboard/cogs`).
+- Novo `CogsService` + `CogsController` + view `/dashboard/cogs` (edição inline +
+  CSV MLB,custo) + histórico `item_cogs_history`.
+- Fonte canônica do P&L continua `sku_custos`; badge "real/estimado" no P&L
+  (`financials.php`) + link para cadastro.
+- `ItemService::updateItemCost` agora espelha em `sku_custos`.
+
+### T2 — Plano de Destravamento
+- Novo `AccountUnlockPlanService` + tabela `account_unlock_plan_items`.
+- Aba no Raio X; reconstrói a partir do governance + blockers + moderação API.
+- MLB7346643828: `under_review` + `sub_status=forbidden` + catálogo MLB75435443
+  (motivo real da API, não genérico).
+- 3 bloqueios de catálogo ativos no plano (impact 40, CRITICA).
+- Mark resolved + auto-reconcile no próximo Raio X (só governance).
+
+### T3 — Watchlist
+- Infra já existia (`competitor_items` + `pregao-watchlist.timer`) mas vazia.
+- Seed via highlights/categoria (search API do app está `forbidden`).
+- 9 concorrentes inseridos; Pregão `Concorrentes available=true count=9`.
+- APIs: `/api/pregao/watchlist` CRUD + seed + collect.
+
+### T4 — Segunda conta AWA
+- Fluxo OAuth já pronto em `/dashboard/accounts` → `/auth/authorize`.
+- Checklist: `docs/ops/AWA_MOTOS_CONNECT.md` (usuário conecta pessoalmente).
+- Fix colateral: `config/app.php` key agora lê `$_SERVER`/`getenv` além de
+  `$_ENV` (GPCS sem E quebrava decrypt no CLI → `account_disconnected`).
+
+### T5 — Narrativa VERDE vs TRAVADA
+- Escolha: **duas dimensões explícitas** (não colapsar no pior).
+- Pregão: `Operação: VERDE · Catálogo/Governança: TRAVADA` + tooltip.
+- Snapshot inclui `governance` do último Raio X (score 34 / TRAVADA).
+
+### Validação
+PHPUnit Unit: **4434 testes / 0 falhas** (+5 novos). Zero escrita ML.
+
+---
+
 ## 2026-08-10 (17ª parte) — Onda 2.1: Parte A (Perguntas, bulk selection, heading duplicado)
+
 
 ### Contexto
 Usuário trouxe prompt "Onda 2.1" com 3 pendências supostamente nunca executadas

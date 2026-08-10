@@ -66,6 +66,8 @@ $router->post('api/xray/queue', AccountXRayController::class, 'queueAnalysis');
 $router->get('api/xray/job-status/{jobId}', AccountXRayController::class, 'jobStatus');
 $router->get('api/xray/recovery-history/{accountId}', AccountXRayController::class, 'recoveryHistory');
 $router->get('api/xray/export/pdf/{reportId}', AccountXRayController::class, 'exportPdf');
+$router->get('api/xray/unlock-plan', AccountXRayController::class, 'unlockPlan');
+$router->post('api/xray/unlock-plan/{mlbId}/resolve', AccountXRayController::class, 'resolveUnlockItem');
 
 // OpenSpec Module
 $router->get('dashboard/openspec', 'App\\Controllers\\OpenSpecController', 'index');
@@ -95,6 +97,7 @@ $router->get('dashboard/ean', ViewController::class, 'ean');
 $router->get('dashboard/ean/admin', ViewController::class, 'eanAdmin');
 $router->get('dashboard/questions', DashboardController::class, 'questions');
 $router->get('dashboard/items', DashboardController::class, 'items');
+$router->get('dashboard/cogs', DashboardController::class, 'cogs');
 $router->get('dashboard/items/bulk-compatibility', DashboardController::class, 'bulkCompatibilidades');
 $router->get('dashboard/messages', DashboardController::class, 'messages');
 $router->get('dashboard/catalog/clone', DashboardController::class, 'catalogClone');

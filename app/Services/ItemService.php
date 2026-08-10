@@ -705,16 +705,45 @@ class ItemService
     public function updateItemCost(string $itemId, ?float $cost, ?float $tax): bool
     {
         try {
-            $stmt = $this->db->prepare("
-                UPDATE items
-                SET cost_price = :cost, tax_rate = :tax, updated_at = NOW()
-                WHERE ml_item_id = :id
-            ");
-            return $stmt->execute([
-                ':cost' => $cost,
-                ':tax' => $tax,
-                ':id' => $itemId
-            ]);
+            if ($this->accountId) {
+                $stmt = $this->db->prepare("
+                    UPDATE items
+                    SET cost_price = :cost, tax_rate = :tax, updated_at = NOW()
+                    WHERE ml_item_id = :id AND account_id = :account_id
+                ");
+                $ok = $stmt->execute([
+                    ':cost' => $cost,
+                    ':tax' => $tax,
+                    ':id' => $itemId,
+                    ':account_id' => $this->accountId,
+                ]);
+            } else {
+                $stmt = $this->db->prepare("
+                    UPDATE items
+                    SET cost_price = :cost, tax_rate = :tax, updated_at = NOW()
+                    WHERE ml_item_id = :id
+                ");
+                $ok = $stmt->execute([
+                    ':cost' => $cost,
+                    ':tax' => $tax,
+                    ':id' => $itemId,
+                ]);
+            }
+
+            // Espelha na fonte canônica do P&L (sku_custos) quando há conta + custo
+            if ($ok && $this->accountId && $cost !== null && $cost >= 0) {
+                try {
+                    (new \App\Services\Financial\CogsService($this->db))
+                        ->upsertUnitCost($this->accountId, $itemId, $cost, 'items.cost_price_sync');
+                } catch (\Throwable $e) {
+                    log_warning('ItemService: sync CMV→sku_custos falhou', [
+                        'item_id' => $itemId,
+                        'error' => $e->getMessage(),
+                    ]);
+                }
+            }
+
+            return $ok;
         } catch (\Exception $e) {
             return false;
         }

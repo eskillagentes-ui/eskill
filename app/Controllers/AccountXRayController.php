@@ -620,4 +620,88 @@ class AccountXRayController
             'include_financial' => (bool)($options['include_financial'] ?? true),
         ];
     }
+
+    /**
+     * GET /api/xray/unlock-plan?account_id=
+     * Retorna o plano de destravamento persistido (ou reconstrói a partir do último report).
+     */
+    public function unlockPlan(): void
+    {
+        $this->requireAuth();
+        $this->jsonHeader();
+
+        try {
+            $accountId = (int) ($this->request->get('account_id') ?? 0);
+            if ($accountId <= 0) {
+                $this->error400('account_id obrigatório');
+                return;
+            }
+            if (!$this->userOwnsAccount($accountId)) {
+                $this->error403('Conta não encontrada ou sem permissão');
+                return;
+            }
+
+            $service = new \App\Services\AccountUnlockPlanService($accountId);
+            $rebuild = (string) ($this->request->get('rebuild') ?? '') === '1';
+
+            if ($rebuild) {
+                // Rebuild a partir do último relatório Raio X (governance no JSON)
+                $stmt = \App\Database::getInstance()->prepare(
+                    'SELECT id, report_json FROM account_xray_reports
+                     WHERE account_id = ? ORDER BY created_at DESC, id DESC LIMIT 1'
+                );
+                $stmt->execute([$accountId]);
+                $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+                if (!$row) {
+                    echo json_encode(['success' => false, 'error' => 'Nenhum Raio X disponível — rode um scan primeiro'], JSON_UNESCAPED_UNICODE);
+                    return;
+                }
+                $report = json_decode((string) $row['report_json'], true);
+                $gov = is_array($report['governance'] ?? null) ? $report['governance'] : [];
+                if ($gov === []) {
+                    echo json_encode(['success' => false, 'error' => 'Relatório sem governance'], JSON_UNESCAPED_UNICODE);
+                    return;
+                }
+                $plan = $service->buildAndPersist($gov, (string) $row['id']);
+                echo json_encode(['success' => true, 'data' => $plan], JSON_UNESCAPED_UNICODE);
+                return;
+            }
+
+            $data = $service->loadLatest($accountId);
+            echo json_encode(['success' => true, 'data' => $data], JSON_UNESCAPED_UNICODE);
+        } catch (\Throwable $e) {
+            $this->error500($e->getMessage());
+        }
+    }
+
+    /**
+     * POST /api/xray/unlock-plan/{mlbId}/resolve?account_id=
+     * Marca item como resolvido manualmente (usuário executou no painel ML).
+     */
+    public function resolveUnlockItem(string $mlbId): void
+    {
+        $this->requireAuth();
+        $this->jsonHeader();
+
+        try {
+            $accountId = (int) ($this->request->get('account_id') ?? 0);
+            $body = $this->jsonInput();
+            if ($accountId <= 0 && isset($body['account_id'])) {
+                $accountId = (int) $body['account_id'];
+            }
+            if ($accountId <= 0) {
+                $this->error400('account_id obrigatório');
+                return;
+            }
+            if (!$this->userOwnsAccount($accountId)) {
+                $this->error403('Conta não encontrada ou sem permissão');
+                return;
+            }
+
+            $ok = (new \App\Services\AccountUnlockPlanService($accountId))->markResolved($accountId, $mlbId);
+            echo json_encode(['success' => $ok, 'mlb_id' => strtoupper($mlbId)], JSON_UNESCAPED_UNICODE);
+        } catch (\Throwable $e) {
+            $this->error500($e->getMessage());
+        }
+    }
 }

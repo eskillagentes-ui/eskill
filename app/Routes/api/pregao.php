@@ -17,6 +17,16 @@ $router->get('api/pregao/ticket', PregaoController::class, 'ticket');
 $router->post('api/pregao/qa/run', PregaoController::class, 'qaRun');
 $router->get('qa/live/{runId}', PregaoController::class, 'qaLive');
 $router->get('qa/frame/{runId}', PregaoController::class, 'qaFrame');
+$router->get('api/pregao/watchlist', PregaoController::class, 'watchlistList');
+$router->post('api/pregao/watchlist', PregaoController::class, 'watchlistAdd');
+$router->post('api/pregao/watchlist/seed', PregaoController::class, 'watchlistSeed');
+$router->delete('api/pregao/watchlist/{mlbId}', PregaoController::class, 'watchlistRemove');
+$router->post('api/pregao/watchlist/collect', PregaoController::class, 'watchlistCollect');
 
 use App\Controllers\SentinelaController;
 $router->get('api/sentinela/snapshot', SentinelaController::class, 'snapshot');
+
+use App\Controllers\CogsController;
+$router->get('api/cogs/audit', CogsController::class, 'audit');
+$router->put('api/cogs/{mlbId}', CogsController::class, 'upsert');
+$router->post('api/cogs/import', CogsController::class, 'importCsv');

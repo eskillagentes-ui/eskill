@@ -201,6 +201,8 @@
             <file>tests/Unit/Services/SalesAnalyticsServiceTest.php</file>
             <file>tests/Unit/Services/Financial/SellerReputationServiceTest.php</file>
             <file>tests/Unit/Services/Financial/OrderFinancialServiceTest.php</file>
+            <file>tests/Unit/Services/Financial/CogsServiceTest.php</file>
+            <file>tests/Unit/Services/AccountUnlockPlanServiceTest.php</file>
             <!-- FIX-010: Unprotected ML API calls -->
             <file>tests/Unit/Services/Financial/ClaimDisputeServiceTest.php</file>
             <file>tests/Unit/Services/Financial/PaymentRefundServiceTest.php</file>

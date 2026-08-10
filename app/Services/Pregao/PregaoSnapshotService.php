@@ -145,6 +145,7 @@ final class PregaoSnapshotService
                     : null
             ),
             'semaforo' => $semaforo,
+            'governance' => $this->loadGovernanceStatus($accountId),
             'baselines' => $baselines,
             'sentinela' => $this->loadSentinelaSummary($accountId),
             'seed_enabled' => (bool) ($this->config['seed_enabled'] ?? false),
@@ -152,6 +153,55 @@ final class PregaoSnapshotService
             'read_only' => true,
             'v' => \App\Services\Pregao\PregaoEmitService::VERSION,
         ];
+    }
+
+    /**
+     * Status de governança/catálogo (Raio X) — dimensão distinta do semáforo operacional.
+     *
+     * @return array{available:bool, account_status:?string, score_overall:?int, observed_at:?string, label:string}
+     */
+    private function loadGovernanceStatus(int $accountId): array
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT account_status, score_overall, completed_at, created_at
+                 FROM account_xray_reports
+                 WHERE account_id = ? AND status = \'completed\'
+                 ORDER BY COALESCE(completed_at, created_at) DESC, id DESC
+                 LIMIT 1'
+            );
+            $stmt->execute([$accountId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$row) {
+                return [
+                    'available' => false,
+                    'account_status' => null,
+                    'score_overall' => null,
+                    'observed_at' => null,
+                    'label' => 'Catálogo/Governança: n/d',
+                ];
+            }
+            $status = strtoupper(trim((string) ($row['account_status'] ?? 'UNKNOWN')));
+            if ($status === '') {
+                $status = 'UNKNOWN';
+            }
+            $observed = $row['completed_at'] ?? $row['created_at'] ?? null;
+            return [
+                'available' => true,
+                'account_status' => $status,
+                'score_overall' => isset($row['score_overall']) ? (int) $row['score_overall'] : null,
+                'observed_at' => $observed ? (string) $observed : null,
+                'label' => 'Catálogo/Governança: ' . $status,
+            ];
+        } catch (Throwable $e) {
+            return [
+                'available' => false,
+                'account_status' => null,
+                'score_overall' => null,
+                'observed_at' => null,
+                'label' => 'Catálogo/Governança: n/d',
+            ];
+        }
     }
 
     /**

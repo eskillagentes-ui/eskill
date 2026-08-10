@@ -270,6 +270,10 @@ $unansweredQuestions = $_SESSION['unanswered_questions'] ?? 0;
                 <i class="bi bi-graph-up-arrow"></i>
                 <span>Relatórios</span>
             </a>
+            <a href="/dashboard/cogs" class="nav-item <?= isActive('/cogs') ? 'active' : '' ?>">
+                <i class="bi bi-tags"></i>
+                <span>CMV (custos)</span>
+            </a>
 
             <a href="/dashboard/financials/conciliation" class="nav-item <?= isActive('/conciliation') && (($_GET['view'] ?? '') !== 'discrepancies') ? 'active' : '' ?>">
                 <i class="bi bi-bank"></i>

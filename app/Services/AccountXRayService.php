@@ -159,6 +159,13 @@ class AccountXRayService
             $this->log('info', 'RAIO X F9: Gerando plano de recuperação');
             $recoveryPlan = $this->buildRecoveryPlan($govResult, $seoAudit, $competitiveAnalysis, $financialHealth, $overallScore);
 
+            // ── FASE 9b: Plano de Destravamento (executável pelo usuário no painel ML)
+            $this->log('info', 'RAIO X F9b: Plano de destravamento');
+            $unlockPlanService = new \App\Services\AccountUnlockPlanService($this->accountId);
+            $unlockPlanService->reconcileResolvedFromGovernance($govResult);
+            $unlockPlan = $unlockPlanService->buildAndPersist($govResult, $reportId);
+            $recoveryPlan['unlock_plan'] = $unlockPlan;
+
             $elapsedMs = round((hrtime(true) - $startTime) / 1_000_000, 2);
 
             $report = [

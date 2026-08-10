@@ -18,9 +18,13 @@ return [
     'name' => 'Mercado Livre Manager',
     'version' => '1.0.0',
     'url' => $appUrl ?: 'http://localhost/eskill/public',
-    'env' => $_ENV['APP_ENV'] ?? 'production',
-    'debug' => filter_var($_ENV['APP_DEBUG'] ?? false, FILTER_VALIDATE_BOOLEAN),
-    'key' => $_ENV['APP_KEY'] ?? '',
+    // Com variables_order=GPCS (sem E), phpdotenv popula $_SERVER/putenv mas NÃO $_ENV.
+    // Fallback obrigatório para CLI/workers (Onda 3.5): sem isso EncryptionService quebra e o
+    // MercadoLivreClient marca a conta como account_disconnected (decrypt_failed).
+    'key' => (string) ($_ENV['APP_KEY'] ?? $_SERVER['APP_KEY'] ?? getenv('APP_KEY') ?: ''),
+
+    'env' => $_ENV['APP_ENV'] ?? $_SERVER['APP_ENV'] ?? getenv('APP_ENV') ?: 'production',
+    'debug' => filter_var($_ENV['APP_DEBUG'] ?? $_SERVER['APP_DEBUG'] ?? getenv('APP_DEBUG') ?: false, FILTER_VALIDATE_BOOLEAN),
 
     'mercadolivre' => [
         'app_id' => $_ENV['ML_APP_ID'] ?? getenv('ML_APP_ID') ?? $_ENV['ML_CLIENT_ID'] ?? getenv('ML_CLIENT_ID') ?? '',

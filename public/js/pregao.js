@@ -380,22 +380,36 @@
         ul.innerHTML = html;
     }
 
-    function applySemaforo(s) {
+    function applySemaforo(s, governance) {
+        // Duas dimensões explícitas (Onda 3.5 / T5):
+        // - Operação = Sentinela/semáforo de limites operacionais (claims, atrasos, cancelamentos)
+        // - Catálogo/Governança = account_status do Raio X (TRAVADA, ESTAVEL, etc.)
+        // Ambos podem estar "certos" e diferir — nunca colapsar em um único VERDE/VERMELHO.
+        const opLabels = {
+            verde: 'VERDE',
+            amarelo: 'AMARELO',
+            vermelho: 'VERMELHO'
+        };
+        const el = $('sema');
         if (!s || s.status == null) {
-            const el = $('sema');
             if (el) el.className = 'sema';
-            if ($('semaText')) $('semaText').textContent = 'SAÚDE DA CONTA · n/d';
+            const gov = governance && governance.account_status ? String(governance.account_status) : 'n/d';
+            if ($('semaText')) {
+                $('semaText').textContent = 'Operação: n/d · Catálogo/Governança: ' + gov;
+                $('semaText').title = 'Operação = limites Sentinela. Catálogo/Governança = status do Raio X (toxicidade/catálogo).';
+            }
             return;
         }
         const status = s.status || 'verde';
-        const el = $('sema');
-        el.className = 'sema ' + status;
-        const labels = {
-            verde: 'SAÚDE DA CONTA VERDE · TODOS OS LIMITES <50%',
-            amarelo: 'SAÚDE DA CONTA AMARELA · ATENÇÃO 50–80%',
-            vermelho: 'SAÚDE DA CONTA VERMELHA · ACIMA DE 80% DO LIMITE'
-        };
-        $('semaText').textContent = labels[status] || 'SAÚDE DA CONTA · ' + status.toUpperCase();
+        if (el) el.className = 'sema ' + status;
+        const op = opLabels[status] || String(status).toUpperCase();
+        const gov = (governance && governance.available && governance.account_status)
+            ? String(governance.account_status)
+            : 'n/d';
+        if ($('semaText')) {
+            $('semaText').textContent = 'Operação: ' + op + ' · Catálogo/Governança: ' + gov;
+            $('semaText').title = 'Operação mede riscos operacionais (Sentinela). Catálogo/Governança mede saúde do catálogo (Raio X). Podem divergir sem contradição.';
+        }
     }
 
     function renderTape(ranks, rankTrackerEnabled) {
@@ -970,7 +984,7 @@
                 if (isValidAgentEvent(ev)) applyAgentStatus(ev.payload, ev.ts);
                 break;
             case 'account.semaforo':
-                applySemaforo(ev.payload || {});
+                applySemaforo(ev.payload || {}, window.__pregaoLastGovernance || null);
                 break;
             default:
                 break;
@@ -1165,8 +1179,9 @@
 
         applyMetrics(d.metrics);
         window.__pregaoLastSentinela = d.sentinela || null;
+        window.__pregaoLastGovernance = d.governance || null;
         applySentinelaCard(window.__pregaoLastSentinela);
-        applySemaforo(d.semaforo);
+        applySemaforo(d.semaforo, window.__pregaoLastGovernance);
         renderTape(d.ranks != null ? d.ranks : d.keywords, d.rank_tracker_enabled);
         applyQa(d.qa);
         applyAgents(d.agents);

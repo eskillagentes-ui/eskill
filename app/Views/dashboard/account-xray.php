@@ -182,6 +182,11 @@ declare(strict_types=1);
               <i class="bi bi-calendar-check me-1"></i> Plano de Ação
             </a>
           </li>
+          <li class="nav-item">
+            <a class="nav-link" data-bs-toggle="tab" href="#tab-unlock">
+              <i class="bi bi-unlock me-1"></i> Plano de Destravamento
+            </a>
+          </li>
         </ul>
       </div>
       <div class="card-body tab-content pt-3" id="xray-tab-content">
@@ -271,6 +276,23 @@ declare(strict_types=1);
         <div class="tab-pane fade" id="tab-plan">
           <div id="plan-content">
             <p class="text-muted text-center py-4">Execute o Raio X para ver o plano</p>
+          </div>
+        </div>
+
+        <!-- TAB: PLANO DE DESTRAVAMENTO -->
+        <div class="tab-pane fade" id="tab-unlock">
+          <div class="d-flex justify-content-between align-items-center mb-3">
+            <div>
+              <div class="fw-semibold">Ações manuais no painel do Mercado Livre</div>
+              <div class="text-muted small">O sistema NÃO escreve no ML — marque como resolvido após executar no painel.</div>
+            </div>
+            <button class="btn btn-sm btn-outline-primary" id="btn-rebuild-unlock" type="button">
+              <i class="bi bi-arrow-clockwise me-1"></i> Reconstruir plano
+            </button>
+          </div>
+          <div id="unlock-summary" class="mb-3"></div>
+          <div id="unlock-plan-content">
+            <p class="text-muted text-center py-4">Execute o Raio X ou reconstrua o plano a partir do último scan</p>
           </div>
         </div>
 
@@ -954,6 +976,7 @@ declare(strict_types=1);
       renderLongTail(report);
       renderFinancial(report);
       renderPlan(report);
+      renderUnlockPlan(report);
     }
 
     function renderScoreCard(r) {
@@ -1251,6 +1274,106 @@ declare(strict_types=1);
       </div>
     `;
     }
+
+    function renderUnlockPlan(r) {
+      const unlock = (r.recovery_plan && r.recovery_plan.unlock_plan)
+        || r.unlock_plan
+        || null;
+      const summaryEl = document.getElementById('unlock-summary');
+      const container = document.getElementById('unlock-plan-content');
+      if (!container) return;
+
+      if (!unlock || !Array.isArray(unlock.items) || !unlock.items.length) {
+        if (summaryEl) summaryEl.innerHTML = '';
+        container.innerHTML = '<p class="text-muted text-center py-4">Nenhum item problemático no plano. Clique em Reconstruir plano se já houver Raio X.</p>';
+        return;
+      }
+
+      const s = unlock.summary || {};
+      if (summaryEl) {
+        summaryEl.innerHTML = `
+          <div class="d-flex flex-wrap gap-2">
+            <span class="badge bg-secondary">Total ${s.total ?? unlock.items.length}</span>
+            <span class="badge bg-warning text-dark">Pendentes ${s.pending ?? '—'}</span>
+            <span class="badge bg-success">Resolvidos ${s.resolved ?? '—'}</span>
+            <span class="badge bg-danger">Críticos ${s.critical ?? '—'}</span>
+            <span class="badge bg-dark">Status conta: ${escHtml(unlock.account_status || r.account_status || '—')}</span>
+          </div>`;
+      }
+
+      container.innerHTML = `
+        <div class="table-responsive">
+          <table class="table table-sm align-middle">
+            <thead class="bg-light">
+              <tr>
+                <th>Anúncio</th>
+                <th>Classe</th>
+                <th>Motivo</th>
+                <th>Ação recomendada (manual no ML)</th>
+                <th>Impacto</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              ${unlock.items.map(item => {
+                const mlb = escHtml(item.mlb_id || '');
+                const title = escHtml(item.title || '');
+                const cls = escHtml(item.classification || '');
+                const reason = escHtml(item.reason || '');
+                const action = escHtml(item.recommended_action || '');
+                const impact = item.impact_score ?? '—';
+                const status = item.status || 'pending';
+                const editUrl = (item.moderation_detail && item.moderation_detail.seller_edit_url)
+                  || (item.catalog_blocker && item.catalog_blocker.seller_edit_url)
+                  || (`https://www.mercadolivre.com.br/publicacoes/${item.mlb_id}/modificar`);
+                const rowCls = status === 'resolved' ? 'table-success' : '';
+                return `<tr class="${rowCls}">
+                  <td><code>${mlb}</code><div class="small text-muted text-truncate" style="max-width:180px">${title}</div></td>
+                  <td><span class="badge bg-secondary">${cls}</span></td>
+                  <td class="small">${reason}</td>
+                  <td class="small">${action}
+                    <div><a href="${escHtml(editUrl)}" target="_blank" rel="noopener">Abrir no ML</a></div>
+                  </td>
+                  <td class="text-end fw-semibold">${impact}</td>
+                  <td>
+                    ${status === 'resolved'
+                      ? '<span class="badge bg-success">resolvido</span>'
+                      : `<button class="btn btn-sm btn-outline-success" data-resolve-unlock="${mlb}">Marcar resolvido</button>`}
+                  </td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    }
+
+    document.getElementById('btn-rebuild-unlock')?.addEventListener('click', async () => {
+      if (!currentAccountId) { alert('Selecione uma conta'); return; }
+      const res = await fetch(`/api/xray/unlock-plan?account_id=${currentAccountId}&rebuild=1`);
+      const data = await res.json();
+      if (data.success && data.data) {
+        renderUnlockPlan({ recovery_plan: { unlock_plan: data.data }, account_status: data.data.account_status });
+      } else {
+        alert(data.error || 'Falha ao reconstruir');
+      }
+    });
+
+    document.getElementById('unlock-plan-content')?.addEventListener('click', async (ev) => {
+      const btn = ev.target.closest('[data-resolve-unlock]');
+      if (!btn || !currentAccountId) return;
+      const mlb = btn.getAttribute('data-resolve-unlock');
+      const res = await fetch(`/api/xray/unlock-plan/${encodeURIComponent(mlb)}/resolve?account_id=${currentAccountId}`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ account_id: currentAccountId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        const reload = await fetch(`/api/xray/unlock-plan?account_id=${currentAccountId}`);
+        const body = await reload.json();
+        if (body.success) renderUnlockPlan({ recovery_plan: { unlock_plan: body.data } });
+      }
+    });
 
     // ── histórico ─────────────────────────────────────────────────
     async function loadHistory() {

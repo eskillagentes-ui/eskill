@@ -238,6 +238,15 @@
             "passes": true,
             "priority": "P2",
             "notes": "2026-08-10, branch fix/onda2-1-pendencias (a partir de fix/onda3-1-agentes). Backup MySQL prévio: storage/backups/pre-onda2.1-20260810_015754.sql (5.49GB). A2 (updateBulkSelection duplicado) e A3 (heading duplicado em Promoções) JÁ estavam corrigidos pelos commits d5986a0f e 8f569a4c da Onda 2, que já faziam parte da branch de origem — verificado ao vivo via sessão admin real (curl): items-dashboard.js com definição única, promotions.php renderizando 1x 'Central de Promoções' + 1x 'Promoções Disponíveis' (textos distintos, nunca duplicados entre si). Nenhuma mudança de código necessária para A2/A3. A1 (Perguntas): a causa raiz original (fonte de dados divergente entre contadores e tabela) já tinha sido corrigida pelo commit 910a7545 da Onda 2 (getQuestionsLocal unificado) — confirmado ao vivo (stats total:45/answered:45/pending:0, tabela retornando as 45 perguntas reais). A causa raiz ATUAL e diferente: filtro padrão da tela (#questionFilter=unanswered) faz a chamada inicial retornar questions:[] para contas sem pendências, enquanto os contadores do topo somam o total geral — parecia bug de inconsistência mas era resultado esperado do filtro. Corrigido (commit d9deadc9): mensagem de estado vazio agora varia por filtro selecionado, deixando claro que as perguntas existem e já foram respondidas. Suite Unit completa (4429/0 falhas) mantida. Parte B (merge das branches em master + deploy) NÃO executada nesta sessão — aguardando autorização explícita do usuário após verificação da Parte A em produção."
+        },
+        {
+            "id": "onda3-5-dados-negocio",
+            "name": "Onda 3.5: CMV + Plano de Destravamento + Watchlist + Multi-conta AWA + Narrativa saúde",
+            "description": "Onda de dados/negócio: cadastro CMV, plano executável TRAVADA→VERDE, watchlist de concorrentes, preparação OAuth 2ª conta, unificação narrativa Operação vs Governança no Pregão.",
+            "category": "negocio",
+            "passes": true,
+            "priority": "P1",
+            "notes": "2026-08-10, branch feat/onda3-5-dados. Backup pre-onda3.5-20260810_021625.sql. T1: audit 35 sold/90d (10 real sku_custos, 25 missing); /dashboard/cogs + CogsService/API + badge P&L. T2: AccountUnlockPlanService + aba Raio X; MLB7346643828 under_review/sub_status=forbidden/catálogo MLB75435443; 3 catalog blocks. T3: seed highlights (search API forbidden no app); 9 competitor_items; Pregão Concorrentes available. T4: docs/ops/AWA_MOTOS_CONNECT.md; fix APP_KEY GPCS→$_SERVER para CLI decrypt. T5: Operação + Catálogo/Governança explícitos (não colapsar). PHPUnit 4434/0 (+5). ML_WRITE_AUTOMATION=false."
         }
     ]
 }

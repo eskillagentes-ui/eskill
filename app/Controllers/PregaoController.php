@@ -415,4 +415,154 @@ class PregaoController extends BaseController
         }
     }
 
+    /** GET /api/pregao/watchlist */
+    public function watchlistList(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        if (!$this->requireAuthJson()) {
+            return;
+        }
+        $accountId = $this->resolveAccountIdBoundary();
+        if ($accountId === false || $accountId === null) {
+            if ($accountId === null) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'error' => 'Conta indisponível']);
+            }
+            return;
+        }
+
+        $items = (new \App\Services\Pregao\PregaoWatchlistCollector())->listActive($accountId);
+        echo json_encode([
+            'success' => true,
+            'data' => ['items' => $items, 'count' => count($items)],
+            'meta' => ['read_only' => false, 'ml_write' => false],
+        ], JSON_UNESCAPED_UNICODE);
+    }
+
+    /** POST /api/pregao/watchlist  body: {mlb_id, apelido?, keyword?} */
+    public function watchlistAdd(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        if (!$this->requireAuthJson()) {
+            return;
+        }
+        $accountId = $this->resolveAccountIdBoundary();
+        if ($accountId === false || $accountId === null) {
+            if ($accountId === null) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'error' => 'Conta indisponível']);
+            }
+            return;
+        }
+
+        $body = json_decode((string) file_get_contents('php://input'), true);
+        if (!is_array($body) || empty($body['mlb_id'])) {
+            http_response_code(400);
+            echo json_encode(['success' => false, 'error' => 'mlb_id obrigatório']);
+            return;
+        }
+
+        try {
+            $id = (new \App\Services\Pregao\PregaoWatchlistCollector())->upsert($accountId, [
+                'mlb_id' => (string) $body['mlb_id'],
+                'apelido' => (string) ($body['apelido'] ?? $body['mlb_id']),
+                'keyword_alvo' => isset($body['keyword']) ? (string) $body['keyword'] : null,
+            ]);
+            echo json_encode(['success' => true, 'data' => ['id' => $id]], JSON_UNESCAPED_UNICODE);
+        } catch (\InvalidArgumentException $e) {
+            http_response_code(422);
+            echo json_encode(['success' => false, 'error' => $e->getMessage()]);
+        } catch (Throwable $e) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => 'Falha ao adicionar']);
+        }
+    }
+
+    /**
+     * POST /api/pregao/watchlist/seed
+     * body: {keywords?: string[], per_keyword?: int, insert?: bool}
+     * Default keywords: categorias FACILYTY (bagageiro, guidão, cavalete).
+     */
+    public function watchlistSeed(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        if (!$this->requireAuthJson()) {
+            return;
+        }
+        $accountId = $this->resolveAccountIdBoundary();
+        if ($accountId === false || $accountId === null) {
+            if ($accountId === null) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'error' => 'Conta indisponível']);
+            }
+            return;
+        }
+
+        $body = json_decode((string) file_get_contents('php://input'), true);
+        $body = is_array($body) ? $body : [];
+        $keywords = $body['keywords'] ?? [
+            'bagageiro cg 160',
+            'guidão cg 160',
+            'cavalete lateral biz',
+        ];
+        if (!is_array($keywords)) {
+            $keywords = [];
+        }
+        $per = (int) ($body['per_keyword'] ?? 5);
+        $insert = array_key_exists('insert', $body) ? (bool) $body['insert'] : true;
+
+        $result = (new \App\Services\Pregao\PregaoWatchlistCollector())
+            ->seedFromKeywords($accountId, $keywords, $per, $insert);
+
+        echo json_encode([
+            'success' => true,
+            'data' => $result,
+            'meta' => ['ml_write' => false, 'read_only_api' => true],
+        ], JSON_UNESCAPED_UNICODE);
+    }
+
+    /** DELETE /api/pregao/watchlist/{mlbId} */
+    public function watchlistRemove(string $mlbId): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        if (!$this->requireAuthJson()) {
+            return;
+        }
+        $accountId = $this->resolveAccountIdBoundary();
+        if ($accountId === false || $accountId === null) {
+            if ($accountId === null) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'error' => 'Conta indisponível']);
+            }
+            return;
+        }
+
+        $ok = (new \App\Services\Pregao\PregaoWatchlistCollector())->deactivate($accountId, $mlbId);
+        echo json_encode(['success' => $ok, 'data' => ['mlb_id' => strtoupper($mlbId)]]);
+    }
+
+    /** POST /api/pregao/watchlist/collect — dispara coleta local (API read-only ML) */
+    public function watchlistCollect(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        if (!$this->requireAuthJson()) {
+            return;
+        }
+        $accountId = $this->resolveAccountIdBoundary();
+        if ($accountId === false || $accountId === null) {
+            if ($accountId === null) {
+                http_response_code(403);
+                echo json_encode(['success' => false, 'error' => 'Conta indisponível']);
+            }
+            return;
+        }
+
+        $result = (new \App\Services\Pregao\PregaoWatchlistCollector())->collect($accountId);
+        echo json_encode([
+            'success' => true,
+            'data' => $result,
+            'meta' => ['ml_write' => false],
+        ], JSON_UNESCAPED_UNICODE);
+    }
+
 }

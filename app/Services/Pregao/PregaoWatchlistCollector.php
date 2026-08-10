@@ -251,6 +251,241 @@ final class PregaoWatchlistCollector
     }
 
     /**
+     * Sugere e opcionalmente insere top anúncios concorrentes.
+     *
+     * Estratégia (Onda 3.5): a API /sites/MLB/search está forbidden para o app ML atual.
+     * Usamos highlights por categoria + /products/{id}/items (read-only) como fonte.
+     * Keywords são mapeadas para category_id dos anúncios da própria conta quando possível.
+     *
+     * @param list<string> $keywords
+     * @return array{suggested: list<array<string, mixed>>, inserted: list<string>, errors: list<string>}
+     */
+    public function seedFromKeywords(int $accountId, array $keywords, int $perKeyword = 5, bool $insert = true): array
+    {
+        $perKeyword = max(1, min(10, $perKeyword));
+        $client = new MercadoLivreClient($accountId);
+        $suggested = [];
+        $inserted = [];
+        $errors = [];
+        $seen = [];
+        $ownSellerId = $this->resolveOwnSellerId($accountId);
+
+        $categoryMap = $this->mapKeywordsToCategories($accountId, $keywords);
+        if ($categoryMap === []) {
+            // Fallback: top categorias da conta
+            $categoryMap = $this->topAccountCategories($accountId, 3);
+        }
+
+        foreach ($categoryMap as $label => $categoryId) {
+            try {
+                $highlights = $client->get('/highlights/MLB/category/' . $categoryId, [], 120, false);
+            } catch (Throwable $e) {
+                $errors[] = "highlights {$categoryId}: " . $e->getMessage();
+                continue;
+            }
+            if (isset($highlights['error'])) {
+                $errors[] = "highlights {$categoryId}: " . (string) ($highlights['error']);
+                continue;
+            }
+
+            $content = is_array($highlights['content'] ?? null) ? $highlights['content'] : [];
+            $added = 0;
+            foreach ($content as $row) {
+                if ($added >= $perKeyword) {
+                    break;
+                }
+                if (!is_array($row)) {
+                    continue;
+                }
+                $type = strtoupper((string) ($row['type'] ?? ''));
+                $id = (string) ($row['id'] ?? '');
+                $candidates = [];
+
+                if ($type === 'ITEM' && preg_match('/^MLB\d+$/', $id)) {
+                    $candidates[] = [
+                        'mlb_id' => $id,
+                        'seller_id' => '0',
+                        'price' => null,
+                        'title' => $id,
+                    ];
+                } elseif ($type === 'PRODUCT' && $id !== '') {
+                    try {
+                        $prodItems = $client->get('/products/' . $id . '/items', [], 60, false);
+                        $results = is_array($prodItems['results'] ?? null) ? $prodItems['results'] : [];
+                        foreach ($results as $pi) {
+                            if (!is_array($pi)) {
+                                continue;
+                            }
+                            $itemId = strtoupper((string) ($pi['item_id'] ?? ''));
+                            if (!preg_match('/^MLB\d+$/', $itemId)) {
+                                continue;
+                            }
+                            $candidates[] = [
+                                'mlb_id' => $itemId,
+                                'seller_id' => (string) ($pi['seller_id'] ?? '0'),
+                                'price' => isset($pi['price']) ? (float) $pi['price'] : null,
+                                'title' => $itemId . ' (catálogo ' . $id . ')',
+                            ];
+                        }
+                    } catch (Throwable $e) {
+                        $errors[] = "product {$id}: " . $e->getMessage();
+                    }
+                }
+
+                foreach ($candidates as $entry) {
+                    if ($added >= $perKeyword) {
+                        break;
+                    }
+                    $mlbId = $entry['mlb_id'];
+                    if (isset($seen[$mlbId])) {
+                        continue;
+                    }
+                    if ($ownSellerId !== null && (string) $entry['seller_id'] === (string) $ownSellerId) {
+                        continue;
+                    }
+                    $seen[$mlbId] = true;
+                    $payload = [
+                        'mlb_id' => $mlbId,
+                        'title' => $entry['title'],
+                        'price' => $entry['price'],
+                        'sold_quantity' => null,
+                        'seller_id' => $entry['seller_id'],
+                        'keyword_alvo' => (string) $label,
+                        'permalink' => null,
+                    ];
+                    $suggested[] = $payload;
+                    $added++;
+
+                    if ($insert) {
+                        try {
+                            $this->upsert($accountId, [
+                                'mlb_id' => $mlbId,
+                                'apelido' => mb_substr((string) $entry['title'], 0, 80),
+                                'keyword_alvo' => (string) $label,
+                                'seller_id' => $entry['seller_id'],
+                            ]);
+                            $this->db->prepare(
+                                'UPDATE competitor_items
+                                 SET price = COALESCE(?, price),
+                                     title = COALESCE(?, title),
+                                     last_checked_at = NOW(),
+                                     updated_at = NOW()
+                                 WHERE account_id = ? AND ml_item_id = ?'
+                            )->execute([
+                                $entry['price'],
+                                $entry['title'],
+                                $accountId,
+                                $mlbId,
+                            ]);
+                            $inserted[] = $mlbId;
+                        } catch (Throwable $e) {
+                            $errors[] = "upsert {$mlbId}: " . $e->getMessage();
+                        }
+                    }
+                }
+            }
+        }
+
+        if ($suggested === [] && $errors === []) {
+            $errors[] = 'Nenhum concorrente encontrado via highlights (search API forbidden neste app ML)';
+        }
+
+        return [
+            'suggested' => $suggested,
+            'inserted' => $inserted,
+            'errors' => $errors,
+        ];
+    }
+
+    /**
+     * @param list<string> $keywords
+     * @return array<string, string> label => category_id
+     */
+    private function mapKeywordsToCategories(int $accountId, array $keywords): array
+    {
+        $map = [];
+        foreach ($keywords as $keyword) {
+            $keyword = trim((string) $keyword);
+            if ($keyword === '') {
+                continue;
+            }
+            $like = '%' . str_replace(' ', '%', mb_strtolower($keyword)) . '%';
+            try {
+                $stmt = $this->db->prepare(
+                    'SELECT category_id FROM ml_items
+                     WHERE account_id = ? AND category_id IS NOT NULL AND category_id != \'\'
+                       AND LOWER(title) LIKE ?
+                     GROUP BY category_id
+                     ORDER BY COUNT(*) DESC
+                     LIMIT 1'
+                );
+                $stmt->execute([$accountId, $like]);
+                $cat = $stmt->fetchColumn();
+                if (is_string($cat) && $cat !== '') {
+                    $map[$keyword] = $cat;
+                }
+            } catch (Throwable) {
+                // ignore
+            }
+        }
+        return $map;
+    }
+
+    /**
+     * @return array<string, string> label => category_id
+     */
+    private function topAccountCategories(int $accountId, int $limit = 3): array
+    {
+        $stmt = $this->db->prepare(
+            'SELECT category_id, COUNT(*) AS c FROM ml_items
+             WHERE account_id = ? AND category_id IS NOT NULL AND category_id != \'\'
+             GROUP BY category_id ORDER BY c DESC LIMIT ?'
+        );
+        $stmt->bindValue(1, $accountId, PDO::PARAM_INT);
+        $stmt->bindValue(2, $limit, PDO::PARAM_INT);
+        $stmt->execute();
+        $map = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+            $cid = (string) $row['category_id'];
+            $map['categoria:' . $cid] = $cid;
+        }
+        return $map;
+    }
+
+    public function deactivate(int $accountId, string $mlbId): bool
+    {
+        $mlbId = strtoupper(trim($mlbId));
+        $stmt = $this->db->prepare(
+            'UPDATE competitor_items SET active = 0, updated_at = NOW()
+             WHERE account_id = ? AND ml_item_id = ?'
+        );
+        $stmt->execute([$accountId, $mlbId]);
+        return $stmt->rowCount() > 0;
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function listActive(int $accountId): array
+    {
+        return $this->loadActive($accountId);
+    }
+
+    private function resolveOwnSellerId(int $accountId): ?string
+    {
+        try {
+            $stmt = $this->db->prepare('SELECT seller_id FROM ml_accounts WHERE id = ? LIMIT 1');
+            $stmt->execute([$accountId]);
+            $sellerId = $stmt->fetchColumn();
+            return $sellerId !== false && $sellerId !== null && (string) $sellerId !== ''
+                ? (string) $sellerId
+                : null;
+        } catch (Throwable) {
+            return null;
+        }
+    }
+
+    /**
      * @param array<string, mixed> $meta
      */
     private function emitAlert(int $accountId, string $level, string $icon, string $msg, array $meta): void
