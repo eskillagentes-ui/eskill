@@ -1,3 +1,104 @@
+## 2026-08-09/10 (16ª parte) — Onda 3.1: FINANCEIRO/ORQUESTRADOR no cron real + Frete + Raio X + Diagnóstico + QA Playwright
+
+### Contexto
+Verificação independente em produção (sessão admin real) confirmou que FINANCEIRO/
+ORQUESTRADOR continuavam FALHOU mesmo após a Onda 3, além de 4 bugs novos: Frete
+("Erro ao carregar pedidos"), Raio X (account_status não persistido + card
+desatualizado), Diagnóstico ("score atual: undefined") e QA Playwright ("erros JS
+e HTTP"). Branch `fix/onda3-1-agentes`, a partir do estado deployado (não master).
+Baseline PHPUnit 4429/0 falhas mantida do início ao fim (rodada após cada bloco).
+
+### F1/F2 — FINANCEIRO/ORQUESTRADOR: causa raiz era um worker com bytecode velho
+O fix de schema da Onda 3 (`5157525f`) estava correto no arquivo, mas o processo
+`agent-runtime-monitor.service` (PID 3218) era de longa duração e nunca recarregou
+o código — rodava a versão pré-fix do allowlist indefinidamente. `SIGTERM` no PID
+forçou o systemd a reiniciar o worker com o código atual; ciclo seguinte confirmou
+FINANCEIRO e ORQUESTRADOR em `success` no `pregao_events`/journalctl.
+Adicionado, para o caso de recorrência: `AgentRuntimeFactory::logReadFailure()`
+agora inclui `exception_class/message/file:line/trace` resumido;
+`logFinanceiroValidationFailure()` loga exatamente qual sub-check de schema
+rejeitou o snapshot fail-closed quando NENHUMA exceção é lançada (schema drift
+silencioso — antes "financeiro unavailable" não tinha causa raiz rastreável);
+`AgentRuntimeWorker::logAggregateFailure()` lista, quando o ORQUESTRADOR falha,
+quais sub-agentes falharam e com que `reason()` (antes só "agent failed" genérico).
+
+### F3 — /dashboard/shipping "Erro ao carregar pedidos" (commit ba0992cb)
+Causa raiz: `OrderService::listOrders()` mandava o filtro `status` da UI direto
+para `order.status` na busca da API do ML. Status de logística (`ready_to_ship`,
+`shipped`, `delivered`, `handling`, `not_delivered`) não são aceitos nesse
+parâmetro — API responde HTTP 400 "Invalid filters", traduzido em "Erro ao
+carregar pedidos" pela tela. Adiciona `ML_ORDER_STATUSES`/`ML_SHIPPING_STATUSES` e
+roteia cada filtro para `order.status` ou `shipping.status` conforme o tipo; expõe
+`shipping_status` no resumo do pedido; ajusta fallback local (cache) e frontend
+(com defensivos para data/status ausentes).
+
+### F4 — Raio X: account_status não persistia + card desatualizado (commit d5f828aa)
+Causa raiz 1: `AccountXRayService` lia `$govResult['classification']['account_status']`,
+mas `AccountGovernanceService::runFullDiagnostic()` retorna `account_status` na
+RAIZ do array — caía sempre em UNKNOWN/NULL mesmo com o diagnóstico resolvendo o
+status real. Causa raiz 2: query do card/histórico ordenava só por `created_at
+DESC`, sujeita a empate — adicionado `id DESC` como desempate em
+`AccountXRayService::listReports` e no subquery de `AccountXRayController`.
+Verificado com scan real: account_status persistido, card mostra o scan mais novo.
+
+### F5 — Diagnóstico "score atual: undefined" (commit 7d2bc3be)
+`AccountHealthService::generateWeeklyPlan()` retorna `focus_pillar.score`, JS lia
+`focus_pillar.current_score` (campo inexistente). Corrigido mapeamento +
+fallback numérico defensivo em `estimated_gain`.
+
+### F6 — QA Playwright "erros JS e HTTP" (commit 2a7759a1) — causa raiz real, não "by design"
+Execução manual pelo MESMO caminho do cron (mesmo `bin/pregao-qa-worker.php`,
+mesmo usuário `eskill`, mesmo ambiente do `pregao-qa-worker.timer`) reproduziu
+2 bugs reais:
+1. `bin/pregao-qa-browser.mjs`: allowlist de rede read-only nunca foi atualizada
+   quando FontAwesome (`@fortawesome/fontawesome-free@6.5.1`, usado em 12 views)
+   foi adicionado a `layouts/modern/app.php` — CSS classificado como "egress
+   externo inesperado", bloqueando a etapa `dashboard` inteira.
+2. `app/Security/PregaoQaReadOnlyGuard`: allowlist tinha `/api/dashboard/notifications`
+   mas o sino de notificações real (`public/js/api-client.js`) chama
+   `/api/notifications?limit=5` — rota ausente, respondendo 403 "Sessão QA
+   somente leitura bloqueada" em toda carga do dashboard, contado como erro HTTP.
+Corrigidas as duas allowlists. Trocado o booleano `stderr_present` (sem conteúdo)
+por `stderr_excerpt` (até 4KB) propagado ao log de falha; o runner mjs agora
+escreve no stderr o motivo exato de cada console.error/pageerror/HTTP>=400.
+Evidência: run real enfileirado via `PregaoController::qaRun()` (mesmo endpoint
+do botão "QA Playwright: Executar"), processado pelo `pregao-qa-worker.timer`
+real (não é chamada isolada) — `run_id=2632b6a4-3836-4181-ac2d-05bc6bf655d9`
+completou com `status=passed` nas 5 etapas, confirmado lendo o estado persistido
+(Redis + `pregao_events`, `receipt_event_id=354540`).
+
+**Descoberta sobre `QaMergeGate`/`QaAgent` (decisão do dono, não implementada)**:
+investigação revelou que esse gate baseado em `QA_GATE_*` (env vars só-do-CI) e o
+`QaAgent` **nunca rodam no ciclo de cron de produção** — `AgentRuntimeExecutor::
+execute()` rejeita explicitamente qualquer modo != `'monitor'`
+(`InvalidArgumentException`), e `createRoster('monitor')` não inclui `QaAgent`.
+Além disso a grade "AGENTES 24/7" do Pregão (`dashboard/pregao.php`) só tem 5
+tiles (SENTINELA/COLETOR/FINANCEIRO/OTIMIZADOR/ORQUESTRADOR) — não existe card
+"QA" ali. Ou seja: `QaMergeGate`/`QaAgent` são código inerte em produção, sem
+nenhum efeito visível, só acionável manualmente via CLI (`bin/agent-runtime.php
+--mode=qa/all`) ou usados pelo `bin/qa-merge-gate.php` dentro do próprio job de
+CI. Perguntado ao dono se deveria (a) deixar como está, (b) ligar a um card novo
++ scheduler automático (capability nova de verdade), ou (c) remover. Decisão:
+(a) deixar como está — documentado aqui, nenhuma mudança de comportamento visível
+a ganhar, e `QaAgent.php`/`QaMergeGate.php` têm teste de pureza deliberado
+(`testImplementacaoNaoPossuiCapacidadesDeShellOuIntegracoesExternas`, barra
+menção a PDO/Database/git/deploy no código-fonte) que seria violado sem motivo.
+
+### Validação final
+Suite Unit completa rodada ao final: **4429 testes, 10488 assertions, 0 falhas**.
+`ML_WRITE_AUTOMATION` permanece `false`; nenhuma escrita no Mercado Livre em
+nenhum momento desta sessão (todas as verificações via `bin/agent-runtime.php`
+read-only, sessões QA read-only via `PregaoQaSessionService`, e leituras diretas
+de `pregao_events`/Redis). Nenhum segredo em diff/commit/log.
+
+### Pendente / não implementado nesta sessão
+- Merge de `fix/onda3-1-agentes` em `master` — decisão do usuário, não feita.
+- Persistência de evidência de CI (`QA_GATE_*`) para runtime — decisão tomada:
+  não fazer, pois não há pipeline de deploy remoto real (deploy.yml roda em
+  checkout efêmero do GitHub, desconectado deste servidor) e não há card afetado.
+
+---
+
 ## 2026-08-09 (15ª parte) — Onda 3: cruzamento do relatório de investigação com o código real
 
 ### Contexto
