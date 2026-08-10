@@ -173,7 +173,11 @@ class AccountXRayService
                     'items_analyzed'    => count($seoAudit['items'] ?? []),
                 ],
                 'score_overall'     => $overallScore,
-                'account_status'    => $govResult['classification']['account_status'] ?? 'UNKNOWN',
+                // AccountGovernanceService::runFullDiagnostic() devolve account_status no
+                // nível raiz do array (não em 'classification' — chave inexistente ali).
+                // Onda 3.1 / F4: lendo o caminho errado, este campo sempre caía no fallback
+                // 'UNKNOWN', mesmo com a governança calculando o status corretamente.
+                'account_status'    => $govResult['account_status'] ?? 'UNKNOWN',
                 'seller'            => $sellerData,
                 'governance'        => $govResult,
                 'seo_audit'         => $seoAudit,
@@ -188,7 +192,7 @@ class AccountXRayService
                 $reportId,
                 $report,
                 $overallScore,
-                $govResult['classification']['account_status'] ?? null,
+                $govResult['account_status'] ?? null,
                 $totalFetched,
                 count($seoAudit['items'] ?? []),
                 count($recoveryPlan['critical'] ?? [])
@@ -243,7 +247,7 @@ class AccountXRayService
                     critical_issues, started_at, completed_at, created_at
              FROM account_xray_reports
              WHERE account_id = :account_id
-             ORDER BY created_at DESC
+             ORDER BY created_at DESC, id DESC
              LIMIT :limit'
         );
         $stmt->bindValue('account_id', $this->accountId, PDO::PARAM_INT);
@@ -711,7 +715,7 @@ class AccountXRayService
     ): int {
         // Score de saúde da conta (0-100) via governance
         $accountHealth = 100;
-        $status = $govResult['classification']['account_status'] ?? '';
+        $status = $govResult['account_status'] ?? '';
         $accountHealth = match ($status) {
             AccountGovernanceService::STATUS_TRAVADA     => 10,
             AccountGovernanceService::STATUS_PENALIZADA  => 25,
@@ -754,7 +758,7 @@ class AccountXRayService
         $problems  = [];
         $strengths = [];
 
-        $status = $govResult['classification']['account_status'] ?? '';
+        $status = $govResult['account_status'] ?? '';
 
         // Problemas de conta
         if ($status === AccountGovernanceService::STATUS_TRAVADA) {

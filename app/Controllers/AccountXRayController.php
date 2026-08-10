@@ -80,7 +80,7 @@ class AccountXRayController
                      AND r.id = (
                          SELECT id FROM account_xray_reports
                          WHERE account_id = a.id AND status = 'completed'
-                         ORDER BY created_at DESC LIMIT 1
+                         ORDER BY created_at DESC, id DESC LIMIT 1
                      )
                  WHERE a.user_id = :user_id
                    AND a.status IN ('active', 'inactive', 'expired')
