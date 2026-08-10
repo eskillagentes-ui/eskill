@@ -46,7 +46,7 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white d-flex justify-content-between align-items-center">
         <h5 class="mb-0">Anúncios com venda — CMV</h5>
-        <button class="btn btn-sm btn-outline-secondary" onclick="loadCogsAudit()">
+        <button type="button" class="btn btn-sm btn-outline-secondary" id="cogsRefreshBtn">
             <i class="bi bi-arrow-clockwise"></i> Atualizar
         </button>
     </div>
@@ -72,22 +72,28 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
     </div>
 </div>
 
-<script>
+<script nonce="<?= CSP_NONCE ?>">
 async function loadCogsAudit() {
     const tbody = document.getElementById('cogsTable');
     tbody.innerHTML = '<tr><td colspan="7" class="text-center py-4 text-muted">Carregando…</td></tr>';
     try {
-        const { response, data } = await ApiClient.json('/api/cogs/audit?days=90');
+        const client = window.ApiClient;
+        if (!client || typeof client.json !== 'function') {
+            tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">ApiClient indisponível</td></tr>';
+            return;
+        }
+        const { response, data } = await client.json('/api/cogs/audit?days=90');
         if (!response.ok || !data?.success) {
             tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Erro ao carregar auditoria</td></tr>';
             return;
         }
-        const summary = data.data.summary || {};
+        const payload = data.data || {};
+        const summary = payload.summary || {};
         document.getElementById('cogsTotal').textContent = summary.total ?? 0;
         document.getElementById('cogsReal').textContent = summary.with_real_cogs ?? 0;
         document.getElementById('cogsMissing').textContent = summary.missing ?? 0;
 
-        const items = data.data.items || [];
+        const items = payload.items || [];
         if (!items.length) {
             tbody.innerHTML = '<tr><td colspan="7" class="text-center py-5 text-muted">Nenhum anúncio com venda no período</td></tr>';
             return;
@@ -100,34 +106,35 @@ async function loadCogsAudit() {
             const title = escapeHtml(row.title || '—');
             const mlb = escapeHtml(row.mlb_id || '');
             const receita = Number(row.receita_90d || 0).toLocaleString('pt-BR', {style:'currency', currency:'BRL'});
-            return `<tr>
+            return `<tr data-mlb="${mlb}">
                 <td class="ps-3"><code>${mlb}</code></td>
                 <td><div class="text-truncate" style="max-width:320px" title="${title}">${title}</div></td>
                 <td class="text-end">${row.vendas_90d ?? 0}</td>
                 <td class="text-end">${receita}</td>
                 <td class="text-end">
-                    <input type="number" min="0" step="0.01" class="form-control form-control-sm text-end"
-                           id="cost-${mlb}" value="${cost}" style="width:110px;margin-left:auto">
+                    <input type="number" min="0" step="0.01" class="form-control form-control-sm text-end cogs-cost-input"
+                           data-mlb="${mlb}" value="${cost}" style="width:110px;margin-left:auto">
                 </td>
                 <td>${badge} <small class="text-muted">${escapeHtml(row.fonte || 'none')}</small></td>
                 <td class="pe-3">
-                    <button class="btn btn-sm btn-primary" onclick="saveCogs('${mlb}')">Salvar</button>
+                    <button type="button" class="btn btn-sm btn-primary cogs-save-btn" data-mlb="${mlb}">Salvar</button>
                 </td>
             </tr>`;
         }).join('');
     } catch (e) {
+        console.error('loadCogsAudit', e);
         tbody.innerHTML = '<tr><td colspan="7" class="text-center text-danger py-4">Erro de rede</td></tr>';
     }
 }
 
 async function saveCogs(mlb) {
-    const input = document.getElementById('cost-' + mlb);
+    const input = document.querySelector('.cogs-cost-input[data-mlb="' + mlb + '"]');
     const unitCost = parseFloat(input?.value || '');
     if (Number.isNaN(unitCost) || unitCost < 0) {
         alert('Informe um custo válido');
         return;
     }
-    const { response, data } = await ApiClient.json('/api/cogs/' + encodeURIComponent(mlb), {
+    const { response, data } = await window.ApiClient.json('/api/cogs/' + encodeURIComponent(mlb), {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ unit_cost: unitCost })
@@ -139,11 +146,24 @@ async function saveCogs(mlb) {
     }
 }
 
+function escapeHtml(str) {
+    return String(str)
+        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
+        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+document.getElementById('cogsRefreshBtn')?.addEventListener('click', () => { loadCogsAudit(); });
+document.getElementById('cogsTable')?.addEventListener('click', (ev) => {
+    const btn = ev.target && ev.target.closest ? ev.target.closest('.cogs-save-btn') : null;
+    if (!btn) return;
+    const mlb = btn.getAttribute('data-mlb') || '';
+    if (mlb) saveCogs(mlb);
+});
 document.getElementById('cogsCsv')?.addEventListener('change', async (ev) => {
     const file = ev.target.files?.[0];
     if (!file) return;
     const text = await file.text();
-    const { response, data } = await ApiClient.json('/api/cogs/import', {
+    const { response, data } = await window.ApiClient.json('/api/cogs/import', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ csv: text })
@@ -156,12 +176,6 @@ document.getElementById('cogsCsv')?.addEventListener('change', async (ev) => {
     }
     ev.target.value = '';
 });
-
-function escapeHtml(str) {
-    return String(str)
-        .replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;')
-        .replace(/"/g,'&quot;').replace(/'/g,'&#39;');
-}
 
 document.addEventListener('DOMContentLoaded', loadCogsAudit);
 </script>

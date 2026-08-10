@@ -100,3 +100,6 @@ LOG=/home/eskill/htdocs/eskill.com.br/storage/logs
 
 # CloudWays update
 0 3 * * * sudo clp-update
+
+# Rotação semanal de dumps grandes (domingo 04:30)
+30 4 * * 0 cd /home/eskill/htdocs/eskill.com.br && bash bin/backup-rotate.sh >> storage/logs/backup-rotate.log 2>&1

@@ -1,3 +1,29 @@
+## 2026-08-10 (20ª parte) — Pós-merge hotfix (H1 CMV CSP + H2 push bloqueado + H3 backups)
+
+### H1 — CMV "Carregando…" permanente
+Causa raiz: `<script>` inline em `app/Views/dashboard/cogs.php` **sem**
+`nonce="<?= CSP_NONCE ?>"`. CSP (`script-src 'nonce-…' 'strict-dynamic'`)
+bloqueava o JS → contadores "—" e tabela travada. API `/api/cogs/audit` estava OK.
+Correção: nonce + listeners (sem onclick). Evidência browser: total=35,
+real=11, missing=24, 35 linhas/badges. Salvar MLB4435358255 unit_cost=12.34
+refletiu em `sku_custos.custo_produto=12.3400` (escrita local, zero ML).
+
+### H2 — Push origin/master
+Host key GitHub resolvido em `~/.ssh/known_hosts` (fingerprints oficiais
+RSA/ECDSA/ED25519). Porém **não há chave privada SSH** no usuário eskill
+(`Permission denied (publickey)`). `gh` sem login. PARADO — precisa de deploy
+key / SSH key autorizada no repo `jessestainx/eskill` ou remote HTTPS com
+credencial. Não inventar remote.
+
+### H3 — Rotação de backups
+Antes: 45G em storage/backups, disco 73%. Script `bin/backup-rotate.sh`
+(política: 3 .sql íntegros recentes + marcos de onda em .gz). Cron semanal
+domingo 04:30. Inventário e df no relatório.
+
+`ML_WRITE_AUTOMATION=false` intacto. Branches mergeadas NÃO deletadas.
+
+---
+
 ## 2026-08-10 (19ª parte) — MERGE ÚNICO em master (Ondas 2 → 3 → 3.1 → 2.1 → 3.5)
 
 ### Autorização

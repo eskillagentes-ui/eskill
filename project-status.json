@@ -256,6 +256,15 @@
             "passes": true,
             "priority": "P0",
             "notes": "2026-08-10 autorizado. Hashes branches: onda2=14a8c7d6 onda3=062ce886 onda3.1=3eb68761 onda2.1=d9fb7a17 onda3.5=791c7ce1. Merge FF zero conflitos. PHPUnit 4434/0. Backup pre-merge-master-20260810_030204.sql. Hotfix unlock-plan ($this->request null). deploy.sh restart workers (systemctl ou SIGTERM fallback). Branches preservadas até OK smoke independente."
+        },
+        {
+            "id": "pos-merge-hotfix-h1-h3",
+            "name": "Pós-merge hotfix: CMV CSP nonce + backup-rotate",
+            "description": "H1: script CMV sem nonce CSP bloqueava UI. H3: bin/backup-rotate.sh + cron semanal. H2 push bloqueado sem SSH key.",
+            "category": "qualidade",
+            "passes": true,
+            "priority": "P1",
+            "notes": "2026-08-10 branch fix/pos-merge-hotfix. H1: nonce CSP_NONCE em cogs.php; browser 35/11/24; sku_custos MLB4435358255=12.34. H2: known_hosts GitHub OK; falta chave privada (Permission denied publickey). H3: backups 45G→17G, disco 73%→58%; keep 3 sql + marcos gz; cron sun 04:30."
         }
     ]
 }
