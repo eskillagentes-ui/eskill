@@ -1,0 +1,28 @@
+{
+  "when": "2026-08-10T03:12:00-03:00",
+  "branch": "fix/onda4-1-rank",
+  "pregao": {
+    "posicao_organica": "DISPONÍVEL",
+    "source_after_smoke_cleanup": "trends_partial",
+    "qa_card": "APROVADO / passed",
+    "note": "smoke curl-smoke-onda41 e smoke-test-onda4-1 removidos da fita; evidência HTTP permanece em onda4-1-rank-20260810.json"
+  },
+  "write_governance": {
+    "checklist_qa": "OK · última execução 2026-08-10T01:28:10.999Z",
+    "checklist_score": "2/7",
+    "ml_write_automation": "OFF"
+  },
+  "t3_add_account": {
+    "accounts_page": "/dashboard/accounts",
+    "button": "Conectar Nova Conta",
+    "authorize_path": "/auth/authorize",
+    "redirect_host": "auth.mercadolibre.com",
+    "redirect_path": "/authorization",
+    "response_type": "code",
+    "redirect_uri": "https://eskill.com.br/auth/callback",
+    "pkce": "S256",
+    "completed_oauth": false,
+    "note": "parado na tela Seleccione el país — usuário completa login AWA"
+  },
+  "consistency": "checklist QA e card Pregão usam pregao_events (fallback durable)"
+}
