@@ -193,11 +193,17 @@ try {
     $process = null;
     $pipes = [];
     if ($processResult['exit_code'] !== 0 || $terminalResult === null) {
+        // Onda 3.1 / F6: o stderr do runner Node/Playwright é a única fonte com o motivo real
+        // (ex.: "erro de runtime observados" por HTTP 403/404 ou console.error na página, violação
+        // de política de rede por recurso externo fora da allowlist). Sem isso, só existia o booleano
+        // stderr_present, tornando toda falha indistinguível ("mensagem genérica inaceitável").
         log_error('Pregao QA browser failed', [
             'reason' => 'qa_browser_failed',
             'run_id' => $runId,
             'exit_code' => $processResult['exit_code'],
             'stderr_present' => $processResult['stderr_present'],
+            'stderr_excerpt' => $processResult['stderr_excerpt'] ?? '',
+            'terminal_result' => $terminalResult,
         ]);
         throw new RuntimeException('qa_browser_failed');
     }

@@ -20,6 +20,7 @@ final class PregaoQaReadOnlyGuard
         '/api/dashboard/recent-activity',
         '/api/dashboard/recent-documents',
         '/api/dashboard/notifications',
+        '/api/notifications',
         '/css/dashboard-modern.css',
         '/css/theme.css',
         '/css/components.css',

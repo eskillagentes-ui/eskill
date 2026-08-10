@@ -98,6 +98,7 @@ export function networkPolicyDecision(method, rawUrl, baseUrl) {
   const known = [
     ['fonts.googleapis.com', /^\/css2$/, 'text/css; charset=utf-8', EMPTY_CSS_STUB],
     ['cdn.jsdelivr.net', /^\/npm\/bootstrap-icons@1\.11\.0\/font\/bootstrap-icons\.css$/, 'text/css; charset=utf-8', EMPTY_CSS_STUB],
+    ['cdn.jsdelivr.net', /^\/npm\/@fortawesome\/fontawesome-free@6\.5\.1\/css\/all\.min\.css$/, 'text/css; charset=utf-8', EMPTY_CSS_STUB],
     ['cdn.jsdelivr.net', /^\/npm\/bootstrap@5\.3\.0\/dist\/css\/bootstrap\.min\.css$/, 'text/css; charset=utf-8', EMPTY_CSS_STUB],
     ['cdn.jsdelivr.net', /^\/npm\/chart\.js@4\.4\.7\/dist\/chart\.umd\.min\.js$/, 'application/javascript; charset=utf-8', CHART_JS_STUB],
     ['cdnjs.cloudflare.com', /^\/ajax\/libs\/Chart\.js\/4\.4\.7\/chart\.umd\.min\.js$/, 'application/javascript; charset=utf-8', CHART_JS_STUB],
@@ -402,13 +403,24 @@ export async function run(config) {
 
     const page = await context.newPage();
     page.on('console', (message) => {
-      if (message.type() === 'error') observations.javascript += 1;
+      // Onda 3.1 / F6: motivo real vai para stderr (capturado como stderr_excerpt pelo worker PHP),
+      // em vez de deixar a etapa "erros JS e HTTP" falhar com mensagem genérica.
+      if (message.type() === 'error') {
+        observations.javascript += 1;
+        process.stderr.write(`[pregao-qa] console.error: ${message.text()}\n`);
+      }
     });
     page.on('pageerror', (error) => {
-      if (!isIgnorableSandboxServiceWorkerError(error)) observations.javascript += 1;
+      if (!isIgnorableSandboxServiceWorkerError(error)) {
+        observations.javascript += 1;
+        process.stderr.write(`[pregao-qa] pageerror: ${error.message}\n`);
+      }
     });
     page.on('response', (response) => {
-      if (response.status() >= 400) observations.http += 1;
+      if (response.status() >= 400) {
+        observations.http += 1;
+        process.stderr.write(`[pregao-qa] http ${response.status()}: ${response.url()}\n`);
+      }
     });
 
     async function step(name, action) {

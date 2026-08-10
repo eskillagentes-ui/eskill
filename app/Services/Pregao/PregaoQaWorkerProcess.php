@@ -8,6 +8,9 @@ final class PregaoQaWorkerProcess
 {
     private const SELECT_MICROSECONDS = 200_000;
     private const MAX_PROTOCOL_BUFFER_BYTES = 65_536;
+    /** Limite de bytes de stderr retidos para diagnóstico (evita logs enormes; texto vem do próprio
+     *  console/rede da conta em sessão QA read-only, sem segredos). */
+    private const MAX_STDERR_EXCERPT_BYTES = 4_096;
 
     /**
      * @param resource $process
@@ -16,7 +19,7 @@ final class PregaoQaWorkerProcess
      * @param callable(string):void $onStdoutLine
      * @param callable():void $onTick
      * @param callable():bool $shutdownRequested
-     * @return array{exit_code:int,stderr_present:bool}
+     * @return array{exit_code:int,stderr_present:bool,stderr_excerpt:string}
      */
     public static function drain(
         mixed $process,
@@ -35,6 +38,7 @@ final class PregaoQaWorkerProcess
         stream_set_blocking($stderr, false);
         $stdoutBuffer = '';
         $stderrPresent = false;
+        $stderrExcerpt = '';
         $startedAt = hrtime(true);
         $lastExitCode = null;
 
@@ -82,6 +86,9 @@ final class PregaoQaWorkerProcess
                             self::emitCompleteLines($stdoutBuffer, $onStdoutLine);
                         } else {
                             $stderrPresent = true;
+                            if (strlen($stderrExcerpt) < self::MAX_STDERR_EXCERPT_BYTES) {
+                                $stderrExcerpt .= $chunk;
+                            }
                         }
                     }
                 } elseif ($running) {
@@ -116,6 +123,7 @@ final class PregaoQaWorkerProcess
         return [
             'exit_code' => $exitCode,
             'stderr_present' => $stderrPresent,
+            'stderr_excerpt' => substr($stderrExcerpt, 0, self::MAX_STDERR_EXCERPT_BYTES),
         ];
     }
 
