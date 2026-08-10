@@ -151,6 +151,12 @@ final class PregaoSnapshotService
             'sentinela' => $this->loadSentinelaSummary($accountId),
             'seed_enabled' => (bool) ($this->config['seed_enabled'] ?? false),
             'rank_tracker_enabled' => (bool) ($this->config['rank_tracker_enabled'] ?? false),
+            'rank_position_source' => is_array($meta['metrics']['posicao_media'] ?? null)
+                ? ($meta['metrics']['posicao_media']['position_source'] ?? null)
+                : null,
+            'rank_status_label' => is_array($meta['metrics']['posicao_media'] ?? null)
+                ? ($meta['metrics']['posicao_media']['label'] ?? null)
+                : null,
             'read_only' => true,
             'v' => \App\Services\Pregao\PregaoEmitService::VERSION,
         ];
@@ -437,6 +443,12 @@ final class PregaoSnapshotService
             if (!isset($meta['metrics']) || !is_array($meta['metrics'])) {
                 $meta['metrics'] = [];
             }
+            $sourceMap = [
+                'search' => 'search_auth',
+                'proxy' => 'collector_local',
+                'trends' => 'trends_partial',
+            ];
+            $posSource = (string) ($rankStatus['position_source'] ?? '');
             $meta['metrics']['posicao_media'] = [
                 'available' => (bool) ($rankStatus['available'] ?? false),
                 'reason' => $rankStatus['available'] ?? false
@@ -445,7 +457,10 @@ final class PregaoSnapshotService
                 'label' => $rankStatus['label'] ?? null,
                 'freshness' => $rankStatus['freshness'] ?? null,
                 'avg_position' => $rankStatus['avg_position'] ?? null,
-                'source' => 'keyword_ranks',
+                'position_source' => $posSource !== '' ? $posSource : null,
+                'partial' => (bool) ($rankStatus['partial'] ?? false),
+                'note' => $rankStatus['note'] ?? null,
+                'source' => $sourceMap[$posSource] ?? 'rank_history',
             ];
         } catch (\Throwable) {
             // keep previous meta
@@ -459,7 +474,14 @@ final class PregaoSnapshotService
     private function loadKeywordRanks(int $accountId, array $meta): array
     {
         if (!($this->config['rank_tracker_enabled'] ?? false)) {
-            return [];
+            // Coletor local / trends ainda podem alimentar keyword_ranks / status
+            $posMeta = $meta['metrics']['posicao_media'] ?? null;
+            if (!is_array($posMeta) || ($posMeta['available'] ?? false) !== true) {
+                return [];
+            }
+            if (($posMeta['position_source'] ?? '') === 'trends') {
+                return []; // trends = parcial, sem tape de posição exata
+            }
         }
 
         $posMeta = $meta['metrics']['posicao_media'] ?? null;

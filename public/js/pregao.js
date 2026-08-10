@@ -66,7 +66,8 @@
         search_forbidden: 'API search bloqueada',
         seller_not_found_in_search: 'seller não encontrado',
         unavailable: 'indisponível',
-        watchlist_empty: 'watchlist vazia'
+        watchlist_empty: 'watchlist vazia',
+        trends_partial: 'trends parcial (sem posição exata)'
     };
     let observabilityConsolidatedMs = null;
     const agentStaleAfterMs = 600 * 1000;
@@ -415,38 +416,48 @@
         }
     }
 
-    function renderTape(ranks, rankTrackerEnabled) {
+    function renderTape(ranks, rankTrackerEnabled, positionSource, statusLabel) {
         const el = $('tape');
         if (!el) return;
         el.textContent = '';
+        const list = Array.isArray(ranks) ? ranks.filter(isValidKeywordRankPayload) : [];
+        if (list.length) {
+            for (let copy = 0; copy < 2; copy++) {
+                list.forEach((rank) => {
+                    let cls = 'y', label = '·';
+                    if (rank.delta > 0) { cls = 'u'; label = '▲' + rank.delta; }
+                    else if (rank.delta < 0) { cls = 'd'; label = '▼' + Math.abs(rank.delta); }
+                    else if (rank.delta === 0) { label = '='; }
+                    if (rank.pos === 1) { cls = 'y'; label = 'TOPO'; }
+                    const item = document.createElement('span');
+                    const keyword = document.createElement('b');
+                    const delta = document.createElement('span');
+                    keyword.textContent = rank.kw;
+                    delta.className = cls;
+                    delta.textContent = label;
+                    item.appendChild(keyword);
+                    item.appendChild(document.createTextNode(' #' + String(rank.pos) + ' '));
+                    item.appendChild(delta);
+                    el.appendChild(item);
+                });
+            }
+            return;
+        }
+        if (positionSource === 'trends' || positionSource === 'trends_partial') {
+            el.textContent = typeof statusLabel === 'string' && statusLabel
+                ? statusLabel
+                : 'trends parcial (sem posição exata)';
+            return;
+        }
+        if (positionSource === 'proxy' || positionSource === 'collector_local') {
+            el.textContent = 'aguardando coletor local';
+            return;
+        }
         if (rankTrackerEnabled === false) {
             el.textContent = 'rank tracker desativado';
             return;
         }
-        const list = Array.isArray(ranks) ? ranks.filter(isValidKeywordRankPayload) : [];
-        if (!list.length) {
-            el.textContent = 'sem ranks';
-            return;
-        }
-        for (let copy = 0; copy < 2; copy++) {
-            list.forEach((rank) => {
-                let cls = 'y', label = '·';
-                if (rank.delta > 0) { cls = 'u'; label = '▲' + rank.delta; }
-                else if (rank.delta < 0) { cls = 'd'; label = '▼' + Math.abs(rank.delta); }
-                else if (rank.delta === 0) { label = '='; }
-                if (rank.pos === 1) { cls = 'y'; label = 'TOPO'; }
-                const item = document.createElement('span');
-                const keyword = document.createElement('b');
-                const delta = document.createElement('span');
-                keyword.textContent = rank.kw;
-                delta.className = cls;
-                delta.textContent = label;
-                item.appendChild(keyword);
-                item.appendChild(document.createTextNode(' #' + String(rank.pos) + ' '));
-                item.appendChild(delta);
-                el.appendChild(item);
-            });
-        }
+        el.textContent = 'sem ranks';
     }
 
     function escapeHtml(str) {
@@ -702,7 +713,26 @@
             el.textContent = fmtNum(p.value, 0);
             if ($('sPos')) $('sPos').textContent = 'visitas 7d (Fe)';
         } else if (p.key === 'posicao_media') {
-            el.textContent = p.value == null ? 'n/d' : ('#' + fmtNum(p.value, 1));
+            if (p.value == null && p.partial) {
+                el.textContent = 'parcial';
+            } else {
+                el.textContent = p.value == null ? 'n/d' : ('#' + fmtNum(p.value, 1));
+            }
+            if ($('sPos')) {
+                const src = p.position_source || p.source || null;
+                const label = p.label || null;
+                if (label) {
+                    $('sPos').textContent = String(label);
+                } else if (src === 'trends' || src === 'trends_partial') {
+                    $('sPos').textContent = 'trends parcial (sem posição exata)';
+                } else if (src === 'proxy' || src === 'collector_local') {
+                    $('sPos').textContent = 'coletor local';
+                } else if (src === 'search' || src === 'search_auth') {
+                    $('sPos').textContent = 'search autenticada';
+                } else {
+                    $('sPos').textContent = 'posição orgânica';
+                }
+            }
         } else if (p.key === 'health_medio') {
             el.textContent = fmtNum(p.value, 2);
         } else if (p.key === 'tempo_medio_resposta_s') {
@@ -1185,7 +1215,12 @@
         window.__pregaoLastGovernance = d.governance || null;
         applySentinelaCard(window.__pregaoLastSentinela);
         applySemaforo(d.semaforo, window.__pregaoLastGovernance);
-        renderTape(d.ranks != null ? d.ranks : d.keywords, d.rank_tracker_enabled);
+        renderTape(
+            d.ranks != null ? d.ranks : d.keywords,
+            d.rank_tracker_enabled,
+            d.rank_position_source,
+            d.rank_status_label
+        );
         applyQa(d.qa);
         applyAgents(d.agents);
         renderObservability(d.observability);

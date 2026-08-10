@@ -1,0 +1,67 @@
+{
+    "when": "2026-08-10T02:40:53-03:00",
+    "egress": "72.62.14.91",
+    "note": "tokens never logged",
+    "T1a": {
+        "auth_search": {
+            "status": 403,
+            "error": "forbidden",
+            "message": "forbidden",
+            "has_results": false
+        },
+        "public_search": {
+            "status": 403,
+            "error": "forbidden",
+            "message": "forbidden"
+        }
+    },
+    "T1c": {
+        "auth_trends": {
+            "status": 200,
+            "n": 50
+        },
+        "auth_highlights": {
+            "status": 200,
+            "content_n": 20
+        },
+        "collectDemandSignals": {
+            "ok": true,
+            "signals": 10,
+            "errors": 0,
+            "last_error": null
+        },
+        "statusForPregao": {
+            "available": true,
+            "position_source": "trends",
+            "label": "trends parcial (sem posição exata)",
+            "partial": true
+        }
+    },
+    "T1b": {
+        "ingest": {
+            "ok": true,
+            "idempotent": false,
+            "message": "ingest ok",
+            "mlb_id": "MLB4435358255",
+            "keyword": "smoke-test-onda4-1",
+            "position": 12,
+            "position_source": "proxy"
+        },
+        "rank_history_row": {
+            "mlb_id": "MLB4435358255",
+            "keyword": "smoke-test-onda4-1",
+            "position": 12,
+            "position_source": "proxy",
+            "captured_at": "2026-08-10 02:40:56"
+        }
+    },
+    "T2": {
+        "qa_checklist": {
+            "id": "qa_playwright",
+            "label": "QA Playwright verde na última execução",
+            "pass": true,
+            "value": "OK · última execução 2026-08-10T01:28:10.999Z"
+        },
+        "passed_total": "2\/7"
+    }
+}

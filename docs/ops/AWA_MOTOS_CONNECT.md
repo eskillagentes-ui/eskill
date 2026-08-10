@@ -2,6 +2,14 @@
 
 Checklist operacional (Onda 3.5 / T4). **Não conecte a conta por API automática** — o dono faz o login ML pessoalmente.
 
+## Verificação Onda 4.1 (2026-08-10)
+
+- Botão **Conectar Nova Conta** presente em `/dashboard/accounts` e Configurações.
+- `MercadoLivreAuthService::getAuthUrl` gera redirect para `auth.mercadolibre.com/authorization`
+  com `response_type=code`, `redirect_uri` em `eskill.com.br` e PKCE (`code_challenge`).
+- Evidência: `docs/ops/evidence/t3-add-account-20260810.json`.
+- **Não** completar o login ML automaticamente — o dono autentica a conta AWA.
+
 ## O que já existe (pronto)
 
 - Tela `/dashboard/accounts` com botão **Conectar Nova Conta** → `/auth/authorize`

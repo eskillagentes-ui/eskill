@@ -283,6 +283,15 @@
             "passes": true,
             "priority": "P0",
             "notes": "2026-08-10. Tip c94e0c8d. Backup pre-merge-onda4-20260810_044003.sql. PHPUnit 4449/0. ML_WRITE_AUTOMATION=false. Branch preservada. Sem push GitHub (sem SSH key)."
+        },
+        {
+            "id": "onda4-1-rank-tracker-unblock",
+            "name": "Onda 4.1: rank tracker (T1a/b/c) + checklist QA fonte única + T0 Adicionar conta",
+            "description": "Destravar posição orgânica sem scraping: evidência 403 autenticado, coletor local residencial, fallback trends/highlights, checklist QA=pregao_events, fluxo OAuth AWA pronto.",
+            "category": "negocio",
+            "passes": true,
+            "priority": "P0",
+            "notes": "2026-08-10 branch fix/onda4-1-rank (NÃO mergear master). T1a AUTH search 403 (egress 72.62.14.91). T1b collector+ingest HMAC HTTP 200 + rank_history proxy. T1c trends/highlights AUTH 200; status trends parcial. T2 QA checklist lê pregao_events → OK·última execução. T3 /dashboard/accounts + /auth/authorize → auth.mercadolibre.com PKCE. PHPUnit 4452/0. ML_WRITE_AUTOMATION=false."
         }
     ]
 }

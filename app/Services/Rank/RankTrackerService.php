@@ -10,19 +10,23 @@ use PDO;
 use Throwable;
 
 /**
- * Rank tracker orgânico — somente API oficial /sites/{site}/search.
+ * Rank tracker orgânico — somente API oficial api.mercadolibre.com.
  *
- * Causa histórica da desativação (NÃO é scraping HTML):
- * o endpoint público /sites/MLB/search retorna 403 forbidden a partir deste
- * host (IP datacenter / PolicyAgent Cloudflare). Ver MercadoLivreClient e
- * config/pregao.php. Scraping (ProxyService) foi removido do repo em outro
- * contexto; o rank tracker sempre usou a API oficial.
+ * Fontes (position_source):
+ * - search: GET /sites/MLB/search com OAuth user-scoped (T1a)
+ * - proxy: coletor local residencial (T1b) — sem token ML
+ * - trends: /trends + /highlights autenticados (T1c, parcial, sem posição exata de busca)
+ * - unavailable: tentativa registrada sem posição
  *
- * Este serviço implementa rate limit, cache diário por keyword, backoff 429
- * e circuit breaker (3 falhas → pausa).
+ * NÃO faz scraping HTML. NÃO rotaciona IP para burlar bloqueio.
  */
 final class RankTrackerService
 {
+    public const SOURCE_SEARCH = 'search';
+    public const SOURCE_PROXY = 'proxy';
+    public const SOURCE_TRENDS = 'trends';
+    public const SOURCE_UNAVAILABLE = 'unavailable';
+
     private PDO $db;
     private int $maxReqPerMin;
     private int $circuitThreshold;
@@ -42,6 +46,14 @@ final class RankTrackerService
     {
         return filter_var(
             $_ENV['RANK_TRACKER_ENABLED'] ?? getenv('RANK_TRACKER_ENABLED') ?: 'false',
+            FILTER_VALIDATE_BOOLEAN
+        );
+    }
+
+    public function isLocalCollectorEnabled(): bool
+    {
+        return filter_var(
+            $_ENV['RANK_COLLECTOR_LOCAL'] ?? getenv('RANK_COLLECTOR_LOCAL') ?: 'false',
             FILTER_VALIDATE_BOOLEAN
         );
     }
@@ -87,8 +99,6 @@ final class RankTrackerService
     }
 
     /**
-     * Garante keywords para anúncios ativos da conta (até $limit itens).
-     *
      * @return int número de keywords upsertadas
      */
     public function seedKeywordsForAccount(int $accountId, int $limit = 30): int
@@ -122,20 +132,429 @@ final class RankTrackerService
     }
 
     /**
-     * Coleta diária: respeita cache (mesma kw no dia), rate limit e circuit breaker.
+     * Assignments para o coletor local (máx 30 = 10 anúncios × 3 kws).
+     *
+     * @return list<array{mlb_id:string,keyword:string}>
+     */
+    public function listAssignments(int $accountId, int $max = 30): array
+    {
+        $max = max(1, min(30, $max));
+        $this->seedKeywordsForAccount($accountId, 10);
+        $stmt = $this->db->prepare(
+            'SELECT mlb_id, keyword FROM item_rank_keywords
+             WHERE account_id = ? AND active = 1
+             ORDER BY mlb_id, keyword
+             LIMIT ' . $max
+        );
+        $stmt->execute([$accountId]);
+        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $out = [];
+        foreach ($rows as $row) {
+            $out[] = [
+                'mlb_id' => strtoupper((string) $row['mlb_id']),
+                'keyword' => (string) $row['keyword'],
+            ];
+        }
+        return $out;
+    }
+
+    /**
+     * Ingest do coletor local — idempotente por (account, mlb, keyword, dia).
+     *
+     * @param array<string, mixed> $payload
+     * @return array<string, mixed>
+     */
+    public function ingestFromCollector(array $payload): array
+    {
+        $accountId = (int) ($payload['account_id'] ?? 0);
+        $mlb = strtoupper(trim((string) ($payload['mlb_id'] ?? '')));
+        $keyword = trim((string) ($payload['keyword'] ?? ''));
+        $position = $payload['position'] ?? null;
+        $page = $payload['page'] ?? null;
+        $pagePosition = $payload['page_position'] ?? null;
+        $total = $payload['total_results'] ?? null;
+        $error = isset($payload['error']) ? (string) $payload['error'] : null;
+        $day = (string) ($payload['day'] ?? '');
+
+        if ($accountId <= 0 || $mlb === '' || $keyword === '') {
+            return ['ok' => false, 'error' => 'validation', 'message' => 'account_id, mlb_id e keyword obrigatórios'];
+        }
+        if (!preg_match('/^MLB[A-Z0-9]+$/i', $mlb)) {
+            return ['ok' => false, 'error' => 'validation', 'message' => 'mlb_id inválido'];
+        }
+        if (mb_strlen($keyword) > 200) {
+            return ['ok' => false, 'error' => 'validation', 'message' => 'keyword muito longa'];
+        }
+
+        $today = (new \DateTimeImmutable('now', new \DateTimeZone('America/Sao_Paulo')))->format('Y-m-d');
+        if ($day !== '' && $day !== $today) {
+            return ['ok' => false, 'error' => 'validation', 'message' => 'day deve ser o dia atual America/Sao_Paulo'];
+        }
+
+        if ($this->hasCaptureToday($accountId, $mlb, $keyword)) {
+            return [
+                'ok' => true,
+                'idempotent' => true,
+                'message' => 'já capturado hoje',
+                'mlb_id' => $mlb,
+                'keyword' => $keyword,
+            ];
+        }
+
+        $pos = is_numeric($position) ? (int) $position : null;
+        if ($pos !== null && $pos < 1) {
+            $pos = null;
+        }
+
+        $found = [
+            'position' => $pos,
+            'page' => is_numeric($page) ? (int) $page : null,
+            'page_position' => is_numeric($pagePosition) ? (int) $pagePosition : null,
+            'total_results' => is_numeric($total) ? (int) $total : null,
+            'error' => $error,
+            'position_source' => self::SOURCE_PROXY,
+        ];
+        $this->persistCapture($accountId, $mlb, $keyword, $found);
+        if ($pos !== null) {
+            $this->recordSuccess($accountId);
+        }
+
+        return [
+            'ok' => true,
+            'idempotent' => false,
+            'message' => 'ingest ok',
+            'mlb_id' => $mlb,
+            'keyword' => $keyword,
+            'position' => $pos,
+            'position_source' => self::SOURCE_PROXY,
+        ];
+    }
+
+    /**
+     * Coleta diária: search autenticado (se flag) + fallback trends/highlights (sempre).
      *
      * @return array<string, mixed>
      */
     public function collect(int $accountId, ?MercadoLivreClient $client = null): array
     {
-        if (!$this->isEnabled()) {
-            return ['ok' => false, 'skipped' => true, 'reason' => 'rank_tracker_disabled'];
+        $client ??= new MercadoLivreClient($accountId);
+        $searchResult = [
+            'ok' => false,
+            'skipped' => true,
+            'reason' => 'rank_tracker_disabled',
+            'captured' => 0,
+            'cached_skips' => 0,
+            'errors' => 0,
+        ];
+
+        if ($this->isEnabled() && !$this->isCircuitOpen($accountId)) {
+            $searchResult = $this->collectSearch($accountId, $client);
+        } elseif ($this->isEnabled() && $this->isCircuitOpen($accountId)) {
+            $searchResult = [
+                'ok' => false,
+                'skipped' => true,
+                'reason' => 'circuit_open',
+                'circuit' => $this->circuitState($accountId),
+                'captured' => 0,
+                'cached_skips' => 0,
+                'errors' => 0,
+            ];
         }
 
-        if ($this->isCircuitOpen($accountId)) {
-            return ['ok' => false, 'skipped' => true, 'reason' => 'circuit_open', 'circuit' => $this->circuitState($accountId)];
+        // Em testes (searchFn injetado) não dispara HTTP real de trends/highlights.
+        $trends = ['ok' => true, 'signals' => 0, 'skipped' => true, 'reason' => 'harness'];
+        if ($this->searchFn === null) {
+            $trends = $this->collectDemandSignals($accountId, $client);
         }
 
+        $available = ($searchResult['captured'] ?? 0) > 0
+            || $this->countRecentCaptures($accountId, 2) > 0
+            || ($trends['signals'] ?? 0) > 0;
+
+        return [
+            'ok' => (($searchResult['ok'] ?? false) || ($trends['ok'] ?? false)),
+            'search' => $searchResult,
+            'trends' => $trends,
+            'captured' => (int) ($searchResult['captured'] ?? 0),
+            'cached_skips' => (int) ($searchResult['cached_skips'] ?? 0),
+            'errors' => (int) ($searchResult['errors'] ?? 0),
+            'last_error' => $searchResult['last_error'] ?? null,
+            'available' => $available,
+            'position_source' => $this->resolveActiveSource($accountId),
+            'circuit' => $this->circuitState($accountId),
+            'rate_limit_per_min' => $this->maxReqPerMin,
+            'local_collector' => $this->isLocalCollectorEnabled(),
+        ];
+    }
+
+    /**
+     * T1c: /trends e /highlights autenticados — demanda e top categoria.
+     *
+     * @return array<string, mixed>
+     */
+    public function collectDemandSignals(int $accountId, ?MercadoLivreClient $client = null): array
+    {
+        $client ??= new MercadoLivreClient($accountId);
+        $this->seedKeywordsForAccount($accountId, 10);
+
+        $signals = 0;
+        $errors = 0;
+        $lastError = null;
+
+        // Trends site-wide (auth)
+        $trends = $client->get('/trends/MLB', [], 0, false);
+        $trendOk = array_is_list($trends) || (isset($trends[0]) && is_array($trends[0]));
+        if (!$trendOk && isset($trends['error'])) {
+            $errors++;
+            $lastError = 'trends_' . (string) ($trends['error'] ?? 'fail');
+        } else {
+            $list = array_is_list($trends) ? $trends : [];
+            // Persiste até 5 keywords de demanda como sinal (sem posição de busca)
+            foreach (array_slice($list, 0, 5) as $row) {
+                if (!is_array($row)) {
+                    continue;
+                }
+                $kw = trim((string) ($row['keyword'] ?? ''));
+                if ($kw === '') {
+                    continue;
+                }
+                $mlb = 'TREND';
+                if ($this->hasCaptureToday($accountId, $mlb, $kw)) {
+                    continue;
+                }
+                $this->persistCapture($accountId, $mlb, $kw, [
+                    'position' => null,
+                    'page' => null,
+                    'page_position' => null,
+                    'total_results' => null,
+                    'error' => null,
+                    'position_source' => self::SOURCE_TRENDS,
+                    'message' => 'demand_signal',
+                ]);
+                $signals++;
+            }
+        }
+
+        // Highlights por categoria dos top itens
+        $stmt = $this->db->prepare(
+            "SELECT ml_item_id AS mlb_id, category_id FROM items
+             WHERE account_id = ? AND status = 'active' AND category_id IS NOT NULL AND category_id != ''
+             ORDER BY sold_quantity DESC, id DESC
+             LIMIT 5"
+        );
+        try {
+            $stmt->execute([$accountId]);
+            $items = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        } catch (Throwable) {
+            $items = [];
+        }
+
+        foreach ($items as $item) {
+            $mlb = strtoupper((string) ($item['mlb_id'] ?? ''));
+            $cat = (string) ($item['category_id'] ?? '');
+            if ($mlb === '' || $cat === '') {
+                continue;
+            }
+            $hl = $client->get('/highlights/MLB/category/' . rawurlencode($cat), [], 0, false);
+            if (isset($hl['error'])) {
+                $errors++;
+                $lastError = 'highlights_' . (string) $hl['error'];
+                continue;
+            }
+            $content = $hl['content'] ?? [];
+            if (!is_array($content)) {
+                continue;
+            }
+            $foundPos = null;
+            foreach ($content as $idx => $entry) {
+                if (!is_array($entry)) {
+                    continue;
+                }
+                $id = strtoupper((string) ($entry['id'] ?? ''));
+                // Highlights usa MLBU* (user product); matching aproximado por sufixo numérico do MLB
+                $pos = isset($entry['position']) ? (int) $entry['position'] : ((int) $idx + 1);
+                if ($id === $mlb || $this->idsLooselyMatch($id, $mlb)) {
+                    $foundPos = $pos;
+                    break;
+                }
+            }
+            $kw = 'highlight:' . $cat;
+            if ($this->hasCaptureToday($accountId, $mlb, $kw)) {
+                continue;
+            }
+            $this->persistCapture($accountId, $mlb, $kw, [
+                'position' => $foundPos,
+                'page' => 1,
+                'page_position' => $foundPos,
+                'total_results' => count($content),
+                'error' => $foundPos === null ? 'not_in_highlights' : null,
+                'position_source' => self::SOURCE_TRENDS,
+            ]);
+            $signals++;
+        }
+
+        return [
+            'ok' => $signals > 0 || $errors === 0,
+            'signals' => $signals,
+            'errors' => $errors,
+            'last_error' => $lastError,
+            'position_source' => self::SOURCE_TRENDS,
+            'note' => 'sem posição exata de busca orgânica — trends/highlights',
+        ];
+    }
+
+    /**
+     * Status para o Pregão / UI / checklist.
+     *
+     * @return array<string, mixed>
+     */
+    public function statusForPregao(int $accountId): array
+    {
+        $source = $this->resolveActiveSource($accountId);
+        $sourceLabels = [
+            self::SOURCE_SEARCH => 'search autenticada',
+            self::SOURCE_PROXY => 'coletor local',
+            self::SOURCE_TRENDS => 'trends parcial',
+            self::SOURCE_UNAVAILABLE => 'indisponível',
+        ];
+
+        $exact = $this->latestCapturesBySources($accountId, [self::SOURCE_SEARCH, self::SOURCE_PROXY], 5);
+        if ($exact !== []) {
+            $avg = 0;
+            $n = 0;
+            foreach ($exact as $row) {
+                if ($row['position'] !== null) {
+                    $avg += (int) $row['position'];
+                    $n++;
+                }
+            }
+            $src = (string) ($exact[0]['position_source'] ?? $source);
+            return [
+                'available' => true,
+                'reason' => null,
+                'label' => $sourceLabels[$src] ?? $src,
+                'position_source' => $src,
+                'freshness' => $exact[0]['captured_at'] ?? null,
+                'sample' => $exact,
+                'avg_position' => $n > 0 ? round($avg / $n, 1) : null,
+                'partial' => false,
+                'local_collector' => $this->isLocalCollectorEnabled(),
+                'search_enabled' => $this->isEnabled(),
+            ];
+        }
+
+        $trends = $this->latestCapturesBySources($accountId, [self::SOURCE_TRENDS], 5);
+        if ($trends !== [] || $this->countRecentBySource($accountId, self::SOURCE_TRENDS, 7) > 0) {
+            return [
+                'available' => true,
+                'reason' => null,
+                'label' => 'trends parcial (sem posição exata)',
+                'position_source' => self::SOURCE_TRENDS,
+                'freshness' => $trends[0]['captured_at'] ?? null,
+                'sample' => $trends,
+                'avg_position' => null,
+                'partial' => true,
+                'note' => 'sem posição exata',
+                'cause_doc' => 'search 403 datacenter; trends/highlights autenticados ativos',
+                'local_collector' => $this->isLocalCollectorEnabled(),
+                'search_enabled' => $this->isEnabled(),
+            ];
+        }
+
+        if (!$this->isEnabled() && !$this->isLocalCollectorEnabled()) {
+            return [
+                'available' => false,
+                'reason' => 'rank_tracker_disabled',
+                'label' => 'desativado (flags off; coletor local off)',
+                'position_source' => self::SOURCE_UNAVAILABLE,
+                'cause_doc' => 'sites/search 403 datacenter — ver docs/ops/RANK_TRACKER.md',
+                'partial' => false,
+                'local_collector' => false,
+                'search_enabled' => false,
+            ];
+        }
+
+        if ($this->isCircuitOpen($accountId) && !$this->isLocalCollectorEnabled()) {
+            $c = $this->circuitState($accountId);
+            return [
+                'available' => false,
+                'reason' => 'circuit_open',
+                'label' => 'pausado (circuit breaker search)',
+                'detail' => $c,
+                'position_source' => self::SOURCE_UNAVAILABLE,
+                'cause_doc' => 'API /sites/MLB/search retornou falhas repetidas (tipicamente 403 datacenter)',
+                'partial' => false,
+                'local_collector' => false,
+                'search_enabled' => $this->isEnabled(),
+            ];
+        }
+
+        return [
+            'available' => false,
+            'reason' => 'no_captures',
+            'label' => $this->isLocalCollectorEnabled()
+                ? 'aguardando coletor local'
+                : 'sem capturas ainda',
+            'position_source' => self::SOURCE_UNAVAILABLE,
+            'cause_doc' => 'Aguardando coleta (search/proxy/trends)',
+            'partial' => false,
+            'local_collector' => $this->isLocalCollectorEnabled(),
+            'search_enabled' => $this->isEnabled(),
+        ];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function historyForItem(int $accountId, string $mlbId, int $days = 30): array
+    {
+        $days = max(1, min(90, $days));
+        $since = $this->sinceExpr($days);
+        $stmt = $this->db->prepare(
+            "SELECT mlb_id, keyword, position, page, page_position, total_results, captured_at, error, position_source
+             FROM rank_history
+             WHERE account_id = ? AND mlb_id = ?
+               AND captured_at >= {$since}
+             ORDER BY captured_at DESC, keyword"
+        );
+        $stmt->execute([$accountId, strtoupper($mlbId)]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    /**
+     * @return list<array<string, mixed>>
+     */
+    public function latestCaptures(int $accountId, int $limit = 20): array
+    {
+        $limit = max(1, min(100, $limit));
+        $stmt = $this->db->prepare(
+            "SELECT mlb_id, keyword, position, page, page_position, total_results, captured_at, error, position_source
+             FROM rank_history
+             WHERE account_id = ? AND position IS NOT NULL
+             ORDER BY captured_at DESC LIMIT {$limit}"
+        );
+        $stmt->execute([$accountId]);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    public function countRecentCaptures(int $accountId, int $days = 14): int
+    {
+        $days = max(1, min(90, $days));
+        $since = $this->sinceExpr($days);
+        $stmt = $this->db->prepare(
+            "SELECT COUNT(*) FROM rank_history
+             WHERE account_id = ? AND position IS NOT NULL
+               AND captured_at >= {$since}"
+        );
+        $stmt->execute([$accountId]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function collectSearch(int $accountId, MercadoLivreClient $client): array
+    {
         $this->seedKeywordsForAccount($accountId, 40);
 
         $kwStmt = $this->db->prepare(
@@ -149,7 +568,6 @@ final class RankTrackerService
 
         $siteId = 'MLB';
         $sellerId = $this->sellerId($accountId);
-        $client ??= new MercadoLivreClient($accountId);
 
         $captured = 0;
         $errors = 0;
@@ -173,7 +591,7 @@ final class RankTrackerService
             if (($found['error'] ?? null) !== null) {
                 $errors++;
                 $lastError = (string) $found['error'];
-                // Persiste tentativa (posição null + error) para auditoria — sem inventar ranking
+                $found['position_source'] = self::SOURCE_UNAVAILABLE;
                 $this->persistCapture($accountId, $mlb, $kw, $found);
                 $this->recordFailure($accountId, $lastError);
                 if ($this->isCircuitOpen($accountId)) {
@@ -185,125 +603,22 @@ final class RankTrackerService
                 continue;
             }
 
+            $found['position_source'] = self::SOURCE_SEARCH;
             $this->recordSuccess($accountId);
             $this->persistCapture($accountId, $mlb, $kw, $found);
             $captured++;
         }
 
-        $available = $captured > 0 || $this->countRecentCaptures($accountId, 2) > 0;
-
         return [
             'ok' => $errors === 0 || $captured > 0,
+            'skipped' => false,
             'captured' => $captured,
             'cached_skips' => $cached,
             'errors' => $errors,
             'last_error' => $lastError,
-            'available' => $available,
             'circuit' => $this->circuitState($accountId),
-            'rate_limit_per_min' => $this->maxReqPerMin,
+            'position_source' => self::SOURCE_SEARCH,
         ];
-    }
-
-    /**
-     * Status para o Pregão / UI.
-     *
-     * @return array<string, mixed>
-     */
-    public function statusForPregao(int $accountId): array
-    {
-        if (!$this->isEnabled()) {
-            return [
-                'available' => false,
-                'reason' => 'rank_tracker_disabled',
-                'label' => 'desativado (flag RANK_TRACKER_ENABLED=false)',
-                'cause_doc' => 'sites/search 403 datacenter — ver docs/ops/RANK_TRACKER.md',
-            ];
-        }
-        if ($this->isCircuitOpen($accountId)) {
-            $c = $this->circuitState($accountId);
-            return [
-                'available' => false,
-                'reason' => 'circuit_open',
-                'label' => 'pausado (circuit breaker)',
-                'detail' => $c,
-                'cause_doc' => 'API /sites/MLB/search retornou falhas repetidas (tipicamente 403 datacenter)',
-            ];
-        }
-
-        $recent = $this->latestCaptures($accountId, 5);
-        if ($recent === []) {
-            return [
-                'available' => false,
-                'reason' => 'no_captures',
-                'label' => 'sem capturas ainda',
-                'cause_doc' => 'Aguardando coleta ou API search ainda 403 neste host',
-            ];
-        }
-
-        $avg = 0;
-        $n = 0;
-        foreach ($recent as $row) {
-            if ($row['position'] !== null) {
-                $avg += (int) $row['position'];
-                $n++;
-            }
-        }
-
-        return [
-            'available' => true,
-            'reason' => null,
-            'label' => 'disponível',
-            'freshness' => $recent[0]['captured_at'] ?? null,
-            'sample' => $recent,
-            'avg_position' => $n > 0 ? round($avg / $n, 1) : null,
-        ];
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    public function historyForItem(int $accountId, string $mlbId, int $days = 30): array
-    {
-        $days = max(1, min(90, $days));
-        $since = $this->sinceExpr($days);
-        $stmt = $this->db->prepare(
-            "SELECT mlb_id, keyword, position, page, page_position, total_results, captured_at, error
-             FROM rank_history
-             WHERE account_id = ? AND mlb_id = ?
-               AND captured_at >= {$since}
-             ORDER BY captured_at DESC, keyword"
-        );
-        $stmt->execute([$accountId, strtoupper($mlbId)]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-    }
-
-    /**
-     * @return list<array<string, mixed>>
-     */
-    public function latestCaptures(int $accountId, int $limit = 20): array
-    {
-        $limit = max(1, min(100, $limit));
-        $stmt = $this->db->prepare(
-            "SELECT mlb_id, keyword, position, page, page_position, total_results, captured_at, error
-             FROM rank_history
-             WHERE account_id = ? AND position IS NOT NULL
-             ORDER BY captured_at DESC LIMIT {$limit}"
-        );
-        $stmt->execute([$accountId]);
-        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-    }
-
-    public function countRecentCaptures(int $accountId, int $days = 14): int
-    {
-        $days = max(1, min(90, $days));
-        $since = $this->sinceExpr($days);
-        $stmt = $this->db->prepare(
-            "SELECT COUNT(*) FROM rank_history
-             WHERE account_id = ? AND position IS NOT NULL
-               AND captured_at >= {$since}"
-        );
-        $stmt->execute([$accountId]);
-        return (int) $stmt->fetchColumn();
     }
 
     /**
@@ -322,7 +637,7 @@ final class RankTrackerService
     }
 
     /**
-     * @return array{position:?int,page:?int,page_position:?int,total_results:?int,error?:string}
+     * @return array{position:?int,page:?int,page_position:?int,total_results:?int,error?:string,message?:string,position_source?:string}
      */
     private function locateItem(
         MercadoLivreClient $client,
@@ -339,12 +654,12 @@ final class RankTrackerService
             if ($this->searchFn !== null) {
                 $result = ($this->searchFn)($siteId, $keyword, $limit, $offset);
             } else {
-                $result = $client->searchItems([
-                    'site_id' => $siteId,
+                // T1a: busca autenticada (OAuth user-scoped) — NÃO public/app-only
+                $result = $client->get("/sites/{$siteId}/search", [
                     'q' => $keyword,
                     'limit' => $limit,
                     'offset' => $offset,
-                ], 0);
+                ], 0, false);
             }
 
             $status = (int) ($result['status'] ?? 0);
@@ -404,14 +719,15 @@ final class RankTrackerService
     }
 
     /**
-     * @param array{position:?int,page:?int,page_position:?int,total_results:?int,error?:string} $found
+     * @param array{position:?int,page:?int,page_position:?int,total_results:?int,error?:?string,position_source?:string} $found
      */
     private function persistCapture(int $accountId, string $mlbId, string $keyword, array $found): void
     {
+        $source = (string) ($found['position_source'] ?? self::SOURCE_UNAVAILABLE);
         $stmt = $this->db->prepare(
             'INSERT INTO rank_history
-             (account_id, mlb_id, keyword, position, page, page_position, total_results, error, captured_at)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ' . $this->nowSql() . ')'
+             (account_id, mlb_id, keyword, position, page, page_position, total_results, error, position_source, captured_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ' . $this->nowSql() . ')'
         );
         $stmt->execute([
             $accountId,
@@ -422,10 +738,10 @@ final class RankTrackerService
             $found['page_position'],
             $found['total_results'],
             $found['error'] ?? null,
+            $source,
         ]);
 
-        // Compat com keyword_ranks do Pregão (agregado por kw/dia)
-        if ($found['position'] !== null) {
+        if ($found['position'] !== null && in_array($source, [self::SOURCE_SEARCH, self::SOURCE_PROXY], true)) {
             try {
                 $date = (new \DateTimeImmutable('now', new \DateTimeZone('America/Sao_Paulo')))->format('Y-m-d');
                 $upsert = $this->db->prepare(
@@ -548,6 +864,59 @@ final class RankTrackerService
         $stmt->execute([$accountId]);
     }
 
+    /**
+     * @param list<string> $sources
+     * @return list<array<string, mixed>>
+     */
+    private function latestCapturesBySources(int $accountId, array $sources, int $limit): array
+    {
+        if ($sources === []) {
+            return [];
+        }
+        $limit = max(1, min(100, $limit));
+        $placeholders = implode(',', array_fill(0, count($sources), '?'));
+        $params = array_merge([$accountId], $sources);
+        $stmt = $this->db->prepare(
+            "SELECT mlb_id, keyword, position, page, page_position, total_results, captured_at, error, position_source
+             FROM rank_history
+             WHERE account_id = ? AND position_source IN ({$placeholders})
+             ORDER BY captured_at DESC LIMIT {$limit}"
+        );
+        $stmt->execute($params);
+        return $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+    }
+
+    private function countRecentBySource(int $accountId, string $source, int $days): int
+    {
+        $since = $this->sinceExpr($days);
+        $stmt = $this->db->prepare(
+            "SELECT COUNT(*) FROM rank_history
+             WHERE account_id = ? AND position_source = ?
+               AND captured_at >= {$since}"
+        );
+        $stmt->execute([$accountId, $source]);
+        return (int) $stmt->fetchColumn();
+    }
+
+    private function resolveActiveSource(int $accountId): string
+    {
+        $exact = $this->latestCapturesBySources($accountId, [self::SOURCE_SEARCH, self::SOURCE_PROXY], 1);
+        if ($exact !== []) {
+            return (string) ($exact[0]['position_source'] ?? self::SOURCE_SEARCH);
+        }
+        if ($this->countRecentBySource($accountId, self::SOURCE_TRENDS, 7) > 0) {
+            return self::SOURCE_TRENDS;
+        }
+        return self::SOURCE_UNAVAILABLE;
+    }
+
+    private function idsLooselyMatch(string $a, string $b): bool
+    {
+        $na = preg_replace('/\D+/', '', $a) ?? '';
+        $nb = preg_replace('/\D+/', '', $b) ?? '';
+        return $na !== '' && $na === $nb;
+    }
+
     private function isSqlite(): bool
     {
         return $this->db->getAttribute(PDO::ATTR_DRIVER_NAME) === 'sqlite';
@@ -580,6 +949,7 @@ final class RankTrackerService
                     page_position INT NULL,
                     total_results INT NULL,
                     error TEXT NULL,
+                    position_source TEXT NULL,
                     captured_at TEXT NOT NULL
                 )'
             );
@@ -619,11 +989,17 @@ final class RankTrackerService
                 page_position INT NULL,
                 total_results INT NULL,
                 error VARCHAR(64) NULL,
+                position_source VARCHAR(32) NULL,
                 captured_at DATETIME NOT NULL,
                 INDEX idx_account_mlb (account_id, mlb_id, captured_at),
                 INDEX idx_kw_day (account_id, keyword, captured_at)
             ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4'
         );
+        try {
+            $this->db->exec('ALTER TABLE rank_history ADD COLUMN position_source VARCHAR(32) NULL AFTER error');
+        } catch (Throwable) {
+            // coluna já existe
+        }
         $this->db->exec(
             'CREATE TABLE IF NOT EXISTS item_rank_keywords (
                 account_id INT NOT NULL,

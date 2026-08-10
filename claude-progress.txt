@@ -1,4 +1,38 @@
-## 2026-08-10 (22ª parte) — MERGE Onda 4 em master
+## 2026-08-10 (23ª parte) — Onda 4.1 rank tracker unblock
+
+Branch: `fix/onda4-1-rank` (a partir de master pós-Onda4). **NÃO mergear em master.**
+Backup: `storage/backups/pre-onda4-1-rank-20260810_053111.sql.gz`
+PHPUnit Unit: **4452 / 0 falhas** (27 skipped). `ML_WRITE_AUTOMATION=false` intacto.
+
+### T1a — busca autenticada (falhou — evidência obrigatória)
+Egress `72.62.14.91`. Token renovado; `/users/me` OK.
+`GET /sites/MLB/search` com Bearer user-scoped → **HTTP 403 forbidden** (igual público/anônimo).
+Sem scraping / sem bypass de ASN. Doc: `docs/ops/RANK_TRACKER.md` +
+`docs/ops/evidence/onda4-1-rank-20260810.json`.
+
+### T1b — coletor local residencial
+`collector/rank-collector.php` (<200 linhas) + README + install Linux/Windows.
+Endpoints `/api/rank/assignments` + `/api/rank/ingest` (chave dedicada + HMAC; CSRF exempt).
+Dry-run OK (30 kws). Ingest curl HTTP 200 → `rank_history` `position_source=proxy`.
+Flag `RANK_COLLECTOR_LOCAL=false` (degradado elegante; chave no `.env` local não commitada).
+
+### T1c — trends/highlights (sempre)
+AUTH `/trends/MLB` 200 (50) · `/highlights/MLB/category/{id}` 200 (20).
+`collectDemandSignals` 10 sinais; Pregão `available=true` com label
+**trends parcial (sem posição exata)** quando sem proxy/search.
+
+### T2 — checklist QA
+Causa: lia tabela inexistente `pregao_qa_runs`. Agora mesma fonte do Pregão:
+`pregao_events` type=`qa.status` (+ receipt Redis se houver).
+Valor: `OK · última execução 2026-08-10T01:28:10.999Z` (pass=true).
+
+### T3 — Adicionar conta AWA
+UI: `/dashboard/accounts` + Configurações botão **Conectar Nova Conta** → `/auth/authorize`.
+`getAuthUrl`: host `auth.mercadolibre.com`, PKCE, redirect `eskill.com.br`.
+Não completar OAuth (ação do usuário). Doc: `docs/ops/AWA_MOTOS_CONNECT.md`.
+
+---
+
 
 Autorização: verificação UI/CLI do usuário → Proceed.
 Branch `feat/onda4-loop` FF-merge em `master` (tip `c94e0c8d`).

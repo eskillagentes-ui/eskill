@@ -28,12 +28,16 @@ final class PregaoDataSourceStatusService
     private const SAFE_SOURCES = [
         'AdsMetricsCollector',
         'account_health_history',
+        'collector_local',
         'items_multiget',
         'items_visits',
         'keyword_ranks',
         'ml_api',
         'ml_orders',
+        'rank_history',
+        'search_auth',
         'seller_reputation',
+        'trends_partial',
     ];
 
     /** @var list<string> */

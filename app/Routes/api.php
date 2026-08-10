@@ -21,6 +21,9 @@ require __DIR__ . '/api/auth.php';
 // Pregão (read-only realtime)
 require __DIR__ . '/api/pregao.php';
 
+// Rank collector local (T1b) — chave dedicada, sem token ML
+require __DIR__ . '/api/rank.php';
+
 // Integrations: Brevo, Clawdbot, Assistant Connector, OpenClaw
 require __DIR__ . '/api/integrations.php';
 

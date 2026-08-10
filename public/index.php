@@ -338,10 +338,11 @@ if ($isApi) {
     $hasBearerToken = $authHeader && preg_match('/Bearer\s+.+/i', $authHeader);
 }
 // CSRF exempt se: (a) webhook, (b) API com Bearer token stateless,
-// ou (c) API que lida com própria autenticação internamente (render harness).
+// ou (c) API que lida com própria autenticação internamente (render harness / rank collector).
 // API routes com autenticação via session cookie continuam sujeitas a CSRF.
 $isCsrfExempt = $isWebhookRoute || ($isApi && $hasBearerToken)
-    || strpos($path, '/api/render') === 0;
+    || strpos($path, '/api/render') === 0
+    || strpos($path, '/api/rank/') === 0;
 
 if (!$isCsrfExempt && in_array($_SERVER['REQUEST_METHOD'], ['POST', 'PUT', 'DELETE', 'PATCH'])) {
     $csrf = new App\Middleware\CsrfMiddleware();
@@ -366,6 +367,8 @@ $publicApiPaths = [
     '/api/status',
     // Render harness endpoints handle their own authentication internally
     '/api/render',
+    // Coletor local residencial (auth própria por chave + HMAC; sem sessão/token ML)
+    '/api/rank/',
 ];
 
 // Exact-match public paths (não usar strpos para evitar match parcial)

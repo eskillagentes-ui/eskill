@@ -1,0 +1,25 @@
+{
+  "when": "2026-08-10T05:42:00-03:00",
+  "task": "T3 Adicionar conta AWA Motos",
+  "ui": {
+    "accounts_page": "/dashboard/accounts",
+    "settings": "/dashboard/settings",
+    "button": "Conectar Nova Conta",
+    "href": "/auth/authorize",
+    "files": [
+      "app/Views/dashboard/accounts.php",
+      "app/Views/dashboard/settings-content.php"
+    ]
+  },
+  "oauth_probe": {
+    "note": "getAuthUrl sem completar autorização do usuário",
+    "oauth_host": "auth.mercadolibre.com",
+    "oauth_path": "/authorization",
+    "response_type": "code",
+    "has_client_id": true,
+    "has_redirect_uri": true,
+    "has_pkce_code_challenge": true,
+    "redirect_uri_host": "eskill.com.br"
+  },
+  "user_action_required": "Login ML da conta AWA Motos (não FACILYTY) no redirect OAuth"
+}

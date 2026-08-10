@@ -39,7 +39,7 @@ final class WriteEnablementChecklist
             $this->checkUnlockPlanNoCritical($accountId),
             $this->checkCogsCoverage($accountId),
             $this->checkRankHistory($accountId),
-            $this->checkQaPlaywright(),
+            $this->checkQaPlaywright($accountId),
             $this->checkFreshBackup(),
         ];
 
@@ -197,31 +197,99 @@ final class WriteEnablementChecklist
     }
 
     /**
+     * Mesma fonte persistida do card do Pregão (F6 Onda 3.1):
+     * pregao_events type=qa.status — NÃO a tabela fantasma pregao_qa_runs.
+     *
      * @return array<string, mixed>
      */
-    private function checkQaPlaywright(): array
+    private function checkQaPlaywright(int $accountId): array
     {
-        $status = 'n/d';
+        $value = 'sem runs';
         $pass = false;
+        $finishedAt = null;
+
         try {
-            $stmt = $this->db->query(
-                "SELECT status, finished_at FROM pregao_qa_runs
-                 ORDER BY id DESC LIMIT 1"
+            // Preferência: receipt Redis autoritativo (mesmo path do PregaoSnapshotService)
+            if ($accountId > 0) {
+                try {
+                    $proof = \App\Services\Pregao\PregaoQaProof::fromEnvironment();
+                    if ($proof !== null) {
+                        $runs = new \App\Services\Pregao\PregaoQaRunService(
+                            \App\Services\Pregao\PregaoQaRunService::connectRedis(),
+                            $proof
+                        );
+                        $receipt = $runs->loadLatestReceipt($accountId);
+                        if (is_array($receipt) && is_int($receipt['event_id'] ?? null)) {
+                            $stmt = $this->db->prepare(
+                                "SELECT payload, ts FROM pregao_events
+                                 WHERE id = ? AND account_id = ? AND type = 'qa.status' AND source = 'live'
+                                 LIMIT 1"
+                            );
+                            $stmt->execute([$receipt['event_id'], $accountId]);
+                            $row = $stmt->fetch(PDO::FETCH_ASSOC);
+                            if (is_array($row)) {
+                                $payload = is_string($row['payload'] ?? null)
+                                    ? json_decode((string) $row['payload'], true)
+                                    : null;
+                                if (is_array($payload) && $runs->isStatusAuthoritative($payload, $accountId)) {
+                                    $result = strtolower((string) ($payload['result'] ?? ''));
+                                    $finishedAt = (string) ($payload['observed_at'] ?? $row['ts'] ?? '');
+                                    $pass = $result === 'passed';
+                                    $value = $pass
+                                        ? ('OK · última execução ' . $finishedAt)
+                                        : ($result !== '' ? $result : 'sem runs');
+                                    return [
+                                        'id' => 'qa_playwright',
+                                        'label' => 'QA Playwright verde na última execução',
+                                        'pass' => $pass,
+                                        'value' => $value,
+                                    ];
+                                }
+                            }
+                        }
+                    }
+                } catch (Throwable) {
+                    // cai no fallback durable abaixo
+                }
+            }
+
+            // Fallback durable: último qa.status terminal na mesma tabela do Pregão
+            $stmt = $this->db->prepare(
+                "SELECT payload, ts FROM pregao_events
+                 WHERE account_id = ? AND type = 'qa.status' AND source = 'live'
+                 ORDER BY id DESC
+                 LIMIT 40"
             );
-            $row = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : false;
-            if ($row) {
-                $status = (string) ($row['status'] ?? 'n/d');
-                $pass = strtolower($status) === 'passed';
+            $stmt->execute([$accountId]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            foreach ($rows as $row) {
+                $payload = is_string($row['payload'] ?? null)
+                    ? json_decode((string) $row['payload'], true)
+                    : null;
+                if (!is_array($payload)) {
+                    continue;
+                }
+                $result = strtolower((string) ($payload['result'] ?? ''));
+                if (!in_array($result, ['passed', 'failed', 'blocked'], true)) {
+                    continue;
+                }
+                $finishedAt = (string) ($payload['observed_at'] ?? $row['ts'] ?? '');
+                $pass = $result === 'passed';
+                $value = $pass
+                    ? ('OK · última execução ' . $finishedAt)
+                    : $result . ($finishedAt !== '' ? (' · ' . $finishedAt) : '');
+                break;
             }
         } catch (Throwable) {
-            // try redis/file based? keep n/d
-            $status = 'sem runs';
+            $value = 'sem runs';
+            $pass = false;
         }
+
         return [
             'id' => 'qa_playwright',
             'label' => 'QA Playwright verde na última execução',
             'pass' => $pass,
-            'value' => $status,
+            'value' => $value,
         ];
     }
 

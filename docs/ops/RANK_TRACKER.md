@@ -1,37 +1,59 @@
-# Rank Tracker — causa da desativação e política Onda 4
+# Rank Tracker — Onda 4.1 (fix/onda4-1-rank)
 
-## Causa exata (não é scraping HTML)
+## Política (inegociável)
 
-O Pregão exibia **"Posição orgânica: N/D — desativado por segurança"** / **"rank tracker desativado"** porque:
+- Somente **API oficial** `api.mercadolibre.com`.
+- **Proibido**: scraping HTML, headless contra o site ML, rotação de IP para burlar ASN.
+- Tokens ML **nunca** passam pelo coletor local (T1b).
+- `ML_WRITE_AUTOMATION=false` intacto.
 
-1. Flag `RANK_TRACKER_ENABLED=false` (default em `.env`, `config/pregao.php` e units systemd `pregao-tick` / `pregao-keywords`).
-2. A implementação **sempre** usou a **API oficial** `GET /sites/{site}/search` (`MercadoLivreClient::searchItems` / `PregaoMetricsCollector::collectKeywords`).
-3. Neste host (IP de datacenter / Cloudflare PolicyAgent) o endpoint responde **HTTP 403 `forbidden`** de forma consistente — com ou sem `access_token`, com ou sem `client_id`. Comentário no client:
+## Evidência T1a — busca autenticada (2026-08-10)
 
-   > `/sites/{site}/search 403 genérico (forbidden) — IP datacenter/CF; esperado.`
+Egress host: `72.62.14.91` (datacenter). Token user-scoped renovado com sucesso (`/users/me` 200).
 
-4. **Scraping HTML do site do ML não faz parte deste caminho.** O `ProxyService` / scraping foi removido do repo em outro contexto (auditoria AWA 2026-08-03). O rank tracker nunca dependeu de HTML.
+| Tentativa | Request (sem token no log) | HTTP | Resultado |
+|-----------|----------------------------|------|-----------|
+| A | `GET /sites/MLB/search?q=…&limit=1` **Bearer user OAuth** (`public=false`) + UA app | **403** `forbidden` | falhou |
+| B | idem `public=true` / app-only | **403** | falhou |
+| C | cURL anônimo raw | **403** | falhou |
 
-## O que a Onda 4 faz
+**Conclusão T1a:** 403 persiste mesmo autenticado → **não** habilitar search neste egress. Seguir T1b + T1c.
 
-- `RankTrackerService`: keywords por anúncio, tabela `rank_history`, rate limit, cache diário, backoff 429, circuit breaker.
-- CLI `bin/rank-tracker-collect.php` (janela 04h–06h recomendada).
-- Pregão/UI consomem status real (`circuit_open` / `search_forbidden` / capturas).
-- Enquanto o 403 persistir neste egress, **não haverá posições reais**; o circuit abre após 3 falhas e o Pregão permanece indisponível com motivo explícito — sem inventar dados.
+Arquivo bruto: `docs/ops/evidence/t1a-search-probe-20260810.json` (gerado no smoke).
 
-## Decisão arquitetural (Onda 4)
+## T1b — Coletor local residencial
 
-Enquanto `/sites/MLB/search` retornar **403** neste egress:
+- Script: `collector/rank-collector.php` (<200 linhas)
+- README + install Linux/Windows em `collector/`
+- Endpoints: `GET /api/rank/assignments`, `POST /api/rank/ingest` (chave `RANK_COLLECTOR_KEY` + HMAC)
+- Flag: `RANK_COLLECTOR_LOCAL=false` → degradado elegante
+- Volume: máx 30 kw/dia, 1 req/2s
+- `position_source=proxy`
 
-1. **Não inventamos posições.** `rank_history` pode registrar tentativas com `position=NULL` e `error=search_forbidden` (auditoria).
-2. Circuit breaker abre após N falhas → Pregão mostra **INDISPONÍVEL** com reason `circuit_open` / causa documentada (não "N/D genérico").
-3. Keywords são derivadas e persistidas em `item_rank_keywords` mesmo sem posição.
-4. Habilitação de `RANK_TRACKER_ENABLED=true` em produção só após API liberar (curl de smoke).
+## T1c — Fallback trends/highlights (sempre)
 
-Cadência: coleta diária **04h–06h** America/Sao_Paulo (`bin/rank-tracker-collect.php`), máx. `RANK_TRACKER_MAX_REQ_PER_MIN` (default 6), cache 1 captura/kw/mlb/dia.
+Deste host, **com** OAuth user-scoped:
 
+| Endpoint | Auth | HTTP |
+|----------|------|------|
+| `GET /trends/MLB` | Bearer | **200** (lista) |
+| `GET /trends/MLB/{category}` | Bearer | **200** |
+| `GET /highlights/MLB/category/{id}` | Bearer | **200** |
+| `GET /trends/MLB` | anônimo | **403** PolicyAgent |
 
-1. Confirmar `curl`/`MercadoLivreClient` a `/sites/MLB/search?q=teste&limit=1` retorna `results` (não 403).
-2. `RANK_TRACKER_ENABLED=true` no `.env`.
-3. Rodar `php bin/rank-tracker-collect.php --account-id=1335`.
-4. Religar `pregao-keywords.timer` se desejado.
+`position_source=trends` · Pregão mostra **trends parcial (sem posição exata)** em vez de N/D genérico.
+
+## Flags
+
+```
+RANK_TRACKER_ENABLED=false          # search neste host continua 403
+RANK_COLLECTOR_LOCAL=false          # ligar só se o usuário agendar o coletor
+RANK_COLLECTOR_KEY=                 # >=16 chars
+RANK_COLLECTOR_HMAC_SECRET=         # default = KEY se vazio no coletor
+```
+
+## Reabilitar search (futuro)
+
+1. Smoke: `GET /sites/MLB/search` autenticado = 200 com `results`
+2. `RANK_TRACKER_ENABLED=true`
+3. `php bin/rank-tracker-collect.php --account-id=… --force`
