@@ -1,6 +1,6 @@
 {
     "version": 2,
-    "updated_at": "2026-08-09",
+    "updated_at": "2026-08-10",
     "north_star": "Automação ML em escala com governança: read-only primeiro; escrita/apply na conta 1335 só com aprovação explícita item a item (SAFE_MODE + FORBIDDEN_ACCOUNTS)",
     "features": [
         {
@@ -247,6 +247,15 @@
             "passes": true,
             "priority": "P1",
             "notes": "2026-08-10, branch feat/onda3-5-dados. Backup pre-onda3.5-20260810_021625.sql. T1: audit 35 sold/90d (10 real sku_custos, 25 missing); /dashboard/cogs + CogsService/API + badge P&L. T2: AccountUnlockPlanService + aba Raio X; MLB7346643828 under_review/sub_status=forbidden/catálogo MLB75435443; 3 catalog blocks. T3: seed highlights (search API forbidden no app); 9 competitor_items; Pregão Concorrentes available. T4: docs/ops/AWA_MOTOS_CONNECT.md; fix APP_KEY GPCS→$_SERVER para CLI decrypt. T5: Operação + Catálogo/Governança explícitos (não colapsar). PHPUnit 4434/0 (+5). ML_WRITE_AUTOMATION=false."
+        },
+        {
+            "id": "merge-master-ondas-2-3-3.1-2.1-3.5",
+            "name": "Merge único em master: Ondas 2, 3, 3.1, 2.1 e 3.5",
+            "description": "Merge sequencial FF das branches verificadas em produção + deploy.sh restart workers long-lived.",
+            "category": "infra",
+            "passes": true,
+            "priority": "P0",
+            "notes": "2026-08-10 autorizado. Hashes: onda2=14a8c7d6 onda3=062ce886 onda3.1=3eb68761 onda2.1=d9fb7a17 onda3.5=791c7ce1. Master tip pós-merge=791c7ce1 (FF). Conflitos: zero. PHPUnit 4434/0. Backup pre-merge-master-20260810_030204.sql. Branches preservadas até OK smoke independente."
         }
     ]
 }

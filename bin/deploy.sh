@@ -6,6 +6,7 @@
 #   bash bin/deploy.sh              # Deploy completo
 #   bash bin/deploy.sh --check      # Só verificação
 #   bash bin/deploy.sh --services   # Só checar serviços
+#   bash bin/deploy.sh --workers    # Só restart workers long-lived
 #   bash bin/deploy.sh --cron       # Só instalar crontab
 #   bash bin/deploy.sh --migrate    # Só aplicar migrations
 #
@@ -132,10 +133,60 @@ fix_permissions() {
 }
 
 # ============================================================
-# 5. HTTPS & SITE CHECK
+# 5. LONG-LIVED WORKERS (systemd)
+# Lição Onda 3.1: agent-runtime-monitor carrega classes em memória;
+# sem restart após deploy, FINANCEIRO/ORQUESTRADOR continuam no código antigo.
+# ============================================================
+restart_long_lived_workers() {
+    section "5. Restart workers de longa duração"
+
+    local services=(
+        agent-runtime-monitor.service
+        pregao-tick.service
+        pregao-ws.service
+    )
+
+    if ! command -v systemctl &>/dev/null; then
+        warn "systemctl não disponível — pule restart manual dos workers"
+        return
+    fi
+
+    for svc in "${services[@]}"; do
+        if systemctl list-unit-files "$svc" &>/dev/null || systemctl cat "$svc" &>/dev/null; then
+            if systemctl restart "$svc" 2>/dev/null; then
+                sleep 1
+                if systemctl is-active --quiet "$svc"; then
+                    ok "$svc reiniciado (active)"
+                else
+                    fail "$svc reiniciado mas NÃO active"
+                fi
+            else
+                # Sem permissão sudo: tenta user-level; senão avisa
+                warn "Não foi possível reiniciar $svc (permissão?). Rode: systemctl restart $svc"
+            fi
+        else
+            info "$svc não instalado — ignorado"
+        fi
+    done
+
+    # PHP-FPM: recarrega opcache sem derrubar conexões
+    for fpm in php8.4-fpm php8.3-fpm php8.2-fpm php8.1-fpm php8.0-fpm php-fpm; do
+        if systemctl list-unit-files "${fpm}.service" &>/dev/null || systemctl cat "${fpm}.service" &>/dev/null; then
+            if systemctl reload "$fpm" 2>/dev/null; then
+                ok "$fpm reload (opcache)"
+            else
+                warn "Não foi possível reload $fpm (permissão?)"
+            fi
+            break
+        fi
+    done
+}
+
+# ============================================================
+# 6. HTTPS & SITE CHECK
 # ============================================================
 check_https() {
-    section "5. HTTPS & Site"
+    section "6. HTTPS & Site"
 
     APP_URL=$(grep "^APP_URL=" .env 2>/dev/null | cut -d= -f2-)
 
@@ -211,11 +262,15 @@ case "$MODE" in
     --migrate)
         run_migrations
         ;;
+    --workers)
+        restart_long_lived_workers
+        ;;
     full|*)
         check_prerequisites
         check_services
         run_migrations
         fix_permissions
+        restart_long_lived_workers
         check_https
         ;;
 esac
