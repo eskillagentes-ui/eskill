@@ -1,3 +1,62 @@
+## 2026-08-10 (17ª parte) — Onda 2.1: Parte A (Perguntas, bulk selection, heading duplicado)
+
+### Contexto
+Usuário trouxe prompt "Onda 2.1" com 3 pendências supostamente nunca executadas
+(A1 Perguntas, A2 updateBulkSelection duplicado, A3 heading duplicado em
+Promoções) + Parte B (merge das branches fix/onda2-consistencia →
+fix/onda3-operacional → fix/onda3-1-agentes em master, autorizado mas condicionado
+à verificação da Parte A pelo usuário antes de executar). Branch
+`fix/onda2-1-pendencias`, criada a partir de `fix/onda3-1-agentes`. Backup MySQL
+completo antes de começar (`storage/backups/pre-onda2.1-20260810_015754.sql`,
+5.49GB, sem erros).
+
+### Descoberta: A2 e A3 já estavam corrigidos (sem ação necessária)
+Investigação encontrou que A2 (commit `d5986a0f`, "unifica updateBulkSelection()
+e funções irmãs duplicadas") e A3 (commit `8f569a4c`, "remove bloco duplicado
+inteiro em /dashboard/promotions") já foram corrigidos na Onda 2, e esses commits
+já estavam na branch `fix/onda3-1-agentes` de onde parti. Verificado ao vivo
+(sessão admin real via curl, conta 1335): `/dashboard/items` carrega
+`items-dashboard.js` uma única vez com uma única definição de
+`updateBulkSelection()`; `/dashboard/marketing/promotions` renderiza exatamente
+1x "Central de Promoções" (título de página) e 1x "Promoções Disponíveis"
+(header do card) — textos diferentes, nunca foram duplicados um do outro.
+Nenhuma mudança de código necessária para A2/A3.
+
+### A1 — Perguntas: causa raiz NÃO era mais fonte de dados divergente
+Commit `910a7545` (Onda 2) já unificou tabela e contadores em
+`QuestionService::getQuestionsLocal()` — confirmado ao vivo:
+`/api/questions/stats` retorna `total:45, answered:45, pending:0`, e
+`/api/questions?limit=10` retorna as 45 perguntas reais com `source:"local"`.
+A causa raiz ATUAL (reproduzida ao vivo) é outra: o filtro padrão da tela em
+`app/Views/dashboard/questions.php` (`#questionFilter`, opção `unanswered`
+marcada `selected`) faz `loadQuestions()` chamar
+`/api/questions?status=unanswered&...` no carregamento inicial — para uma conta
+com 0 perguntas pendentes (45/45 já respondidas), a API retorna corretamente
+`questions: []` para esse filtro. A mensagem genérica "Nenhuma pergunta
+encontrada" ao lado de "Total: 45" no topo da tela parecia inconsistência de
+dados, mas era o resultado esperado do filtro ativo.
+**Correção**: mensagem de estado vazio agora varia por filtro selecionado
+(unanswered → "Nenhuma pergunta pendente — todas já foram respondidas! 🎉";
+answered → "Nenhuma pergunta respondida ainda"; all → "Nenhuma pergunta
+encontrada para esta conta"). Verificado ao vivo: página `/dashboard/questions`
+já serve o JS atualizado (sem restart necessário — views PHP não sofrem o
+problema de bytecode preso de workers systemd de longa duração da Onda 3.1).
+
+### Validação
+Suite Unit completa rodada ao final: **4429 testes, 10488 assertions, 0
+falhas**. `ML_WRITE_AUTOMATION=false` intacto; todas as verificações desta
+sessão foram leituras (sessão admin de diagnóstico criada diretamente no Redis
+para inspeção read-only via curl, destruída ao final; nenhuma escrita no
+Mercado Livre).
+
+### Pendente (aguardando autorização explícita do usuário)
+Parte B (merge sequencial fix/onda2-consistencia → fix/onda3-operacional →
+fix/onda3-1-agentes → fix/onda2-1-pendencias em master + deploy + restart de
+workers + smoke test) **não foi executada** nesta sessão — usuário pediu para
+aguardar a verificação da Parte A em produção antes de autorizar.
+
+---
+
 ## 2026-08-09/10 (16ª parte) — Onda 3.1: FINANCEIRO/ORQUESTRADOR no cron real + Frete + Raio X + Diagnóstico + QA Playwright
 
 ### Contexto
