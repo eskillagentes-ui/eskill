@@ -274,6 +274,15 @@
             "passes": true,
             "priority": "P1",
             "notes": "2026-08-10 branch feat/onda4-loop (NÃO mergeada). T0 OAuth Adicionar conta OK até redirect ML. T1 causa desativação=403 /sites/MLB/search datacenter (não scraping) — docs/ops/RANK_TRACKER.md; circuit abre após 3 falhas; rank_history com tentativas error=search_forbidden. T2 SeoKpiService + aba Resultados SEO Killer. T3 MLWriteGateway kill_switch→flags→sentinela/TRAVADA→allowlist→rate→dry-run; demo pause MORTO bloqueada por kill_switch, api_called=no. T4 AdsReadinessService fila real waste R$ + Executar disabled. T5 checklist 1/7 (só backup<24h). ML_WRITE_AUTOMATION=false. Legacy updateItem paths ainda existem fora do gateway — Onda 5 migra; nenhum caminho NOVO bypassa."
+        },
+        {
+            "id": "merge-master-onda4-loop",
+            "name": "Merge Onda 4 (feat/onda4-loop) em master",
+            "description": "FF-merge do loop dry-run/fail-closed + hotfix pós-merge CMV/backups.",
+            "category": "infra",
+            "passes": true,
+            "priority": "P0",
+            "notes": "2026-08-10. Tip c94e0c8d. Backup pre-merge-onda4-20260810_044003.sql. PHPUnit 4449/0. ML_WRITE_AUTOMATION=false. Branch preservada. Sem push GitHub (sem SSH key)."
         }
     ]
 }

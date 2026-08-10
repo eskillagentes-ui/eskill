@@ -1,3 +1,18 @@
+## 2026-08-10 (22ª parte) — MERGE Onda 4 em master
+
+Autorização: verificação UI/CLI do usuário → Proceed.
+Branch `feat/onda4-loop` FF-merge em `master` (tip `c94e0c8d`).
+Inclui também `de4be68a` (hotfix CMV/backups) que ainda não estava em master.
+
+- Backup: `storage/backups/pre-merge-onda4-20260810_044003.sql` (5.2G)
+- PHPUnit Unit: **4449 / 0 falhas** (27 skipped)
+- `ML_WRITE_AUTOMATION=false` intacto
+- Workers: `bin/deploy.sh --workers`
+- Branch `feat/onda4-loop` **preservada** (não deletada)
+- Sem push origin (SSH key ainda ausente / H2)
+
+---
+
 ## 2026-08-10 (21ª parte) — Onda 4: loop de otimização (dry-run / fail-closed)
 
 Branch: `feat/onda4-loop` (a partir de `fix/pos-merge-hotfix` / `de4be68a`).
