@@ -284,11 +284,22 @@ async function loadQuestions() {
                 </tr>
             `}).join('');
         } else {
+            // Onda 2.1 / A1: o filtro padrão da tela é "unanswered" (Não Respondidas).
+            // Quando a conta não tem nenhuma pergunta pendente, esse filtro retorna [] mesmo
+            // com dezenas de perguntas respondidas — os contadores do topo (que somam TODAS)
+            // continuam mostrando o total real. Sem uma mensagem por contexto, isso parecia um
+            // bug de "contadores != tabela" quando na verdade é o resultado esperado do filtro.
+            const emptyMessages = {
+                unanswered: 'Nenhuma pergunta pendente — todas já foram respondidas! 🎉',
+                answered: 'Nenhuma pergunta respondida ainda.',
+                all: 'Nenhuma pergunta encontrada para esta conta.',
+            };
+            const emptyMessage = emptyMessages[filter] || emptyMessages.all;
             tbody.innerHTML = `
                 <tr>
                     <td colspan="5" class="text-center py-5 text-muted">
                         <i class="bi bi-chat-dots fs-1"></i>
-                        <p class="mt-2 mb-0">Nenhuma pergunta encontrada</p>
+                        <p class="mt-2 mb-0">${emptyMessage}</p>
                     </td>
                 </tr>
             `;
