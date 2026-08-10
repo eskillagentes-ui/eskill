@@ -52,6 +52,16 @@ RANK_COLLECTOR_KEY=                 # >=16 chars
 RANK_COLLECTOR_HMAC_SECRET=         # default = KEY se vazio no coletor
 ```
 
+## Cadência diária (servidor)
+
+```bash
+# T1c leve (trends/highlights autenticados) — já no crontab 05:20
+php bin/rank-tracker-collect.php --account-id=1335 --demand-only
+
+# Search completo só na janela 04–06h (ou --force); neste host ainda 403
+php bin/rank-tracker-collect.php --account-id=1335 --force
+```
+
 ## Reabilitar search (futuro)
 
 1. Smoke: `GET /sites/MLB/search` autenticado = 200 com `results`

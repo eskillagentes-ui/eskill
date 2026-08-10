@@ -33,6 +33,7 @@ Não completar OAuth (ação do usuário). Doc: `docs/ops/AWA_MOTOS_CONNECT.md`.
 
 ---
 
+## 2026-08-10 (22ª parte) — MERGE Onda 4 em master
 
 Autorização: verificação UI/CLI do usuário → Proceed.
 Branch `feat/onda4-loop` FF-merge em `master` (tip `c94e0c8d`).

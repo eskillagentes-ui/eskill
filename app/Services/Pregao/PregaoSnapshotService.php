@@ -449,13 +449,22 @@ final class PregaoSnapshotService
                 'trends' => 'trends_partial',
             ];
             $posSource = (string) ($rankStatus['position_source'] ?? '');
+            $freshness = $rankStatus['freshness'] ?? null;
+            $collectedAt = null;
+            if (is_string($freshness) && $freshness !== '') {
+                $ts = strtotime($freshness);
+                if ($ts !== false) {
+                    $collectedAt = $ts;
+                }
+            }
             $meta['metrics']['posicao_media'] = [
                 'available' => (bool) ($rankStatus['available'] ?? false),
                 'reason' => $rankStatus['available'] ?? false
                     ? null
                     : (string) ($rankStatus['reason'] ?? 'no_captures'),
                 'label' => $rankStatus['label'] ?? null,
-                'freshness' => $rankStatus['freshness'] ?? null,
+                'freshness' => $freshness,
+                'collected_at' => $collectedAt,
                 'avg_position' => $rankStatus['avg_position'] ?? null,
                 'position_source' => $posSource !== '' ? $posSource : null,
                 'partial' => (bool) ($rankStatus['partial'] ?? false),
