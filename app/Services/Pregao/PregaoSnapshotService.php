@@ -610,23 +610,7 @@ final class PregaoSnapshotService
                         return $projected;
                     }
                 }
-                // Projeção mínima se assinatura/idade impedir projectStatus
-                return [
-                    'executed' => true,
-                    'running' => false,
-                    'suite' => $payload['suite'] ?? null,
-                    'test' => $payload['test'] ?? null,
-                    'result' => $result,
-                    'status' => $result,
-                    'video_url' => $payload['video_url'] ?? null,
-                    'stream_url' => $payload['stream_url'] ?? null,
-                    'run_id' => $payload['run_id'] ?? null,
-                    'sequence' => $payload['sequence'] ?? null,
-                    'step' => $payload['step'] ?? null,
-                    'observed_at' => $payload['observed_at'] ?? null,
-                    'log' => [],
-                    'trusted' => false,
-                ];
+                // Sem assinatura/projeção confiável: não inventar execução (fail-closed).
             }
         } catch (Throwable) {
             // empty below
