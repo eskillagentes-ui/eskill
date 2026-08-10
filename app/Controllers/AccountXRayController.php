@@ -631,7 +631,8 @@ class AccountXRayController
         $this->jsonHeader();
 
         try {
-            $accountId = (int) ($this->request->get('account_id') ?? 0);
+            // Este controller não estende BaseController — usar $_GET como nos demais endpoints.
+            $accountId = (int) ($_GET['account_id'] ?? $this->activeAccountId() ?? 0);
             if ($accountId <= 0) {
                 $this->error400('account_id obrigatório');
                 return;
@@ -642,7 +643,7 @@ class AccountXRayController
             }
 
             $service = new \App\Services\AccountUnlockPlanService($accountId);
-            $rebuild = (string) ($this->request->get('rebuild') ?? '') === '1';
+            $rebuild = (string) ($_GET['rebuild'] ?? '') === '1';
 
             if ($rebuild) {
                 // Rebuild a partir do último relatório Raio X (governance no JSON)
@@ -684,11 +685,8 @@ class AccountXRayController
         $this->jsonHeader();
 
         try {
-            $accountId = (int) ($this->request->get('account_id') ?? 0);
             $body = $this->jsonInput();
-            if ($accountId <= 0 && isset($body['account_id'])) {
-                $accountId = (int) $body['account_id'];
-            }
+            $accountId = (int) ($_GET['account_id'] ?? $body['account_id'] ?? $this->activeAccountId() ?? 0);
             if ($accountId <= 0) {
                 $this->error400('account_id obrigatório');
                 return;

@@ -31,8 +31,15 @@ das Ondas 2, 3, 3.1, 2.1 e 3.5. `ML_WRITE_AUTOMATION=false` intacto.
   (lição Onda 3.1). Flag `--workers`.
 - Branches mergeadas NÃO deletadas (aguardam OK do smoke independente do usuário).
 
+### Hotfix pós-smoke
+- `AccountXRayController::unlockPlan/resolveUnlockItem` usavam `$this->request`
+  (controller não estende BaseController) → HTTP 500. Corrigido para `$_GET`
+  + `activeAccountId()`, padrão dos demais endpoints do mesmo controller.
+- `deploy.sh`: fallback SIGTERM no MainPID quando `systemctl restart` sem
+  permissão (User=eskill + Restart=always).
+
 ### Hash final master
-`791c7ce1` (+ commit deploy.sh workers se aplicado nesta sessão).
+ver `git rev-parse HEAD` após commits desta sessão (`acdfd894`+hotfix).
 
 ---
 

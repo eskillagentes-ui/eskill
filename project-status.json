@@ -255,7 +255,7 @@
             "category": "infra",
             "passes": true,
             "priority": "P0",
-            "notes": "2026-08-10 autorizado. Hashes: onda2=14a8c7d6 onda3=062ce886 onda3.1=3eb68761 onda2.1=d9fb7a17 onda3.5=791c7ce1. Master tip pós-merge=791c7ce1 (FF). Conflitos: zero. PHPUnit 4434/0. Backup pre-merge-master-20260810_030204.sql. Branches preservadas até OK smoke independente."
+            "notes": "2026-08-10 autorizado. Hashes branches: onda2=14a8c7d6 onda3=062ce886 onda3.1=3eb68761 onda2.1=d9fb7a17 onda3.5=791c7ce1. Merge FF zero conflitos. PHPUnit 4434/0. Backup pre-merge-master-20260810_030204.sql. Hotfix unlock-plan ($this->request null). deploy.sh restart workers (systemctl ou SIGTERM fallback). Branches preservadas até OK smoke independente."
         }
     ]
 }

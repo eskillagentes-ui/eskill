@@ -153,16 +153,31 @@ restart_long_lived_workers() {
 
     for svc in "${services[@]}"; do
         if systemctl list-unit-files "$svc" &>/dev/null || systemctl cat "$svc" &>/dev/null; then
-            if systemctl restart "$svc" 2>/dev/null; then
-                sleep 1
+            restarted=0
+            if systemctl restart "$svc" 2>/dev/null || sudo -n systemctl restart "$svc" 2>/dev/null; then
+                restarted=1
+            else
+                # Sem systemctl privilegiado: SIGTERM no MainPID (User=eskill) → Restart=always
+                pid=$(systemctl show "$svc" -p MainPID --value 2>/dev/null || echo "")
+                if [[ -n "$pid" && "$pid" != "0" ]] && kill -TERM "$pid" 2>/dev/null; then
+                    restarted=1
+                    info "$svc: systemctl sem permissão — SIGTERM PID $pid (systemd reinicia)"
+                fi
+            fi
+            if [[ "$restarted" -eq 1 ]]; then
+                # agent-runtime tem RestartSec=30
+                sleep 2
+                for _ in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15; do
+                    systemctl is-active --quiet "$svc" && break
+                    sleep 2
+                done
                 if systemctl is-active --quiet "$svc"; then
                     ok "$svc reiniciado (active)"
                 else
                     fail "$svc reiniciado mas NÃO active"
                 fi
             else
-                # Sem permissão sudo: tenta user-level; senão avisa
-                warn "Não foi possível reiniciar $svc (permissão?). Rode: systemctl restart $svc"
+                warn "Não foi possível reiniciar $svc. Rode: sudo systemctl restart $svc"
             fi
         else
             info "$svc não instalado — ignorado"
@@ -172,10 +187,10 @@ restart_long_lived_workers() {
     # PHP-FPM: recarrega opcache sem derrubar conexões
     for fpm in php8.4-fpm php8.3-fpm php8.2-fpm php8.1-fpm php8.0-fpm php-fpm; do
         if systemctl list-unit-files "${fpm}.service" &>/dev/null || systemctl cat "${fpm}.service" &>/dev/null; then
-            if systemctl reload "$fpm" 2>/dev/null; then
+            if systemctl reload "$fpm" 2>/dev/null || sudo -n systemctl reload "$fpm" 2>/dev/null; then
                 ok "$fpm reload (opcache)"
             else
-                warn "Não foi possível reload $fpm (permissão?)"
+                warn "Não foi possível reload $fpm (precisa sudo). Opcache pode servir bytecode antigo até o próximo reload."
             fi
             break
         fi
