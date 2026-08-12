@@ -24,15 +24,15 @@ final class PHP84NullableCompatibilityTest extends TestCase
         return [
             'job id' => [
                 'app/Services/JobService.php',
-                'private function executeJob(string $type, array $payload, ?int $jobId = null): mixed',
+                'private function executeJob(string $type, array $payload, ?int $jobId = null',
             ],
             'refresh token days' => [
                 'app/Services/RefreshTokenService.php',
-                'public function createToken(int $userId, ?string $deviceInfo = null, ?int $days = null): string',
+                'public function createToken(int $userId, ?string $deviceInfo = null, ?int $days = null',
             ],
             'market category' => [
                 'app/Services/AI/SEO/MarketAnalytics.php',
-                'public function analyzemarketSentiment(?string $categoryId = null): array',
+                'public function analyzemarketSentiment(?string $categoryId = null',
             ],
         ];
     }

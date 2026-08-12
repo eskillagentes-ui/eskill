@@ -359,10 +359,68 @@ class QuestionServiceTest extends TestCase
 
         $db = $this->createMockDb($dbRow);
         $service = $this->buildService(db: $db);
-        $result = $service->getQuestions(['account_id' => 'all']);
+        $result = $service->getQuestions([
+            'account_id' => 'all',
+            'owner_user_id' => 7,
+        ]);
 
         $this->assertTrue($result['success']);
         $this->assertEquals('local', $result['source']);
+    }
+
+    public function testGetQuestionsAllWithoutOwnerFailsClosed(): void
+    {
+        $db = $this->createMockDb([
+            'question_id' => 'Q1',
+            'question_text' => 'Serve?',
+            'status' => 'UNANSWERED',
+            'item_id' => 'MLB111',
+            'from_user_id' => 100,
+            'date_created' => '2026-01-01 00:00:00',
+            'account_id' => 99,
+            'seller_id' => 12345,
+            'sentiment' => null,
+            'intent' => null,
+            'urgency' => null,
+            'ai_draft' => null,
+            'answer_text' => null,
+            'answer_date' => null,
+        ]);
+        $service = $this->buildService(db: $db);
+        $result = $service->getQuestions(['account_id' => 'all']);
+
+        $this->assertFalse($result['success']);
+        $this->assertSame('unscoped_all_forbidden', $result['error']);
+        $this->assertSame([], $result['questions']);
+    }
+
+    public function testGetQuestionsAllScopesSqlToOwnedAccounts(): void
+    {
+        $captured = ['sql' => [], 'params' => null];
+        $stmt = $this->createMock(PDOStatement::class);
+        $stmt->method('execute')->willReturnCallback(function ($params = []) use (&$captured) {
+            $captured['params'] = $params;
+            return true;
+        });
+        $stmt->method('fetchAll')->willReturn([]);
+        $stmt->method('fetchColumn')->willReturn(0);
+
+        $db = $this->createMock(PDO::class);
+        $db->method('prepare')->willReturnCallback(function (string $sql) use (&$captured, $stmt) {
+            $captured['sql'][] = $sql;
+            return $stmt;
+        });
+
+        $service = $this->buildService(db: $db);
+        $service->getQuestions([
+            'account_id' => 'all',
+            'owner_user_id' => 42,
+        ]);
+
+        $joined = implode("\n", $captured['sql']);
+        $this->assertStringContainsString('ml_accounts', $joined);
+        $this->assertStringContainsString('user_id', $joined);
+        $this->assertSame([42], $captured['params']);
     }
 
     public function testGetQuestionsWithEnrichedLocalData(): void

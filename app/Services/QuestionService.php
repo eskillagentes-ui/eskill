@@ -151,11 +151,20 @@ class QuestionService
         $offset = max(0, (int)($filters['offset'] ?? 0));
 
         if (isset($filters['account_id']) && $filters['account_id'] === 'all') {
+            $ownerUserId = (int) ($filters['owner_user_id'] ?? 0);
+            if ($ownerUserId <= 0) {
+                return $this->emptyQuestionsPayload($limit, $offset, [
+                    'error' => 'unscoped_all_forbidden',
+                    'message' => 'account_id=all exige ator autenticado; o resultado fica limitado às contas owned.',
+                    'source' => 'local',
+                ]);
+            }
+
             $local = $this->getQuestionsFromDatabase([
                 'status' => $filters['status'] ?? null,
                 'limit' => $limit,
                 'offset' => $offset,
-                'account_id' => 'all',
+                'owner_user_id' => $ownerUserId,
             ]);
 
             if (!isset($local['error'])) {
@@ -576,6 +585,9 @@ class QuestionService
             );
         }
 
+        $offset = max(0, (int)($filters['offset'] ?? 0));
+        $limit = max(1, min(200, (int)($filters['limit'] ?? 50)));
+
         $where = ["1=1"];
         $params = [];
 
@@ -584,16 +596,25 @@ class QuestionService
             $params[] = $filters['status'];
         }
 
-        if (!empty($filters['account_id']) && $filters['account_id'] !== 'all') {
+        $ownerUserId = (int) ($filters['owner_user_id'] ?? 0);
+        $filterAccountId = $filters['account_id'] ?? null;
+
+        if ($ownerUserId > 0) {
+            $where[] = 'account_id IN (SELECT id FROM ml_accounts WHERE user_id = ?)';
+            $params[] = $ownerUserId;
+        } elseif (is_numeric($filterAccountId) && (int) $filterAccountId > 0) {
             $where[] = "account_id = ?";
-            $params[] = (int)$filters['account_id'];
+            $params[] = (int) $filterAccountId;
         } elseif ($this->accountId !== null && $this->accountId > 0) {
             $where[] = "account_id = ?";
             $params[] = $this->accountId;
+        } else {
+            return $this->emptyQuestionsPayload($limit, $offset, [
+                'error' => 'unscoped_query_forbidden',
+                'message' => 'Consulta de perguntas exige conta autorizada ou contas do ator.',
+                'source' => 'local',
+            ]);
         }
-
-        $offset = max(0, (int)($filters['offset'] ?? 0));
-        $limit = max(1, min(200, (int)($filters['limit'] ?? 50)));
 
         $sql = "SELECT * FROM ml_questions WHERE " . implode(" AND ", $where) . " ORDER BY date_created DESC LIMIT $limit OFFSET $offset";
 

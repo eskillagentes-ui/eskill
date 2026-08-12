@@ -20,3 +20,6 @@ CREATE TABLE IF NOT EXISTS `ml_sales_blockers` (
   CONSTRAINT `fk_ml_sales_blockers_account`
     FOREIGN KEY (`account_id`) REFERENCES `ml_accounts` (`id`) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+-- DOWN:
+-- DROP TABLE IF EXISTS `ml_sales_blockers`;

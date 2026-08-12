@@ -12,14 +12,17 @@ class QuestionController extends BaseController
 {
     private QuestionService $service;
     private int $accountId;
+    private ?int $actorUserId;
 
     public function __construct()
     {
         parent::__construct();
         // SEC-001: AccountAccessPolicy — header/GET não contornam ownership
         $this->accountId = 0;
+        $resolver = new AccountContextResolver();
+        $this->actorUserId = $resolver->resolveActorUserId();
         try {
-            $this->accountId = (new AccountContextResolver())
+            $this->accountId = $resolver
                 ->authorizeForCurrentActor('questions.read')
                 ->accountId();
         } catch (AccountAccessException $e) {
@@ -38,22 +41,31 @@ class QuestionController extends BaseController
         header('Content-Type: application/json');
 
         $requestedAccount = $this->request->get('account_id');
-        // SEC-001: "all" permanece; qualquer ID numérico usa apenas a conta já autorizada
         $filters = [
             'status' => $this->request->get('status'),
             'item_id' => $this->request->get('item_id'),
             'limit' => $this->request->getInt('limit', 50),
             'offset' => $this->request->getInt('offset', 0),
-            'account_id' => ($requestedAccount === 'all') ? 'all' : ($this->accountId ?: null),
             'allow_local_cache' => $this->request->get('allow_local_cache'),
             'source' => $this->request->get('source')
         ];
 
-        // Se não for "all" e não tiver conta selecionada, erro
-        if (($filters['account_id'] !== 'all') && !$this->accountId) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Conta ML não selecionada']);
-            return;
+        // SEC-001: "all" só lista contas owned do ator (join ml_accounts.user_id)
+        if ($requestedAccount === 'all') {
+            if ($this->actorUserId === null || $this->actorUserId <= 0) {
+                http_response_code(401);
+                echo json_encode(['error' => 'Autenticação necessária']);
+                return;
+            }
+            $filters['account_id'] = 'all';
+            $filters['owner_user_id'] = $this->actorUserId;
+        } else {
+            if (!$this->accountId) {
+                http_response_code(400);
+                echo json_encode(['error' => 'Conta ML não selecionada']);
+                return;
+            }
+            $filters['account_id'] = $this->accountId;
         }
 
         $result = $this->service->getQuestions($filters);
@@ -62,6 +74,8 @@ class QuestionController extends BaseController
             $error = (string)$result['error'];
             if (in_array($error, ['missing_seller_id', 'local_cache_required'], true)) {
                 http_response_code(422);
+            } elseif (in_array($error, ['unscoped_all_forbidden', 'unscoped_query_forbidden'], true)) {
+                http_response_code(403);
             } elseif (in_array($error, ['db_unavailable', 'network_disabled', 'circuit_breaker_open'], true)) {
                 http_response_code(503);
             } elseif ($error === 'missing_token') {
@@ -82,10 +96,17 @@ class QuestionController extends BaseController
     {
         header('Content-Type: application/json');
 
+        if ($this->actorUserId === null || $this->actorUserId <= 0) {
+            http_response_code(401);
+            echo json_encode(['error' => 'Autenticação necessária']);
+            return;
+        }
+
         try {
-            // Usa cache local para não depender da API ML em tela inicial do dashboard.
+            // Cache local; SEC-001 limita às contas owned do ator.
             $all = $this->service->getQuestions([
                 'account_id' => 'all',
+                'owner_user_id' => $this->actorUserId,
                 'limit' => 200,
                 'offset' => 0,
                 'allow_local_cache' => true,
