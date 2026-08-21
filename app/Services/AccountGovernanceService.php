@@ -222,6 +222,37 @@ class AccountGovernanceService
         }
     }
 
+
+    /**
+     * Copy AccountXRayService enrich keys onto the unprefixed names that
+     * calculateFlags / calculateAccountMetrics read.
+     *
+     * Enrich writes _visits_30d / _sales_30d (and optionally 14d). Flags
+     * read visits_30d / sales_30d. Without this copy every item looks like
+     * 0 visits/sales → MORTO → account TRAVADA.
+     *
+     * Prefixed values win when present so freshly enriched metrics override
+     * a missing or stale unprefixed key. Unprefixed-only payloads are left
+     * unchanged (existing tests / non-XRay callers).
+     */
+    public static function normalizeItemMetricKeys(array $item): array
+    {
+        $pairs = [
+            'visits_30d' => '_visits_30d',
+            'sales_30d'  => '_sales_30d',
+            'visits_14d' => '_visits_14d',
+            'sales_14d'  => '_sales_14d',
+        ];
+
+        foreach ($pairs as $plain => $prefixed) {
+            if (array_key_exists($prefixed, $item)) {
+                $item[$plain] = $item[$prefixed];
+            }
+        }
+
+        return $item;
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // ACCOUNT METRICS
     // ═══════════════════════════════════════════════════════════════════════
@@ -248,6 +279,7 @@ class AccountGovernanceService
             } elseif ($status === 'paused') {
                 $pausedItems++;
             }
+            $item = self::normalizeItemMetricKeys($item);
             $totalVisits30d += (int)($item['visits_30d'] ?? 0);
             $totalSales30d += (int)($item['sales_30d'] ?? 0);
         }
@@ -278,6 +310,7 @@ class AccountGovernanceService
      */
     private function processItem(array $item, array $metrics): array
     {
+        $item = self::normalizeItemMetricKeys($item);
         $flags = $this->calculateFlags($item, $metrics);
         $score = $this->calculateItemScore($item, $flags, $metrics);
         $classification = $this->classifyItem($item, $flags, $score);
@@ -298,6 +331,7 @@ class AccountGovernanceService
      */
     public function calculateFlags(array $item, array $metrics): array
     {
+        $item = self::normalizeItemMetricKeys($item);
         $visits30d = (int)($item['visits_30d'] ?? 0);
         $visits14d = (int)($item['visits_14d'] ?? 0);
         $sales30d = (int)($item['sales_30d'] ?? 0);

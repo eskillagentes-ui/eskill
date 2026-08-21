@@ -971,4 +971,133 @@ class AccountGovernanceServiceTest extends TestCase
         $this->assertLessThan(500, $elapsed, "Pipeline took {$elapsed}ms for 100 items");
         $this->assertSame(100, $result['meta']['total_items']);
     }
+
+    // ── X-Ray enrich key aliases (_visits_30d → visits_30d) ──
+
+    public function testNormalizeItemMetricKeysCopiesPrefixedXRayFields(): void
+    {
+        $normalized = AccountGovernanceService::normalizeItemMetricKeys([
+            'id'            => 'MLB1',
+            '_visits_30d'   => 400,
+            '_sales_30d'    => 16,
+            '_visits_14d'   => 180,
+            '_sales_14d'    => 7,
+        ]);
+
+        $this->assertSame(400, $normalized['visits_30d']);
+        $this->assertSame(16, $normalized['sales_30d']);
+        $this->assertSame(180, $normalized['visits_14d']);
+        $this->assertSame(7, $normalized['sales_14d']);
+        $this->assertSame(400, $normalized['_visits_30d']);
+        $this->assertSame(16, $normalized['_sales_30d']);
+    }
+
+    public function testNormalizeItemMetricKeysLeavesUnprefixedOnlyPayloadsUnchanged(): void
+    {
+        $normalized = AccountGovernanceService::normalizeItemMetricKeys([
+            'visits_30d' => 200,
+            'sales_30d'  => 8,
+        ]);
+
+        $this->assertSame(200, $normalized['visits_30d']);
+        $this->assertSame(8, $normalized['sales_30d']);
+        $this->assertArrayNotHasKey('_visits_30d', $normalized);
+    }
+
+    public function testCalculateFlagsReadsPrefixedXRayEnrichKeys(): void
+    {
+        $item = [
+            'id'                 => 'MLB123',
+            'title'              => 'Bagageiro CG 160 Titan',
+            'price'              => 89.90,
+            'status'             => 'active',
+            'available_quantity' => 10,
+            '_visits_30d'        => 500,
+            '_sales_30d'         => 20,
+            '_visits_14d'        => 250,
+            '_sales_14d'         => 10,
+        ];
+        $metrics = ['active_items' => 10, 'total_visits_30d' => 1000];
+
+        $flags = $this->service->calculateFlags($item, $metrics);
+
+        $this->assertTrue($flags['HIGH_TRAFFIC']);
+        $this->assertFalse($flags['LOW_TRAFFIC']);
+        $this->assertFalse($flags['NO_SALES_30']);
+        $this->assertFalse($flags['STALE']);
+    }
+
+    public function testCalculateAccountMetricsReadsPrefixedXRayEnrichKeys(): void
+    {
+        $account = $this->buildAccountData();
+        $items = [
+            [
+                'id' => 'MLB1', 'title' => 'A', 'price' => 10.0, 'status' => 'active',
+                'available_quantity' => 5, '_visits_30d' => 100, '_sales_30d' => 5,
+            ],
+            [
+                'id' => 'MLB2', 'title' => 'B', 'price' => 10.0, 'status' => 'active',
+                'available_quantity' => 5, '_visits_30d' => 200, '_sales_30d' => 10,
+            ],
+        ];
+
+        $metrics = $this->service->calculateAccountMetrics($account, $items);
+
+        $this->assertSame(300, $metrics['total_visits_30d']);
+        $this->assertSame(15, $metrics['total_sales_30d']);
+        $this->assertEqualsWithDelta(0.05, $metrics['account_conv_30d'], 0.0001);
+    }
+
+    public function testPrefixedXRayKeysDoNotClassifyLiveItemAsMorto(): void
+    {
+        $item = [
+            'id'                 => 'MLB1',
+            'title'              => 'Bagageiro CG 160 Titan',
+            'price'              => 89.90,
+            'status'             => 'active',
+            'available_quantity' => 10,
+            '_visits_30d'        => 200,
+            '_sales_30d'         => 8,
+            '_visits_14d'        => 100,
+            '_sales_14d'         => 4,
+        ];
+        $metrics = ['active_items' => 1, 'total_visits_30d' => 200];
+
+        $flags = $this->service->calculateFlags($item, $metrics);
+        $score = $this->service->calculateItemScore($item, $flags, $metrics);
+        $class = $this->service->classifyItem($item, $flags, $score);
+
+        $this->assertFalse($flags['NO_SALES_30']);
+        $this->assertFalse($flags['STALE']);
+        $this->assertFalse($flags['LOW_TRAFFIC']);
+        $this->assertNotSame(AccountGovernanceService::CLASS_MORTO, $class);
+    }
+
+    public function testRunFullDiagnosticWithPrefixedXRayKeysDoesNotMarkHealthyCatalogTravada(): void
+    {
+        $account = $this->buildAccountData(['reputation_level' => 'green']);
+        $items = [];
+        for ($i = 1; $i <= 6; $i++) {
+            $items[] = [
+                'id'                 => 'MLB' . $i,
+                'title'              => 'Item ' . $i,
+                'price'              => 89.90,
+                'status'             => 'active',
+                'available_quantity' => 10,
+                '_visits_30d'        => 200,
+                '_sales_30d'         => 8,
+                '_visits_14d'        => 100,
+                '_sales_14d'         => 4,
+            ];
+        }
+
+        $result = $this->service->runFullDiagnostic($account, $items);
+
+        $this->assertNotSame(AccountGovernanceService::STATUS_TRAVADA, $result['account_status']);
+        foreach ($result['items'] as $item) {
+            $this->assertSame(200, $item['visits_30d']);
+            $this->assertSame(8, $item['sales_30d']);
+            $this->assertNotSame(AccountGovernanceService::CLASS_MORTO, $item['classification']);
+        }
+    }
 }

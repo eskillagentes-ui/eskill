@@ -423,7 +423,9 @@ class AccountXRayService
             $item['_has_sales']          = $sales30 > 0;
             $item['_is_stale']           = $visits > 0 && $sales30 === 0;
 
-            return $item;
+            // Single normalize: copy _visits_30d/_sales_30d onto visits_30d/sales_30d
+            // so AccountGovernanceService::calculateFlags sees enrich metrics.
+            return AccountGovernanceService::normalizeItemMetricKeys($item);
         }, $items);
     }
 
