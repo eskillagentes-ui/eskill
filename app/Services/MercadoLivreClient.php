@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Database;
+use App\Services\Catalog\MlListingReadClient;
 
 /**
  * Client for Mercado Livre API integration
  * This service handles communication with Mercado Livre's API as mentioned in the architecture
  */
-class MercadoLivreClient
+class MercadoLivreClient implements MlListingReadClient
 {
     /**
      * Endpoints públicos conhecidos por bloquear client_id via PolicyAgent.
@@ -1675,6 +1676,61 @@ class MercadoLivreClient
         $params = array_merge($defaults, $params);
 
         return $this->get("/users/{$sellerId}/items/search", $params);
+    }
+
+    /**
+     * Última moderação ativa do anúncio (GET /moderations/last_moderation/{ITEM}-ITM).
+     *
+     * @return array<string, mixed>|list<array<string, mixed>>
+     */
+    public function getLastModeration(string $itemId): array
+    {
+        $itemId = strtoupper(trim($itemId));
+        if ($itemId === '') {
+            return ['error' => 'invalid_item_id'];
+        }
+        $reference = str_ends_with($itemId, '-ITM') ? $itemId : $itemId . '-ITM';
+
+        try {
+            return $this->get('/moderations/last_moderation/' . $reference);
+        } catch (\Exception $e) {
+            log_error('Erro ao obter last_moderation', [
+                'item_id' => $itemId,
+                'error' => $e->getMessage(),
+            ]);
+            return ['error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * Histórico de infrações do vendedor (GET /moderations/infractions/{USER_ID}).
+     *
+     * @param array<string, scalar|null> $params
+     * @return array<string, mixed>
+     */
+    public function getSellerInfractions(array $params = []): array
+    {
+        $userId = $this->getMlUserId() ?? $this->getSellerId();
+        if ($userId === null || $userId === '') {
+            return [
+                'error' => 'seller_not_found',
+                'infractions' => [],
+            ];
+        }
+
+        $query = array_merge([
+            'language' => 'PT',
+            'limit' => 20,
+        ], $params);
+
+        try {
+            return $this->get('/moderations/infractions/' . $userId, $query);
+        } catch (\Exception $e) {
+            log_error('Erro ao obter infractions', [
+                'error' => $e->getMessage(),
+            ]);
+            return ['error' => $e->getMessage(), 'infractions' => []];
+        }
     }
 
     /**

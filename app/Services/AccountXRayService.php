@@ -34,7 +34,11 @@ class AccountXRayService
     // ─────────────────────────────────────────────────────────
 
     private const ITEMS_PER_BATCH          = 20;
-    private const MAX_ITEMS_FULL_ANALYSIS  = 100;  // analisar até 100 itens com SEO completo
+    private const MAX_ITEMS_FULL_ANALYSIS  = 500;  // SEO básico em todos os itens buscados (deep semantic continua limitado)
+    private const DEFAULT_MAX_ITEMS        = 400;  // cobre catálogo típico (~369) sem silenciar o restante
+    private const MAX_ITEMS_CAP            = 500;
+    private const ORDERS_PAGE_SIZE         = 50;   // /orders/search oficial
+    private const ORDERS_MAX_FETCH         = 500;  // teto seguro; não buscar unbounded
     private const MAX_COMPETITORS_PER_CAT  = 10;
     private const LONG_TAIL_TOP_ITEMS      = 20;   // gerar long-tail para os 20 melhores/piores
     private const SEMANTIC_TOP_ITEMS       = 10;   // análise semântica profunda nos 10 críticos
@@ -115,10 +119,13 @@ class AccountXRayService
             }
 
             // ── FASE 2: buscar itens ─────────────────────────────────
-            $maxItems = min((int) ($options['max_items'] ?? 200), 500);
+            $maxItems = min((int) ($options['max_items'] ?? self::DEFAULT_MAX_ITEMS), self::MAX_ITEMS_CAP);
             $includePaused = (bool) ($options['include_paused'] ?? true);
             $this->log('info', 'RAIO X F2: Buscando itens', ['max' => $maxItems]);
-            $rawItems = $this->fetchAllItems($maxItems, $includePaused, $sellerData['seller_id']);
+            $fetchedPack = $this->fetchAllItems($maxItems, $includePaused, $sellerData['seller_id']);
+            $rawItems = $fetchedPack['items'];
+            $universe = $fetchedPack['universe'];
+            $universeTotal = (int) $fetchedPack['universe_total'];
             $totalFetched = count($rawItems);
 
             // ── FASE 3: enriquecer com métricas ML ───────────────────
@@ -178,6 +185,16 @@ class AccountXRayService
                     'elapsed_ms'        => $elapsedMs,
                     'items_fetched'     => $totalFetched,
                     'items_analyzed'    => count($seoAudit['items'] ?? []),
+                    'analyzed'          => count($seoAudit['items'] ?? []),
+                    'universe'          => $universeTotal,
+                    'coverage'          => [
+                        'analyzed'        => count($seoAudit['items'] ?? []),
+                        'fetched'         => $totalFetched,
+                        'universe'        => $universeTotal,
+                        'active_universe' => (int) ($universe['active'] ?? 0),
+                        'paused_universe' => (int) ($universe['paused'] ?? 0),
+                        'truncated'       => $universeTotal > $totalFetched,
+                    ],
                 ],
                 'score_overall'     => $overallScore,
                 // AccountGovernanceService::runFullDiagnostic() devolve account_status no
@@ -200,7 +217,7 @@ class AccountXRayService
                 $report,
                 $overallScore,
                 $govResult['account_status'] ?? null,
-                $totalFetched,
+                $universeTotal,
                 count($seoAudit['items'] ?? []),
                 count($recoveryPlan['critical'] ?? [])
             );
@@ -314,17 +331,31 @@ class AccountXRayService
     // PHASE 2: buscar itens
     // ─────────────────────────────────────────────────────────
 
-    /** @return array<int, array> */
+    /**
+     * @return array{
+     *   items: list<array<string, mixed>>,
+     *   universe: array<string, int>,
+     *   universe_total: int
+     * }
+     */
     private function fetchAllItems(int $max, bool $includePaused, string $sellerId): array
     {
         $items    = [];
-        $offset   = 0;
         $pageSize = min(self::ITEMS_PER_BATCH, 50);
+        $universe = [
+            'active'       => 0,
+            'paused'       => 0,
+            'closed'       => 0,
+            'under_review' => 0,
+            'inactive'     => 0,
+        ];
 
+        // Ativos primeiro para não cair no teto e sumir do diagnóstico.
         $statuses = $includePaused ? ['active', 'paused'] : ['active'];
 
         foreach ($statuses as $status) {
             $offset = 0;
+            $statusTotal = 0;
             while (count($items) < $max) {
                 $response = $this->mlClient->get("/users/{$sellerId}/items/search", [
                     'status' => $status,
@@ -333,13 +364,12 @@ class AccountXRayService
                 ]);
 
                 $ids   = $response['results'] ?? [];
-                $total = (int) ($response['paging']['total'] ?? 0);
+                $statusTotal = (int) ($response['paging']['total'] ?? $statusTotal);
 
                 if (empty($ids)) {
                     break;
                 }
 
-                // Buscar detalhes em batch (até 20 por request)
                 $batches = array_chunk($ids, 20);
                 foreach ($batches as $batch) {
                     if (count($items) >= $max) {
@@ -349,18 +379,49 @@ class AccountXRayService
                     foreach ($details as $item) {
                         $item['_fetched_status'] = $status;
                         $items[] = $item;
+                        if (count($items) >= $max) {
+                            break 2;
+                        }
                     }
                     usleep(150_000); // 150ms entre batches
                 }
 
                 $offset += $pageSize;
-                if ($offset >= $total || count($ids) < $pageSize) {
+                if ($offset >= $statusTotal || count($ids) < $pageSize) {
                     break;
                 }
             }
+
+            $universe[$status] = $statusTotal > 0
+                ? $statusTotal
+                : $this->countItemsByStatus($sellerId, $status);
         }
 
-        return array_slice($items, 0, $max);
+        foreach (array_keys($universe) as $status) {
+            if (!in_array($status, $statuses, true)) {
+                $universe[$status] = $this->countItemsByStatus($sellerId, $status);
+            }
+        }
+
+        return [
+            'items'          => array_slice($items, 0, $max),
+            'universe'       => $universe,
+            'universe_total' => array_sum($universe),
+        ];
+    }
+
+    private function countItemsByStatus(string $sellerId, string $status): int
+    {
+        try {
+            $response = $this->mlClient->get("/users/{$sellerId}/items/search", [
+                'status' => $status,
+                'limit'  => 1,
+                'offset' => 0,
+            ]);
+            return (int) ($response['paging']['total'] ?? 0);
+        } catch (\Throwable) {
+            return 0;
+        }
     }
 
     // ─────────────────────────────────────────────────────────
@@ -443,21 +504,57 @@ class AccountXRayService
             // fixo -03:00 (evita divergência caso o fuso configurado mude).
             $tzOffset = \App\Helpers\TimezoneHelper::mysqlOffsetLiteral();
             $from     = date('Y-m-d', strtotime('-30 days')) . 'T00:00:00.000' . $tzOffset;
-            $response = $this->mlClient->get('/orders/search', [
-                'seller'         => $sellerId,
-                'order.status'   => 'paid',
-                'order.date_created.from' => $from,
-                'limit'          => 100,
-            ]);
+            $wanted   = array_fill_keys($itemIds, true);
+            $offset   = 0;
+            $pageSize = self::ORDERS_PAGE_SIZE;
+            $maxFetch = self::ORDERS_MAX_FETCH;
 
-            foreach ($response['results'] ?? [] as $order) {
-                foreach ($order['order_items'] ?? [] as $oi) {
-                    $id = $oi['item']['id'] ?? '';
-                    if (in_array($id, $itemIds, true)) {
-                        $salesMap[$id] = ($salesMap[$id] ?? 0) + (int) ($oi['quantity'] ?? 1);
+            do {
+                $response = $this->mlClient->get('/orders/search', [
+                    'seller'         => $sellerId,
+                    'order.status'   => 'paid',
+                    'order.date_created.from' => $from,
+                    'sort'           => 'date_desc',
+                    'limit'          => $pageSize,
+                    'offset'         => $offset,
+                ]);
+
+                if (isset($response['error'])) {
+                    $this->log('warning', 'fetchRecentSales API error', [
+                        'error'  => $response['error'],
+                        'offset' => $offset,
+                    ]);
+                    break;
+                }
+
+                $results = $response['results'] ?? [];
+                if (!is_array($results) || $results === []) {
+                    break;
+                }
+
+                foreach ($results as $order) {
+                    if (!is_array($order)) {
+                        continue;
+                    }
+                    foreach ($order['order_items'] ?? [] as $oi) {
+                        if (!is_array($oi)) {
+                            continue;
+                        }
+                        $id = $oi['item']['id'] ?? '';
+                        if (is_string($id) && $id !== '' && isset($wanted[$id])) {
+                            $salesMap[$id] = ($salesMap[$id] ?? 0) + (int) ($oi['quantity'] ?? 1);
+                        }
                     }
                 }
-            }
+
+                $got = count($results);
+                $offset += $got;
+                $pagingTotal = (int) ($response['paging']['total'] ?? 0);
+                if ($got < $pageSize || $offset >= $maxFetch || ($pagingTotal > 0 && $offset >= $pagingTotal)) {
+                    break;
+                }
+                usleep(150_000);
+            } while ($offset < $maxFetch);
         } catch (\Throwable $e) {
             $this->log('warning', 'fetchRecentSales falhou', ['error' => $e->getMessage()]);
         }
@@ -472,7 +569,7 @@ class AccountXRayService
     private function runSEOAudit(array $items, array $options): array
     {
         $deepSeo = (bool) ($options['deep_seo'] ?? false);
-        $limit   = self::MAX_ITEMS_FULL_ANALYSIS;
+        $limit   = min(count($items), self::MAX_ITEMS_FULL_ANALYSIS);
 
         $auditItems    = [];
         $totalSeoScore = 0;

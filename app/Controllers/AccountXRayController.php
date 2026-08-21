@@ -108,7 +108,7 @@ class AccountXRayController
      *
      * Body: {
      *   "account_id": 1,
-     *   "max_items": 200,
+     *   "max_items": 400,
      *   "include_paused": true,
      *   "deep_seo": false,
      *   "include_financial": true
@@ -614,7 +614,7 @@ class AccountXRayController
     private function sanitizeQueueOptions(array $options): array
     {
         return [
-            'max_items' => max(1, min((int)($options['max_items'] ?? 200), 500)),
+            'max_items' => max(1, min((int)($options['max_items'] ?? 400), 500)),
             'include_paused' => (bool)($options['include_paused'] ?? true),
             'deep_seo' => (bool)($options['deep_seo'] ?? false),
             'include_financial' => (bool)($options['include_financial'] ?? true),
