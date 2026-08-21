@@ -22,6 +22,20 @@ class SecurityMiddlewaresTest extends TestCase
         $this->assertTrue(class_exists(\App\Middleware\CsrfMiddleware::class));
     }
 
+    public function test_oauth_callback_is_csrf_exempt_in_bootstrap(): void
+    {
+        $source = (string) file_get_contents(dirname(__DIR__, 3) . '/public/index.php');
+        $this->assertStringContainsString('$path === \'/auth/callback\'', $source);
+        $this->assertStringContainsString('$isOAuthCallback', $source);
+        $this->assertStringContainsString('$path === \'/auth/login\'', $source);
+        $this->assertStringContainsString("isset(\$_GET['code'])", $source);
+        $this->assertStringContainsString("isset(\$_POST['code'])", $source);
+        $this->assertStringContainsString("isset(\$_GET['error'])", $source);
+        $this->assertStringContainsString("isset(\$_POST['error'])", $source);
+        $this->assertStringNotContainsString('strpos($path, \'/auth/\') === 0', $source);
+        $this->assertStringNotContainsString('$isAuthRoute || $isWebhookRoute', $source);
+    }
+
     public function test_csrf_validates_post_methods(): void
     {
         $source = file_get_contents(
