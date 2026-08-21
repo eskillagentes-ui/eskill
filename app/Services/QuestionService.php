@@ -97,7 +97,15 @@ class QuestionService
      */
     public function syncQuestions(int $limit = 50): array
     {
-        $stats = ['synced' => 0, 'errors' => 0];
+        $stats = [
+            'synced' => 0,
+            'errors' => 0,
+            'pages' => 0,
+            'unanswered_fetched' => 0,
+            'recent_fetched' => 0,
+            'forbidden' => false,
+            'account_id' => $this->accountId,
+        ];
         $limit = max(1, min(200, $limit));
 
         try {
@@ -107,29 +115,27 @@ class QuestionService
                 throw new \RuntimeException('Seller ID não encontrado para sincronizar perguntas');
             }
 
-            $apiResult = $this->unwrapMlResponse($this->client->get('/questions/search', [
-                'seller_id' => $sellerId,
-                'sort' => 'date_created_desc',
-                'limit' => $limit
-            ]));
+            // Unanswered is the SLA queue — paginate past the default 50 even when
+            // --limit is small. Recent fills the rest of the local cache.
+            $unansweredCap = max($limit, 200);
+            $unanswered = $this->fetchQuestionPages($sellerId, $limit, $unansweredCap, 'UNANSWERED', $stats);
+            $recent = $this->fetchQuestionPages($sellerId, $limit, $limit, null, $stats);
+            $stats['unanswered_fetched'] = count($unanswered);
+            $stats['recent_fetched'] = count($recent);
 
-            if (isset($apiResult['error'])) {
-                throw new \RuntimeException($this->formatMlApiErrorMessage(
-                    $apiResult,
-                    'Falha ao sincronizar perguntas na API do Mercado Livre'
-                ));
-            }
-
-            $questions = $apiResult['questions'] ?? [];
-            if (!is_array($questions)) {
-                return $stats;
-            }
-
-            foreach ($questions as $q) {
-                if (!is_array($q)) {
+            $seen = [];
+            foreach (array_merge($unanswered, $recent) as $q) {
+                if (!is_array($q) || !isset($q['id'])) {
                     continue;
                 }
 
+                $qid = (string) $q['id'];
+                if (isset($seen[$qid])) {
+                    continue;
+                }
+                $seen[$qid] = true;
+
+                // Never inherit a neighbor account from last-active / payload.
                 $q['account_id'] = $this->accountId;
                 $q['seller_id'] = $sellerId;
 
@@ -143,9 +149,111 @@ class QuestionService
         } catch (Throwable $e) {
             $stats['errors']++;
             $stats['last_error'] = $e->getMessage();
+            if ($this->isForbiddenMlError(['message' => $e->getMessage(), 'status' => 0])) {
+                $stats['forbidden'] = true;
+            }
         }
 
         return $stats;
+    }
+
+    /**
+     * GET /questions/search with api_version=4, paginated. Fail-soft on 403:
+     * records last_error/forbidden and returns whatever was already fetched.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function fetchQuestionPages(
+        string $sellerId,
+        int $pageSize,
+        int $maxItems,
+        ?string $status,
+        array &$stats
+    ): array {
+        $out = [];
+        $offset = 0;
+        $maxPages = 20;
+        $pageSize = max(1, min(50, $pageSize));
+        $maxItems = max(1, min(500, $maxItems));
+
+        for ($page = 0; $page < $maxPages && count($out) < $maxItems; $page++) {
+            $params = [
+                'seller_id' => $sellerId,
+                'api_version' => 4,
+                'limit' => $pageSize,
+                'offset' => $offset,
+                'sort_fields' => 'date_created',
+                'sort_types' => 'DESC',
+            ];
+            if ($status !== null && $status !== '') {
+                $params['status'] = $status;
+            }
+
+            try {
+                $apiResult = $this->unwrapMlResponse($this->client->get('/questions/search', $params));
+            } catch (Throwable $e) {
+                $stats['errors']++;
+                $stats['last_error'] = $e->getMessage();
+                if ($this->isForbiddenMlError(['message' => $e->getMessage()])) {
+                    $stats['forbidden'] = true;
+                }
+                break;
+            }
+
+            $stats['pages'] = (int) ($stats['pages'] ?? 0) + 1;
+
+            if (isset($apiResult['error'])) {
+                $stats['errors']++;
+                $stats['last_error'] = $this->formatMlApiErrorMessage(
+                    $apiResult,
+                    'Falha ao sincronizar perguntas na API do Mercado Livre'
+                );
+                if ($this->isForbiddenMlError($apiResult)) {
+                    $stats['forbidden'] = true;
+                }
+                break;
+            }
+
+            $questions = $apiResult['questions'] ?? [];
+            if (!is_array($questions) || $questions === []) {
+                break;
+            }
+
+            foreach ($questions as $q) {
+                if (is_array($q)) {
+                    $out[] = $q;
+                    if (count($out) >= $maxItems) {
+                        break;
+                    }
+                }
+            }
+
+            $total = $apiResult['total'] ?? ($apiResult['paging']['total'] ?? null);
+            $offset += $pageSize;
+            if (is_numeric($total) && $offset >= (int) $total) {
+                break;
+            }
+            if (count($questions) < $pageSize) {
+                break;
+            }
+        }
+
+        return $out;
+    }
+
+    /**
+     * @param array<string, mixed> $error
+     */
+    private function isForbiddenMlError(array $error): bool
+    {
+        $status = $error['status'] ?? ($error['http_status'] ?? 0);
+        if ((int) $status === 403) {
+            return true;
+        }
+
+        $blob = strtolower((string) ($error['error'] ?? '') . ' ' . (string) ($error['message'] ?? ''));
+
+        return str_contains($blob, 'forbidden') || str_contains($blob, 'http 403');
     }
 
     /**
@@ -779,7 +887,7 @@ class QuestionService
             throw new \RuntimeException('DB indisponível para salvar perguntas');
         }
 
-        if (!isset($q['id']) || !isset($q['item_id']) || !isset($q['status']) || !isset($q['text'])) {
+        if (!isset($q['id']) || !isset($q['item_id']) || !isset($q['status'])) {
             throw new \InvalidArgumentException('Payload de pergunta inválido para persistência');
         }
 
@@ -807,10 +915,10 @@ class QuestionService
 
         $stmt->execute([
             ':question_id' => (string)$q['id'],
-            ':account_id' => $q['account_id'] ?? $this->accountId,
+            ':account_id' => $this->accountId ?? ($q['account_id'] ?? null),
             ':item_id' => (string)$q['item_id'],
             ':status' => (string)$q['status'],
-            ':text' => (string)$q['text'],
+            ':text' => (string)($q['text'] ?? ''),
             ':answer' => $q['answer']['text'] ?? null,
             ':from_user_id' => (int)$fromId,
             ':date_created' => $q['date_created'] ?? date('Y-m-d H:i:s'),

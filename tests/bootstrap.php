@@ -4,6 +4,27 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../vendor/autoload.php';
 
+// Vendor is often a symlink to prod; Composer baseDir then points at prod app/.
+// Force this checkout so unit tests exercise the files under test.
+$projectRoot = dirname(__DIR__);
+foreach (\Composer\Autoload\ClassLoader::getRegisteredLoaders() as $loader) {
+    $loader->setPsr4('App\\', [$projectRoot . '/app']);
+    $loader->setPsr4('Tests\\', [$projectRoot . '/tests']);
+    $remap = [];
+    foreach ($loader->getClassMap() as $class => $file) {
+        $normalized = str_replace('\\', '/', (string) $file);
+        if (str_starts_with($class, 'App\\') && preg_match('#/app/(.+)$#', $normalized, $m)) {
+            $remap[$class] = $projectRoot . '/app/' . $m[1];
+        } elseif (str_starts_with($class, 'Tests\\') && preg_match('#/tests/(.+)$#', $normalized, $m)) {
+            $remap[$class] = $projectRoot . '/tests/' . $m[1];
+        }
+    }
+    if ($remap !== []) {
+        $loader->addClassMap($remap);
+    }
+}
+
+
 // Load helpers
 require_once __DIR__ . '/../app/Helpers/LogHelper.php';
 require_once __DIR__ . '/../app/Helpers/CacheHelper.php';
