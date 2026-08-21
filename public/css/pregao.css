@@ -918,6 +918,98 @@ a.card.sn-card:hover {
     padding: 0 12px 12px;
 }
 
+.hoje-panel {
+    margin-bottom: 14px;
+}
+
+.hoje-summary {
+    margin-left: auto;
+    color: var(--mut);
+    font-family: var(--mono);
+    font-size: 10px;
+    letter-spacing: 0;
+}
+
+.hoje-summary.is-open {
+    color: var(--ml);
+}
+
+.hoje-list {
+    list-style: none;
+    margin: 0;
+    padding: 0 10px 8px;
+}
+
+.hoje-empty {
+    padding: 12px;
+    color: var(--mut);
+    font-size: 12px;
+}
+
+.hoje-row {
+    border-top: 1px solid var(--line);
+    padding: 8px 4px;
+    min-width: 0;
+}
+
+.hoje-row a {
+    display: grid;
+    grid-template-columns: 22px minmax(0, 1fr) auto auto;
+    gap: 8px;
+    align-items: center;
+    color: inherit;
+    text-decoration: none;
+    min-width: 0;
+}
+
+.hoje-pri {
+    color: var(--mut2);
+    font: 700 11px var(--mono);
+}
+
+.hoje-title {
+    overflow: hidden;
+    font-size: 13px;
+    font-weight: 650;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hoje-count {
+    font: 700 13px var(--mono);
+    color: var(--txt);
+}
+
+.hoje-sev {
+    text-transform: uppercase;
+    font: 700 9px var(--mono);
+    letter-spacing: 0.4px;
+    color: var(--mut);
+}
+
+.hoje-row.is-critico .hoje-sev,
+.hoje-row.is-critico .hoje-count { color: var(--down); }
+.hoje-row.is-alto .hoje-sev { color: #f0a202; }
+.hoje-row.is-ok .hoje-sev { color: var(--up); }
+.hoje-row.is-nd .hoje-count,
+.hoje-row.is-nd .hoje-sev { color: var(--mut2); }
+
+.hoje-hint {
+    display: block;
+    margin: 2px 0 0 30px;
+    overflow: hidden;
+    color: var(--mut);
+    font-size: 10px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.hoje-readonly {
+    padding: 0 12px 12px;
+    color: var(--mut);
+    font-size: 10px;
+}
+
 .source-panel {
     margin-top: 14px;
 }

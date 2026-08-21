@@ -1,4 +1,4 @@
-<link rel="stylesheet" href="/css/pregao.css?v=8">
+<link rel="stylesheet" href="/css/pregao.css?v=9">
 
 <div id="pregao-root" data-account-id="<?= (int)($pregaoAccountId ?? 0) ?>" data-read-only="1">
     <header class="pg-header">
@@ -51,6 +51,17 @@
 
     <div class="wrap">
         <div>
+            <section class="panel hoje-panel" id="hojePanel" aria-labelledby="hojeTitle">
+                <div class="p-head" id="hojeTitle">
+                    HOJE — FILA DO DIA
+                    <span class="hoje-summary" id="hojeSummary" role="status">aguardando snapshot</span>
+                </div>
+                <ol class="hoje-list" id="hojeList">
+                    <li class="hoje-empty">Carregando prioridades do dia…</li>
+                </ol>
+                <div class="hoje-readonly">Somente leitura · fatos locais da conta ativa · zero escrita ML</div>
+            </section>
+
             <div class="panel">
                 <div class="p-head">📈 ESKL11 — EVOLUÇÃO DA CONTA · CANDLE 1 SESSÃO ≈ 1 DIA
                     <span class="factors" id="factorsBadge">— de 5 fatores ativos</span>
