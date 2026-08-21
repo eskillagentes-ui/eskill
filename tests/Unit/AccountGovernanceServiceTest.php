@@ -1100,4 +1100,47 @@ class AccountGovernanceServiceTest extends TestCase
             $this->assertNotSame(AccountGovernanceService::CLASS_MORTO, $item['classification']);
         }
     }
+
+    public function testMissingVisitKeysAreNotMortoOrTravada(): void
+    {
+        $item = [
+            'id' => 'MLB1',
+            'title' => 'Peca',
+            'price' => 10.0,
+            'status' => 'active',
+            'available_quantity' => 5,
+        ];
+        $flags = [
+            'OOS' => false,
+            'HIGH_TRAFFIC' => false,
+            'VERY_BAD_CONV' => false,
+            'BAD_CONV' => false,
+            'LOW_TRAFFIC' => true,
+            'NO_SALES_30' => true,
+            'STALE' => true,
+        ];
+        $class = $this->service->classifyItem($item, $flags, 20);
+        $this->assertSame(AccountGovernanceService::CLASS_PERFORMANCE_PENDING, $class);
+        $this->assertNotSame(AccountGovernanceService::CLASS_MORTO, $class);
+        $this->assertNotSame(AccountGovernanceService::CLASS_TOXICO, $class);
+
+        $status = $this->service->classifyAccount(
+            ['account_conv_30d' => 0, 'total_visits_30d' => 0, 'reputation_level' => 'green'],
+            [['classification' => $class]]
+        );
+        $this->assertNotSame(AccountGovernanceService::STATUS_TRAVADA, $status);
+    }
+
+    public function testRealZeroVisitsStillAllowedAsMortoWhenKeysPresent(): void
+    {
+        $item = $this->buildItem([
+            'visits_30d' => 0,
+            'sales_30d' => 0,
+            'visits_14d' => 0,
+            'sales_14d' => 0,
+        ]);
+        $flags = $this->service->calculateFlags($item, ['total_visits_30d' => 1, 'active_items' => 1]);
+        $class = $this->service->classifyItem($item, $flags, 20);
+        $this->assertSame(AccountGovernanceService::CLASS_MORTO, $class);
+    }
 }

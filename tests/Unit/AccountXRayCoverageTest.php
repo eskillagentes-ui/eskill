@@ -32,6 +32,20 @@ final class AccountXRayCoverageTest extends TestCase
         $this->assertMatchesRegularExpression('/DEFAULT_MAX_ITEMS\s*=\s*400/', $src);
         $this->assertMatchesRegularExpression('/MAX_ITEMS_FULL_ANALYSIS\s*=\s*500/', $src);
         $this->assertStringContainsString('countItemsByStatus', $src);
+        $this->assertStringContainsString('loadLocalListingUniverse', $src);
+        $this->assertStringContainsString('countLocalUniverseByStatus', $src);
+        $this->assertStringNotContainsString('getItemHealth(', $src);
+    }
+
+    public function testControllerScopesRunToActiveAccount(): void
+    {
+        $ctrl = (string) file_get_contents(dirname(__DIR__, 2) . '/app/Controllers/AccountXRayController.php');
+        $this->assertStringContainsString('AccountScopeHelper', $ctrl);
+        $this->assertStringContainsString('resolveScopedAccountId', $ctrl);
+        $start = strpos($ctrl, 'function run(');
+        $this->assertNotFalse($start);
+        $chunk = substr($ctrl, $start, 900);
+        $this->assertStringContainsString('resolveScopedAccountId', $chunk);
     }
 
     public function testUiDefaultMaxItemsIsFourHundredAndShowsCoverage(): void
