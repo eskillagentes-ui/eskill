@@ -225,7 +225,11 @@ PROMPT;
                 }
                 $blockers = $this->mergeBlockers($blockers, $llm['blockers'] ?? []);
             } else {
+                $why = $this->llm !== null ? (string) $this->llm->lastError() : 'disabled';
                 $notes .= ' · llm_fallback=rules';
+                if ($why !== '') {
+                    $notes .= '(' . $why . ')';
+                }
             }
         }
 
@@ -565,11 +569,19 @@ PROMPT;
         }
         $sold = [];
         foreach ($items as $item) {
-            if ($this->knownSales($item) > 0 || (int) ($item['sold_quantity'] ?? 0) > 0) {
-                $mlb = strtoupper(trim((string) ($item['ml_item_id'] ?? $item['id'] ?? '')));
-                if ($mlb !== '') {
-                    $sold[$mlb] = true;
+            $sales30 = null;
+            foreach (['sales_30d', '_sales_30d'] as $key) {
+                if (array_key_exists($key, $item) && is_numeric($item[$key])) {
+                    $sales30 = (int) $item[$key];
+                    break;
                 }
+            }
+            if ($sales30 === null || $sales30 <= 0) {
+                continue;
+            }
+            $mlb = strtoupper(trim((string) ($item['ml_item_id'] ?? $item['id'] ?? '')));
+            if ($mlb !== '') {
+                $sold[$mlb] = true;
             }
         }
         if ($sold === []) {
@@ -749,12 +761,16 @@ PROMPT;
     {
         $domain = strtoupper((string) ($item['domain_id'] ?? ''));
         $cat = strtoupper((string) ($item['category_id'] ?? ''));
-        $blob = $domain . ' ' . $cat . ' ' . strtoupper((string) ($item['title'] ?? ''));
+        $brand = strtoupper((string) ($this->attributeValue($item, 'BRAND') ?? ''));
+        $title = strtoupper((string) ($item['title'] ?? ''));
+        $blob = $domain . ' ' . $cat . ' ' . $title . ' ' . $brand;
 
         return str_contains($blob, 'MOTORCYCLE')
             || str_contains($blob, 'AUTO_PART')
             || str_contains($blob, 'VEHICLE')
-            || str_contains($blob, 'SPARE');
+            || str_contains($blob, 'SPARE')
+            || $brand === 'AWA'
+            || (bool) preg_match('/\b(TITAN|FAN|START|TODAY|BIZ|POP|CG|FAZER|BROS)\b/u', $title);
     }
 
     /**
