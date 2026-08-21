@@ -108,6 +108,8 @@
             <file>tests/Unit/Services/MercadoLivreWebhookReplayServiceTest.php</file>
             <file>tests/Unit/Services/AssistantConnectorServiceTest.php</file>
             <file>tests/Unit/Services/QuestionServiceTest.php</file>
+            <file>tests/Unit/Services/QuestionLocalSlaQueueTest.php</file>
+            <file>tests/Unit/Controllers/QuestionControllerWriteGuardTest.php</file>
             <file>tests/Unit/Services/ShippingServiceTest.php</file>
             <file>tests/Unit/Services/ClaimsServiceTest.php</file>
             <file>tests/Unit/Services/SettingsServiceTest.php</file>

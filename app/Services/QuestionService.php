@@ -8,6 +8,7 @@ use App\Database;
 use App\Helpers\Log;
 use App\Services\AI\Answers\AnswerGeneratorService;
 use App\Services\AI\Answers\QuestionAnalyzerService;
+use App\Services\HiddenSeo\SafetyGuard;
 use PDO;
 use Throwable;
 
@@ -16,6 +17,8 @@ use Throwable;
  */
 class QuestionService
 {
+    public const SLA_UNANSWERED_SECONDS = 3600;
+
     private MercadoLivreClient $client;
     private CacheService $cache;
     private ?int $accountId;
@@ -167,7 +170,7 @@ class QuestionService
             'item_id' => $filters['item_id'] ?? null,
             'limit' => $limit,
             'offset' => $offset,
-            'account_id' => $filters['account_id'] ?? 'all',
+            'account_id' => $this->resolveScopedAccountId($filters),
         ]);
 
         if (!isset($local['error'])) {
@@ -215,24 +218,22 @@ class QuestionService
         $apiResult = $this->unwrapMlResponse($this->client->get('/questions/search', $params));
 
         if (isset($apiResult['error'])) {
-            if ($this->shouldAllowLocalFallback($filters)) {
-                $fallback = $this->getQuestionsFromDatabase([
-                    'status' => $filters['status'] ?? null,
-                    'limit' => $limit,
-                    'offset' => $offset,
-                    'account_id' => $this->accountId,
-                ]);
+            $fallback = $this->getQuestionsFromDatabase([
+                'status' => $filters['status'] ?? null,
+                'item_id' => $filters['item_id'] ?? null,
+                'limit' => $limit,
+                'offset' => $offset,
+                'account_id' => $this->resolveScopedAccountId($filters),
+            ]);
 
-                if (!isset($fallback['error'])) {
-                    $fallback['success'] = true;
-                    $fallback['source'] = 'local';
-                    $fallback['fallback_from'] = 'ml_api';
-                    $fallback['warning'] = $this->formatMlApiErrorMessage(
-                        $apiResult,
-                        'API indisponível, exibindo cache local'
-                    );
-                }
-
+            if (!isset($fallback['error'])) {
+                $fallback['success'] = true;
+                $fallback['source'] = 'local';
+                $fallback['fallback_from'] = 'ml_api';
+                $fallback['warning'] = $this->formatMlApiErrorMessage(
+                    $apiResult,
+                    'API indisponível, exibindo cache local'
+                );
                 return $fallback;
             }
 
@@ -244,6 +245,7 @@ class QuestionService
                 ),
                 'api_error' => $apiResult,
                 'source' => 'ml_api',
+                'local_error' => $fallback['error'] ?? 'local_unavailable',
             ]);
         }
 
@@ -368,18 +370,16 @@ class QuestionService
             return $apiResult;
         }
 
-        if ($this->shouldAllowLocalFallback($options)) {
-            $local = $this->getQuestionFromDatabase($questionId);
-            if ($local !== null) {
-                $local['success'] = true;
-                $local['source'] = 'local';
-                $local['fallback_from'] = 'ml_api';
-                $local['warning'] = $this->formatMlApiErrorMessage(
-                    $apiResult,
-                    'Falha ao consultar pergunta na API, retornando cache local'
-                );
-                return $local;
-            }
+        $local = $this->getQuestionFromDatabase($questionId);
+        if ($local !== null) {
+            $local['success'] = true;
+            $local['source'] = 'local';
+            $local['fallback_from'] = 'ml_api';
+            $local['warning'] = $this->formatMlApiErrorMessage(
+                $apiResult,
+                'Falha ao consultar pergunta na API, retornando cache local'
+            );
+            return $local;
         }
 
         $apiResult['success'] = false;
@@ -429,6 +429,11 @@ class QuestionService
                 'error' => 'validation_error',
                 'message' => 'Texto obrigatório',
             ];
+        }
+
+        $blocked = $this->blockedAnswerWrite();
+        if ($blocked !== null) {
+            return $blocked;
         }
 
         $result = $this->unwrapMlResponse($this->client->post('/answers', [
@@ -497,35 +502,107 @@ class QuestionService
         ];
     }
 
+    /**
+     * Fail-closed: POST /answers só com conta válida fora de FORBIDDEN_ACCOUNTS.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function blockedAnswerWrite(): ?array
+    {
+        $accountId = (int) ($this->accountId ?? 0);
+        $guard = new SafetyGuard();
+        if ($accountId > 0 && !$guard->isForbidden($accountId)) {
+            return null;
+        }
+
+        $error = $accountId <= 0
+            ? 'Apply bloqueado: conta ML ausente.'
+            : "Apply bloqueado: conta {$accountId} está na blacklist (FORBIDDEN_ACCOUNTS). "
+                . 'Perguntas não são enviadas automaticamente na FACILYTY (1335).';
+
+        return [
+            'success' => false,
+            'apply_blocked' => true,
+            'error' => $error,
+        ];
+    }
+
     public function getUnansweredCount(): int
     {
-        $params = [
-            'status' => 'UNANSWERED',
-            'limit' => 1,
+        return $this->getLocalUnansweredCount();
+    }
+
+    /**
+     * Contadores reais do cache local (não amostra de 200).
+     *
+     * @return array{
+     *   total: int,
+     *   pending: int,
+     *   answered: int,
+     *   unanswered_ge_1h: int,
+     *   source: string,
+     *   sla_seconds: int,
+     *   error?: string
+     * }
+     */
+    public function getLocalStats(): array
+    {
+        $empty = [
+            'total' => 0,
+            'pending' => 0,
+            'answered' => 0,
+            'unanswered_ge_1h' => 0,
+            'source' => 'local',
+            'sla_seconds' => self::SLA_UNANSWERED_SECONDS,
         ];
 
-        $sellerId = $this->getSellerIdForQuestions();
-        if ($sellerId) {
-            $params['seller_id'] = $sellerId;
+        if ($this->db === null) {
+            $empty['error'] = 'db_unavailable';
+            return $empty;
         }
 
-        $response = $this->unwrapMlResponse($this->client->get('/questions/search', $params));
-
-        if (!isset($response['error'])) {
-            $total = $response['paging']['total'] ?? null;
-            if (is_numeric($total)) {
-                return (int)$total;
-            }
-
-            $questions = $response['questions'] ?? [];
-            return is_array($questions) ? count($questions) : 0;
+        $accountId = $this->resolveScopedAccountId([]);
+        if ($accountId === null) {
+            $empty['error'] = 'missing_account';
+            return $empty;
         }
 
-        if ($this->shouldAllowLocalFallback([])) {
-            return $this->getLocalUnansweredCount();
-        }
+        try {
+            $cutoff = (new \DateTimeImmutable('now'))
+                ->modify('-' . self::SLA_UNANSWERED_SECONDS . ' seconds')
+                ->format('Y-m-d H:i:s');
 
-        return 0;
+            $stmt = $this->db->prepare(
+                "SELECT
+                    COUNT(*) AS total,
+                    SUM(CASE WHEN UPPER(status) = 'UNANSWERED' THEN 1 ELSE 0 END) AS pending,
+                    SUM(CASE WHEN UPPER(status) = 'ANSWERED' THEN 1 ELSE 0 END) AS answered,
+                    SUM(CASE WHEN UPPER(status) = 'UNANSWERED'
+                              AND date_created IS NOT NULL
+                              AND date_created <= ?
+                         THEN 1 ELSE 0 END) AS unanswered_ge_1h
+                 FROM ml_questions
+                 WHERE account_id = ?"
+            );
+            $stmt->execute([$cutoff, $accountId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+
+            return [
+                'total' => (int) ($row['total'] ?? 0),
+                'pending' => (int) ($row['pending'] ?? 0),
+                'answered' => (int) ($row['answered'] ?? 0),
+                'unanswered_ge_1h' => (int) ($row['unanswered_ge_1h'] ?? 0),
+                'source' => 'local',
+                'sla_seconds' => self::SLA_UNANSWERED_SECONDS,
+            ];
+        } catch (Throwable $e) {
+            Log::warning('QuestionService: falha ao contar stats locais', [
+                'account_id' => $accountId,
+                'error' => $e->getMessage(),
+            ]);
+            $empty['error'] = 'db_unavailable';
+            return $empty;
+        }
     }
 
     // --- Private / Helpers ---
@@ -597,21 +674,29 @@ class QuestionService
             );
         }
 
-        $where = ["1=1"];
+        $where = [];
         $params = [];
 
-        $statusFilter = $filters['status'] ?? null;
-        if (!empty($statusFilter) && strtolower((string)$statusFilter) !== 'all') {
-            $where[] = "status = ?";
-            $params[] = $statusFilter;
+        $accountId = $this->resolveScopedAccountId($filters);
+        if ($accountId === null) {
+            return $this->emptyQuestionsPayload(
+                max(1, min(200, (int)($filters['limit'] ?? 50))),
+                max(0, (int)($filters['offset'] ?? 0)),
+                [
+                    'error' => 'missing_account',
+                    'message' => 'Conta ML ativa ausente — recusando mistura de contas.',
+                    'source' => 'local',
+                    'success' => false,
+                ]
+            );
         }
+        $where[] = "account_id = ?";
+        $params[] = $accountId;
 
-        if (!empty($filters['account_id']) && $filters['account_id'] !== 'all') {
-            $where[] = "account_id = ?";
-            $params[] = (int)$filters['account_id'];
-        } elseif ($this->accountId !== null && $this->accountId > 0) {
-            $where[] = "account_id = ?";
-            $params[] = $this->accountId;
+        $statusFilter = $this->normalizeStatusFilter($filters['status'] ?? null);
+        if ($statusFilter !== null) {
+            $where[] = "UPPER(status) = ?";
+            $params[] = $statusFilter;
         }
 
         if (!empty($filters['item_id'])) {
@@ -622,7 +707,12 @@ class QuestionService
         $offset = max(0, (int)($filters['offset'] ?? 0));
         $limit = max(1, min(200, (int)($filters['limit'] ?? 50)));
 
-        $sql = "SELECT * FROM ml_questions WHERE " . implode(" AND ", $where) . " ORDER BY date_created DESC LIMIT $limit OFFSET $offset";
+        $order = $statusFilter === 'UNANSWERED'
+            ? "date_created ASC"
+            : "CASE WHEN UPPER(status) = 'UNANSWERED' THEN 0 ELSE 1 END, date_created DESC";
+
+        $sql = "SELECT * FROM ml_questions WHERE " . implode(" AND ", $where)
+            . " ORDER BY {$order} LIMIT {$limit} OFFSET {$offset}";
 
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
@@ -662,12 +752,13 @@ class QuestionService
             return null;
         }
 
-        $where = ["status = 'ANSWERED'", "answer_date IS NOT NULL"];
-        $params = [];
-        if ($this->accountId !== null && $this->accountId > 0) {
-            $where[] = "account_id = ?";
-            $params[] = $this->accountId;
+        $accountId = $this->resolveScopedAccountId([]);
+        if ($accountId === null) {
+            return null;
         }
+
+        $where = ["status = 'ANSWERED'", "answer_date IS NOT NULL", "account_id = ?"];
+        $params = [$accountId];
 
         $sql = "SELECT AVG(TIMESTAMPDIFF(SECOND, date_created, answer_date)) AS avg_s
                 FROM ml_questions WHERE " . implode(' AND ', $where);
@@ -743,7 +834,13 @@ class QuestionService
             'intent' => $row['intent'] ?? null,
             'urgency' => $row['urgency'] ?? null,
             'ai_draft' => $row['ai_draft'] ?? null,
+            'from_user' => (string) ($row['from_user_nickname'] ?? ''),
         ];
+        $waiting = $this->waitingSeconds($row['date_created'] ?? null);
+        $unanswered = $this->isUnansweredStatus((string) ($row['status'] ?? ''));
+        $payload['waiting_seconds'] = $waiting;
+        $payload['sla_overdue'] = $unanswered && $waiting >= self::SLA_UNANSWERED_SECONDS;
+        $payload['sla_seconds'] = self::SLA_UNANSWERED_SECONDS;
 
         if (!empty($row['answer_text'])) {
             $payload['answer'] = [
@@ -761,18 +858,75 @@ class QuestionService
             return 0;
         }
 
-        $sql = "SELECT COUNT(*) FROM ml_questions WHERE status = :status";
-        $params = ['status' => 'UNANSWERED'];
-
-        if ($this->accountId !== null && $this->accountId > 0) {
-            $sql .= " AND account_id = :account_id";
-            $params['account_id'] = $this->accountId;
+        $accountId = $this->resolveScopedAccountId([]);
+        if ($accountId === null) {
+            return 0;
         }
+
+        $sql = "SELECT COUNT(*) FROM ml_questions WHERE UPPER(status) = :status AND account_id = :account_id";
+        $params = ['status' => 'UNANSWERED', 'account_id' => $accountId];
 
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
 
         return (int)$stmt->fetchColumn();
+    }
+
+
+    /**
+     * Conta ativa apenas. "all" / request solto nunca mistura FACILYTY com Falcão.
+     */
+    private function resolveScopedAccountId(array $filters = []): ?int
+    {
+        if ($this->accountId !== null && $this->accountId > 0) {
+            return $this->accountId;
+        }
+
+        $raw = $filters['account_id'] ?? null;
+        if (is_int($raw) && $raw > 0) {
+            return $raw;
+        }
+        if (is_string($raw) && ctype_digit($raw) && (int) $raw > 0) {
+            return (int) $raw;
+        }
+
+        return null;
+    }
+
+    private function normalizeStatusFilter(mixed $status): ?string
+    {
+        if ($status === null || $status === '' || $status === false) {
+            return null;
+        }
+        $key = strtolower(trim((string) $status));
+        if ($key === 'all') {
+            return null;
+        }
+        $map = [
+            'unanswered' => 'UNANSWERED',
+            'answered' => 'ANSWERED',
+            'closed_unanswered' => 'CLOSED_UNANSWERED',
+            'banned' => 'BANNED',
+            'closed' => 'CLOSED',
+        ];
+        return $map[$key] ?? strtoupper($key);
+    }
+
+    private function isUnansweredStatus(string $status): bool
+    {
+        return strtoupper($status) === 'UNANSWERED';
+    }
+
+    private function waitingSeconds(mixed $dateCreated): int
+    {
+        if (!is_string($dateCreated) || $dateCreated === '') {
+            return 0;
+        }
+        $ts = strtotime($dateCreated);
+        if ($ts === false) {
+            return 0;
+        }
+        return max(0, time() - $ts);
     }
 
     private function getSellerIdForQuestions(array $filters = []): ?string

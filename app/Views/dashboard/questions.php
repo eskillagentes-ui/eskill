@@ -6,10 +6,7 @@ $title = 'Perguntas';
 $subtitle = 'Gerencie as perguntas dos seus anúncios';
 $actions = '
     <div class="d-flex gap-2 flex-wrap">
-        <select class="form-select form-select-sm" id="accountFilter" style="width: auto;">
-            <option value="all">Todas as Contas</option>
-            <option value="">Conta Atual</option>
-        </select>
+        <span class="badge bg-light text-dark border align-self-center" id="activeAccountBadge">Conta ativa</span>
         <select class="form-select form-select-sm" id="questionFilter" style="width: auto;">
             <option value="all">Todas as Perguntas</option>
             <option value="unanswered" selected>Não Respondidas</option>
@@ -77,6 +74,16 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
         <div class="stat-info">
             <h3 id="avgResponseTime">-</h3>
             <p>Tempo Médio</p>
+        </div>
+    </div>
+
+    <div class="stat-card">
+        <div class="stat-icon warning">
+            <i class="bi bi-exclamation-triangle"></i>
+        </div>
+        <div class="stat-info">
+            <h3 id="slaOverdueQuestions">-</h3>
+            <p>Não respondidas ≥ 1h</p>
         </div>
     </div>
 </div>
@@ -190,7 +197,6 @@ document.addEventListener('DOMContentLoaded', function() {
 });
 
 document.getElementById('questionFilter').addEventListener('change', loadQuestions);
-document.getElementById('accountFilter').addEventListener('change', loadQuestions);
 
 async function loadStats() {
     try {
@@ -201,6 +207,8 @@ async function loadStats() {
             document.getElementById('pendingQuestions').textContent = data.pending || 0;
             document.getElementById('answeredQuestions').textContent = data.answered || 0;
             document.getElementById('avgResponseTime').textContent = data.avg_response_time || '-';
+            const slaEl = document.getElementById('slaOverdueQuestions');
+            if (slaEl) slaEl.textContent = data.unanswered_ge_1h || 0;
         }
     } catch (e) {
         console.error('Erro ao carregar estatísticas:', e);
@@ -209,13 +217,12 @@ async function loadStats() {
 
 async function loadQuestions() {
     const filter = document.getElementById('questionFilter').value;
-    const accountFilter = document.getElementById('accountFilter').value;
     const tbody = document.getElementById('questionsList');
 
     const sort = document.getElementById('sortByUrgency')?.checked ? 'urgency_desc' : '';
 
     try {
-        const { data } = await ApiClient.json(`/api/questions?status=${filter}&sort=${sort}&account_id=${accountFilter}`);
+        const { data } = await ApiClient.json(`/api/questions?status=${encodeURIComponent(filter)}&sort=${encodeURIComponent(sort)}`);
 
         if (data.questions && data.questions.length > 0) {
             tbody.innerHTML = data.questions.map(q => {
@@ -239,9 +246,13 @@ async function loadQuestions() {
                     intentBadge = `<span class="badge ${color} ms-1" style="font-size: 0.7em">${q.intent.toUpperCase()}</span>`;
                 }
 
-                // Urgency Highlight
+                const waiting = Number(q.waiting_seconds || 0);
+                const slaOverdue = Boolean(q.sla_overdue) || (
+                    String(q.status || '').toUpperCase() === 'UNANSWERED' && waiting >= 3600
+                );
                 const isUrgent = (q.urgency > 70);
-                const rowClass = isUrgent ? 'table-danger' : '';
+                const rowClass = slaOverdue ? 'table-danger' : (isUrgent ? 'table-warning' : '');
+                const waitLabel = waiting > 0 ? formatWait(waiting) : '';
 
                 return `
                 <tr class="${rowClass}">
@@ -251,6 +262,8 @@ async function loadQuestions() {
                             ${intentBadge}
                         </div>
                         <small class="text-muted">De: ${q.from_user || 'Anônimo'}</small>
+                        ${slaOverdue ? '<span class="badge bg-danger ms-2">SLA ≥ 1h</span>' : ''}
+                        ${!slaOverdue && waitLabel && String(q.status || '').toUpperCase() === 'UNANSWERED' ? `<small class="text-muted ms-2">${waitLabel}</small>` : ''}
                         ${isUrgent ? '<small class="text-danger fw-bold ms-2">URGENTE</small>' : ''}
                     </td>
                     <td>
@@ -259,7 +272,7 @@ async function loadQuestions() {
                     <td>
                         <a href="#" class="text-decoration-none">${escapeHtml(q.item_title || 'Produto')}</a>
                     </td>
-                    <td class="text-muted small">${formatDate(q.date_created)}</td>
+                    <td class="text-muted small">${formatDate(q.date_created)}${String(q.status || '').toUpperCase() === 'UNANSWERED' && waitLabel ? `<div class="text-danger">${waitLabel}</div>` : ''}</td>
                     <td>
                         <span class="badge ${q.status === 'ANSWERED' ? 'bg-success' : 'bg-warning'}">
                             ${q.status === 'ANSWERED' ? 'Respondida' : 'Pendente'}
@@ -372,14 +385,19 @@ async function submitAnswer() {
     }
 
     try {
-        const { data } = await ApiClient.json(`/api/questions/${currentQuestionId}/answer`, {
+        const { data, response } = await ApiClient.json(`/api/questions/${currentQuestionId}/answer`, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
                 'X-CSRF-Token': csrfToken
             },
-            body: JSON.stringify({ answer })
+            body: JSON.stringify({ text: answer, answer })
         });
+
+        if (data.apply_blocked || response?.status === 403) {
+            alert(`${data.error || 'Apply bloqueado'} Conta 1335 exige GO item a item.`);
+            return;
+        }
 
         if (data.success) {
             bootstrap.Modal.getInstance(document.getElementById('answerModal')).hide();
@@ -392,7 +410,10 @@ async function submitAnswer() {
             alert('Erro: ' + (data.error || 'Erro ao enviar resposta'));
         }
     } catch (e) {
-        alert('Erro ao enviar resposta');
+        const blocked = Boolean(e?.payload?.apply_blocked) || String(e?.message || '').includes('403');
+        alert(blocked
+            ? `${e.payload?.error || 'Apply bloqueado'} Conta 1335 exige GO item a item.`
+            : 'Erro ao enviar resposta');
     }
 }
 
@@ -404,6 +425,15 @@ function formatDate(dateString) {
         hour: '2-digit',
         minute: '2-digit'
     });
+}
+
+function formatWait(seconds) {
+    const s = Math.max(0, Number(seconds) || 0);
+    if (s < 60) return s + 's';
+    if (s < 3600) return Math.floor(s / 60) + 'min';
+    const h = Math.floor(s / 3600);
+    const m = Math.floor((s % 3600) / 60);
+    return h + 'h' + String(m).padStart(2, '0');
 }
 
 function escapeHtml(text) {

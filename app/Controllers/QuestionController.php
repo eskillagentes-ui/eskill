@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Exception\UnsafeOperationException;
+use App\Services\HiddenSeo\SafetyGuard;
+use App\Helpers\AccountScopeHelper;
 use App\Helpers\SessionHelper;
 use App\Services\Pregao\PregaoQuestionsService;
 use App\Services\QuestionService;
@@ -16,8 +19,13 @@ class QuestionController extends BaseController
     public function __construct()
     {
         parent::__construct();
-        $active = SessionHelper::getActiveAccountId();
-        $this->accountId = ($active !== null && $active > 0) ? $active : 0;
+        $active = AccountScopeHelper::activeAccountId();
+        $this->accountId = $active ?? 0;
+
+        if ($this->accountId > 0) {
+            $ctx = $this->authorizeAccount($this->accountId, 'questions');
+            $this->accountId = $ctx !== null ? $ctx->accountId() : 0;
+        }
 
         $this->service = new QuestionService($this->accountId ?: null);
     }
@@ -81,33 +89,17 @@ class QuestionController extends BaseController
         try {
             // Usa cache local (mesma fonte da tabela em index(), Onda 2.1 / F1)
             // para não depender da API ML em tela inicial do dashboard.
-            $all = $this->service->getQuestionsLocal([
-                'limit' => 200,
-                'offset' => 0,
-            ]);
-
-            $questions = is_array($all['questions'] ?? null) ? $all['questions'] : [];
-
-            $total = count($questions);
-            $answered = 0;
-            $pending = 0;
-
-            foreach ($questions as $question) {
-                $status = strtoupper((string)($question['status'] ?? ''));
-                if ($status === 'ANSWERED') {
-                    $answered++;
-                } else {
-                    $pending++;
-                }
-            }
-
+            $stats = $this->service->getLocalStats();
             $avgSeconds = $this->service->getAverageResponseTimeSeconds();
 
             echo json_encode([
                 'success' => true,
-                'total' => $total,
-                'pending' => $pending,
-                'answered' => $answered,
+                'source' => 'local',
+                'total' => (int) ($stats['total'] ?? 0),
+                'pending' => (int) ($stats['pending'] ?? 0),
+                'answered' => (int) ($stats['answered'] ?? 0),
+                'unanswered_ge_1h' => (int) ($stats['unanswered_ge_1h'] ?? 0),
+                'sla_seconds' => QuestionService::SLA_UNANSWERED_SECONDS,
                 'avg_response_time' => $avgSeconds !== null
                     ? PregaoQuestionsService::formatDurationHuman((int) round($avgSeconds))
                     : '—',
@@ -121,9 +113,12 @@ class QuestionController extends BaseController
             // Falhar em modo degradado (sem 5xx na UI).
             echo json_encode([
                 'success' => true,
+                'source' => 'local',
                 'total' => 0,
                 'pending' => 0,
                 'answered' => 0,
+                'unanswered_ge_1h' => 0,
+                'sla_seconds' => QuestionService::SLA_UNANSWERED_SECONDS,
                 'avg_response_time' => '—',
             ]);
         }
@@ -180,7 +175,7 @@ class QuestionController extends BaseController
         }
 
         $data = $this->request->json();
-        $text = $data['text'] ?? '';
+        $text = trim((string) ($data['text'] ?? $data['answer'] ?? ''));
 
         if (empty($text)) {
             http_response_code(400);
@@ -188,7 +183,22 @@ class QuestionController extends BaseController
             return;
         }
 
+        try {
+            (new SafetyGuard())->assertCanApply($this->accountId, false, true);
+        } catch (UnsafeOperationException $e) {
+            http_response_code(403);
+            echo json_encode([
+                'success' => false,
+                'apply_blocked' => true,
+                'error' => $e->getMessage(),
+            ]);
+            return;
+        }
+
         $result = $this->service->answerQuestion($id, $text);
+        if (!empty($result['apply_blocked'])) {
+            http_response_code(403);
+        }
         echo json_encode($result);
     }
 
@@ -203,6 +213,18 @@ class QuestionController extends BaseController
         if (!$this->accountId) {
             http_response_code(400);
             echo json_encode(['error' => 'Conta ML não selecionada']);
+            return;
+        }
+
+        try {
+            (new SafetyGuard())->assertCanApply($this->accountId, false, true);
+        } catch (UnsafeOperationException $e) {
+            http_response_code(403);
+            echo json_encode([
+                'success' => false,
+                'apply_blocked' => true,
+                'error' => $e->getMessage(),
+            ]);
             return;
         }
 
