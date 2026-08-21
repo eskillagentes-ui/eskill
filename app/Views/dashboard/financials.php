@@ -1001,12 +1001,24 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
             html += row('(-) Impostos', pnl.taxes, 'text-danger');
             html += row('Receita Líquida', pnl.net_revenue, '', true);
             html += '<tr><td colspan="2"><hr class="my-1"></td></tr>';
-            html += row('(-) Custo Produtos (CMV)', pnl.cogs, 'text-secondary');
+            if (pnl.has_real_cogs === true || (pnl.cogs || 0) > 0) {
+                html += row('(-) Custo Produtos (CMV)', pnl.cogs, 'text-secondary');
+            } else {
+                html += `<tr>
+                    <td>(-) Custo Produtos (CMV)</td>
+                    <td class="text-end text-muted">n/d</td>
+                </tr>`;
+            }
             if (pnl.cogs_source) {
-                const isReal = pnl.cogs_source === 'sku_custos' || pnl.cogs_source === 'ml_orders';
-                const badge = isReal
-                    ? '<span class="badge bg-success ms-2">CMV real (' + escapeHtml(pnl.cogs_source) + ')</span>'
-                    : '<span class="badge bg-warning text-dark ms-2">estimado (' + escapeHtml(pnl.cogs_source) + ')</span>';
+                const isReal = pnl.has_real_cogs === true && (pnl.cogs_source === 'sku_custos' || pnl.cogs_source === 'ml_orders');
+                let badge;
+                if (isReal) {
+                    badge = '<span class="badge bg-success ms-2">CMV real (' + escapeHtml(pnl.cogs_source) + ')</span>';
+                } else if ((pnl.items_sem_custo || 0) > 0) {
+                    badge = '<span class="badge bg-warning text-dark ms-2">CMV incompleto · ' + Number(pnl.items_sem_custo) + ' itens sem custo</span>';
+                } else {
+                    badge = '<span class="badge bg-warning text-dark ms-2">sem CMV</span>';
+                }
                 html += '<tr><td colspan="2" class="small text-muted py-1">Fonte do CMV: ' + badge + ' · <a href="/dashboard/cogs">cadastrar custos</a></td></tr>';
             }
             html += row('(-) Comissões ML', pnl.commissions, 'text-secondary');
@@ -1016,10 +1028,22 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
             html += row('(-) Descontos', pnl.discounts, 'text-secondary');
             html += '<tr><td colspan="2"><hr class="my-1"></td></tr>';
 
-            const profitClass = pnl.net_profit >= 0 ? 'text-success' : 'text-danger';
-            html += row('Resultado Operacional', pnl.net_profit, profitClass, true);
+            const profitNd = pnl.has_real_cogs !== true || pnl.net_profit === null || pnl.net_profit === undefined;
+            if (profitNd) {
+                html += `<tr>
+                    <td class="fw-bold">Resultado Operacional</td>
+                    <td class="text-end fw-bold text-muted">n/d</td>
+                </tr>`;
+                if ((pnl.items_sem_custo || 0) > 0) {
+                    html += `<tr><td colspan="2" class="small text-muted py-1">Lucro não calculado — ${Number(pnl.items_sem_custo)} itens sem CMV. CMV conhecido: ${formatMoney(pnl.cogs || 0)}.</td></tr>`;
+                }
+            } else {
+                const profitClass = pnl.net_profit >= 0 ? 'text-success' : 'text-danger';
+                html += row('Resultado Operacional', pnl.net_profit, profitClass, true);
+            }
 
-            html += `<tr><td colspan="2"><small class="text-muted d-block text-end mt-2">Margem Líquida: ${pnl.avg_margin.toFixed(1)}%</small></td></tr>`;
+            const marginNd = profitNd || pnl.avg_margin === null || pnl.avg_margin === undefined;
+            html += `<tr><td colspan="2"><small class="text-muted d-block text-end mt-2">Margem Líquida: ${marginNd ? 'n/d' : Number(pnl.avg_margin).toFixed(1) + '%'}</small></td></tr>`;
 
             document.querySelector('#pnl-table tbody').innerHTML = html;
         },

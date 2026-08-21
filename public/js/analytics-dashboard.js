@@ -173,7 +173,14 @@ const Analytics = {
         const rows = Array.isArray(json.data) ? json.data : [];
 
         const canvas = document.getElementById('marginChart');
-        if (!this.toggleNoDataState(canvas, rows, 'Sem dados suficientes de margem por tipo de anúncio.')) {
+        const plottable = rows.filter((d) => d.avg_margin !== null && d.avg_margin !== undefined && d.cogs_status !== 'sem_cmv');
+        if (!this.toggleNoDataState(
+            canvas,
+            plottable,
+            rows.length
+                ? 'sem CMV — cadastre o custo em /dashboard/cogs. Margem líquida não é calculada sem CMV (não é 0%).'
+                : 'Sem dados suficientes de margem por tipo de anúncio.'
+        )) {
             return;
         }
 
@@ -184,10 +191,10 @@ const Analytics = {
         this.charts.margin = new Chart(ctx, {
             type: 'bar',
             data: {
-                labels: rows.map(d => d.listing_type || 'N/A'),
+                labels: plottable.map(d => d.listing_type || 'N/A'),
                 datasets: [{
                     label: 'Margem Média (%)',
-                    data: rows.map(d => parseFloat(d.avg_margin)),
+                    data: plottable.map(d => parseFloat(d.avg_margin)),
                     backgroundColor: '#28a745'
                 }]
             },

@@ -274,4 +274,73 @@ class OrderFinancialServiceTest extends TestCase
         // Should be treated as generic error
         $this->assertArrayNotHasKey('feature_unavailable', $result);
     }
+
+
+    // ===========================
+    // Missing CMV is unknown, not zero
+    // ===========================
+
+    public function testSummarizeSalesDoesNotTreatMissingCogsAsZeroProfit(): void
+    {
+        $service = $this->buildService($this->createMockClient());
+        $ref = new \ReflectionClass($service);
+        $method = $ref->getMethod('summarizeSales');
+        $method->setAccessible(true);
+
+        $summary = $method->invoke($service, [
+            [
+                'total_amount' => 100.0,
+                'profit' => null,
+                'has_cogs' => false,
+                'marketplace_net' => 80.0,
+                'taxes' => 0.0,
+                'items' => [
+                    ['item_id' => 'MLB1', 'linked_product' => false, 'has_cogs' => false],
+                ],
+            ],
+            [
+                'total_amount' => 200.0,
+                'profit' => 50.0,
+                'has_cogs' => true,
+                'marketplace_net' => 160.0,
+                'taxes' => 0.0,
+                'items' => [
+                    ['item_id' => 'MLB2', 'linked_product' => true, 'has_cogs' => true],
+                ],
+            ],
+        ]);
+
+        $this->assertSame(1, $summary['unlinked_items']);
+        $this->assertFalse($summary['has_real_cogs']);
+        $this->assertSame(50.0, $summary['lucro_conhecido']);
+        // KPI total_profit is not a complete green number when any line lacks CMV.
+        $this->assertNull($summary['total_profit']);
+        $this->assertNull($summary['avg_margin']);
+    }
+
+    public function testSummarizeSalesComputesProfitWhenEveryItemHasCogs(): void
+    {
+        $service = $this->buildService($this->createMockClient());
+        $ref = new \ReflectionClass($service);
+        $method = $ref->getMethod('summarizeSales');
+        $method->setAccessible(true);
+
+        $summary = $method->invoke($service, [
+            [
+                'total_amount' => 200.0,
+                'profit' => 50.0,
+                'has_cogs' => true,
+                'marketplace_net' => 160.0,
+                'taxes' => 0.0,
+                'items' => [
+                    ['item_id' => 'MLB2', 'linked_product' => true, 'has_cogs' => true],
+                ],
+            ],
+        ]);
+
+        $this->assertTrue($summary['has_real_cogs']);
+        $this->assertSame(50.0, $summary['total_profit']);
+        $this->assertSame(25.0, $summary['avg_margin']);
+        $this->assertSame(0, $summary['unlinked_items']);
+    }
 }

@@ -344,17 +344,25 @@ class OrderFinancialService
     {
         $unlinked = 0;
         $unlinkedUnique = [];
-        $totalProfit = 0.0;
+        $knownProfit = 0.0;
+        $knownRevenue = 0.0;
         $totalRevenue = 0.0;
         $totalNet = 0.0;
         $totalTax = 0.0;
+        $completeSales = 0;
         foreach ($sales as $sale) {
-            $totalProfit += (float)($sale['profit'] ?? 0);
             $totalRevenue += (float)($sale['total_amount'] ?? 0);
             $totalNet += (float)($sale['marketplace_net'] ?? 0);
             $totalTax += (float)($sale['taxes'] ?? 0);
+            $saleHasCogs = !empty($sale['has_cogs']);
+            if ($saleHasCogs && ($sale['profit'] ?? null) !== null) {
+                $completeSales++;
+                $knownProfit += (float)$sale['profit'];
+                $knownRevenue += (float)($sale['total_amount'] ?? 0);
+            }
             foreach ($sale['items'] as $item) {
-                if (empty($item['linked_product'])) {
+                $linked = !empty($item['linked_product']) || !empty($item['has_cogs']);
+                if (!$linked) {
                     $unlinked++;
                     $itemId = trim((string)($item['item_id'] ?? ''));
                     $sku = trim((string)($item['sku'] ?? ''));
@@ -364,15 +372,21 @@ class OrderFinancialService
             }
         }
 
+        $hasRealCogs = $unlinked === 0 && $completeSales > 0;
+
         return [
             'unlinked_items' => $unlinked,
             'unlinked_unique_items' => count($unlinkedUnique),
-            'total_profit' => round($totalProfit, 2),
+            'total_profit' => $hasRealCogs ? round($knownProfit, 2) : null,
+            'lucro_conhecido' => ($completeSales > 0) ? round($knownProfit, 2) : null,
             'total_revenue' => round($totalRevenue, 2),
-            'avg_margin' => $totalRevenue > 0 ? round(($totalProfit / $totalRevenue) * 100, 2) : 0.0,
+            'avg_margin' => $hasRealCogs && $knownRevenue > 0
+                ? round(($knownProfit / $knownRevenue) * 100, 2)
+                : null,
             'marketplace_net' => round($totalNet, 2),
             'total_tax' => round($totalTax, 2),
             'tax_configured' => $totalTax > 0,
+            'has_real_cogs' => $hasRealCogs,
             'partial' => false,
         ];
     }
@@ -567,7 +581,8 @@ class OrderFinancialService
                     $costSource = 'items';
                 }
 
-                $productCost = round($unitCost * $qty, 2);
+                $hasCogs = $linked && $unitCost > 0;
+                $productCost = $hasCogs ? round($unitCost * $qty, 2) : 0.0;
                 $extraCost = round($lineTotal * ($opsPct / 100), 2);
 
                 $lineTax = 0.0;
@@ -593,32 +608,45 @@ class OrderFinancialService
                 $linePaymentFee = round($orderPaymentFee * $share, 2);
                 $lineShipping = round($orderShipping * $share, 2);
                 $lineNet = round($lineTotal - $lineMlFee - $linePaymentFee, 2);
-                $lineProfit = round($lineNet - $lineTax - $productCost - $extraCost - $lineShipping, 2);
-                $lineMargin = $lineTotal > 0 ? round(($lineProfit / $lineTotal) * 100, 2) : 0.0;
+                $profitFields = MissingCogsPolicy::lineProfit(
+                    $hasCogs,
+                    $lineNet,
+                    $productCost,
+                    $lineTax,
+                    $extraCost,
+                    $lineShipping,
+                    $lineTotal
+                );
 
-                $item['product_cost'] = $productCost;
+                $item['product_cost'] = $profitFields['product_cost'];
                 $item['extra_cost'] = $extraCost;
                 $item['tax'] = $lineTax;
                 $item['marketplace_net'] = $lineNet;
-                $item['profit'] = $lineProfit;
-                $item['margin_pct'] = $lineMargin;
-                $item['linked_product'] = $linked;
-                $item['cost_source'] = $costSource;
+                $item['profit'] = $profitFields['profit'];
+                $item['margin_pct'] = $profitFields['margin_pct'];
+                $item['linked_product'] = $hasCogs;
+                $item['has_cogs'] = $profitFields['has_cogs'];
+                $item['cost_source'] = $hasCogs ? $costSource : 'none';
                 $item['tax_source'] = $taxSource;
 
-                $saleProductCost += $productCost;
+                if ($hasCogs) {
+                    $saleProductCost += $productCost;
+                    $saleProfit += (float)$profitFields['profit'];
+                }
                 $saleExtraCost += $extraCost;
                 $saleTax += $lineTax;
-                $saleProfit += $lineProfit;
             }
             unset($item);
 
-            $sale['product_cost'] = round($saleProductCost, 2);
             $sale['extra_cost'] = round($saleExtraCost, 2);
             $sale['taxes'] = round($saleTax > 0 ? $saleTax : $orderTax, 2);
-            $sale['profit'] = round($saleProfit, 2);
-            $sale['margin_pct'] = $orderTotal > 0 ? round(($saleProfit / $orderTotal) * 100, 2) : 0.0;
             $sale['marketplace_net'] = round($orderTotal - $orderMlFee - $orderPaymentFee, 2);
+            $sale = MissingCogsPolicy::saleProfitFromItems($sale, $sale['items']);
+            if (!empty($sale['has_cogs']) && $sale['profit'] === null) {
+                $sale['profit'] = round($saleProfit, 2);
+                $sale['margin_pct'] = $orderTotal > 0 ? round(($saleProfit / $orderTotal) * 100, 2) : 0.0;
+                $sale['product_cost'] = round($saleProductCost, 2);
+            }
         }
         unset($sale);
 
@@ -678,15 +706,20 @@ class OrderFinancialService
                     - (float)($sale['coupon_amount'] ?? 0),
                     2
                 );
-                $sale['profit'] = round(
-                    (float)$sale['marketplace_net']
-                    - (float)($sale['product_cost'] ?? 0)
-                    - (float)($sale['extra_cost'] ?? 0)
-                    - (float)($sale['taxes'] ?? 0),
-                    2
-                );
-                $rev = (float)($sale['total_amount'] ?? 0);
-                $sale['margin_pct'] = $rev > 0 ? round(((float)$sale['profit'] / $rev) * 100, 2) : 0.0;
+                if (!empty($sale['has_cogs']) && ($sale['product_cost'] ?? null) !== null) {
+                    $sale['profit'] = round(
+                        (float)$sale['marketplace_net']
+                        - (float)$sale['product_cost']
+                        - (float)($sale['extra_cost'] ?? 0)
+                        - (float)($sale['taxes'] ?? 0),
+                        2
+                    );
+                    $rev = (float)($sale['total_amount'] ?? 0);
+                    $sale['margin_pct'] = $rev > 0 ? round(((float)$sale['profit'] / $rev) * 100, 2) : 0.0;
+                } else {
+                    $sale['profit'] = null;
+                    $sale['margin_pct'] = null;
+                }
                 continue;
             }
 
@@ -722,15 +755,20 @@ class OrderFinancialService
                 'refund_covered' => (float)$sum['refund_covered'],
             ];
 
-            $sale['profit'] = round(
-                (float)$sale['marketplace_net']
-                - (float)($sale['product_cost'] ?? 0)
-                - (float)($sale['extra_cost'] ?? 0)
-                - (float)($sale['taxes'] ?? 0),
-                2
-            );
-            $rev = (float)($sale['total_amount'] ?? 0);
-            $sale['margin_pct'] = $rev > 0 ? round(((float)$sale['profit'] / $rev) * 100, 2) : 0.0;
+            if (!empty($sale['has_cogs']) && ($sale['product_cost'] ?? null) !== null) {
+                $sale['profit'] = round(
+                    (float)$sale['marketplace_net']
+                    - (float)$sale['product_cost']
+                    - (float)($sale['extra_cost'] ?? 0)
+                    - (float)($sale['taxes'] ?? 0),
+                    2
+                );
+                $rev = (float)($sale['total_amount'] ?? 0);
+                $sale['margin_pct'] = $rev > 0 ? round(((float)$sale['profit'] / $rev) * 100, 2) : 0.0;
+            } else {
+                $sale['profit'] = null;
+                $sale['margin_pct'] = null;
+            }
         }
         unset($sale);
 

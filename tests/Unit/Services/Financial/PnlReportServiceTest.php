@@ -150,4 +150,22 @@ final class PnlReportServiceTest extends TestCase
         $this->assertArrayHasKey('error', $result);
         $this->assertSame(0, $result['available_balance']);
     }
+
+    public function testPresentPnLCoverageViaPolicyWhenPartialSkuCustos(): void
+    {
+        $presented = \App\Services\Financial\MissingCogsPolicy::presentPnL(
+            [
+                'gross_revenue' => 1000.0,
+                'cogs' => 200.0,
+                'cogs_source' => 'sku_custos',
+                'net_profit' => 630.0,
+                'avg_margin' => 63.0,
+            ],
+            ['cogs' => 200.0, 'items_com_custo' => 5, 'items_sem_custo' => 7]
+        );
+
+        $this->assertFalse($presented['has_real_cogs']);
+        $this->assertNull($presented['net_profit']);
+        $this->assertSame(7, $presented['items_sem_custo']);
+    }
 }
