@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Helpers\SessionHelper;
 use App\Services\Pregao\PregaoQuestionsService;
 use App\Services\QuestionService;
 
@@ -15,19 +16,8 @@ class QuestionController extends BaseController
     public function __construct()
     {
         parent::__construct();
-        // Verificar autenticação e obter account_id da sessão ou request
-        // Assumindo que o middleware de auth já validou e temos o user
-        // Aqui simplificamos pegando o primeiro account_id ativo do usuário ou da sessão
-
-        // Em um cenário real, o account_id viria do header ou sessão selecionada
-        $this->accountId = $_SESSION['active_ml_account_id'] ?? 0;
-
-        if (!$this->accountId) {
-            // Se não houver conta na sessão, retornamos 0.
-            // O endpoint específico deve validar se precisa de conta e retornar 401 caso positivo.
-            // REMOVED INSECURE BACKDOOR: $headers['X-Account-Id'] trust
-            $this->accountId = 0;
-        }
+        $active = SessionHelper::getActiveAccountId();
+        $this->accountId = ($active !== null && $active > 0) ? $active : 0;
 
         $this->service = new QuestionService($this->accountId ?: null);
     }
@@ -40,24 +30,21 @@ class QuestionController extends BaseController
     {
         header('Content-Type: application/json');
 
-        $requestedAccountId = $this->request->get('account_id');
+        if (!$this->accountId) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Conta ML não selecionada']);
+            return;
+        }
 
         $filters = [
             'status' => $this->request->get('status'),
             'item_id' => $this->request->get('item_id'),
             'limit' => $this->request->getInt('limit', 50),
             'offset' => $this->request->getInt('offset', 0),
-            'account_id' => $requestedAccountId,
+            'account_id' => $this->accountId,
             'allow_local_cache' => $this->request->get('allow_local_cache'),
             'source' => $this->request->get('source')
         ];
-
-        // Se não for "all" e não tiver conta selecionada, erro
-        if (($requestedAccountId !== 'all') && !$this->accountId) {
-            http_response_code(400);
-            echo json_encode(['error' => 'Conta ML não selecionada']);
-            return;
-        }
 
         // A listagem da tabela usa SEMPRE o cache local (ml_questions) — mesma
         // fonte de stats() — para nunca divergir dos contadores exibidos no

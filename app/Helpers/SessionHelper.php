@@ -88,6 +88,7 @@ class SessionHelper
 
         if ($accountId === null) {
             unset($_SESSION['active_ml_account_id']);
+            unset($_SESSION['current_account_id']);
             // Opcional: limpar a preferência no banco também.
             // $stmt = $db->prepare("UPDATE users SET active_ml_account_id = NULL WHERE id = :user_id");
             // $stmt->execute(['user_id' => $userId]);
@@ -101,8 +102,9 @@ class SessionHelper
         $stmt->execute(['account_id' => $accountId, 'user_id' => $userId]);
 
         if ($stmt->fetch()) {
-            // 1. Atualizar a sessão
+            // 1. Atualizar a sessão (legacy current_account_id kept in sync, never read by getter)
             $_SESSION['active_ml_account_id'] = $accountId;
+            $_SESSION['current_account_id'] = $accountId;
 
             // 2. Persistir a escolha no banco de dados
             $updateStmt = $db->prepare("UPDATE users SET active_ml_account_id = :account_id WHERE id = :user_id");

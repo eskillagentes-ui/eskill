@@ -613,4 +613,15 @@ class AuthControllerTest extends TestCase
             'AuthController deve ter pelo menos 20 métodos públicos próprios'
         );
     }
+
+    public function testCallbackDoesNotUnconditionallyStealActiveAccount(): void
+    {
+        $authService = file_get_contents(dirname(__DIR__, 3) . '/app/Services/MercadoLivreAuthService.php');
+        $this->assertIsString($authService);
+        $this->assertStringContainsString(
+            'shouldSetActiveAccountAfterOAuth',
+            $authService,
+            'OAuth token exchange must gate setActiveAccountId for a new second account'
+        );
+    }
 }

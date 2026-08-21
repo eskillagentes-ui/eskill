@@ -548,6 +548,9 @@ class MercadoLivreAuthService
             session_start();
         }
 
+        // Snapshot BEFORE insert so a brand-new second account cannot steal the dashboard.
+        $previousActiveId = SessionHelper::getActiveAccountId();
+
         $diagnostics = $this->getOAuthConfigDiagnostics();
         if (!$diagnostics['ready']) {
             throw new \RuntimeException((string) ($diagnostics['message'] ?? 'Configuração OAuth inválida'));
@@ -739,9 +742,32 @@ class MercadoLivreAuthService
             'UPDATE ml_accounts SET last_oauth_connection_at = NOW() WHERE id = :id'
         )->execute(['id' => $accountId]);
 
-        SessionHelper::setActiveAccountId($accountId);
+        if (self::shouldSetActiveAccountAfterOAuth($previousActiveId, $accountId, (bool) $existing)) {
+            SessionHelper::setActiveAccountId($accountId);
+        }
 
         return ['success' => true, 'account_id' => $accountId, 'user_info' => $userInfo];
+    }
+
+    /**
+     * Adding a brand-new second ML account must not steal the dashboard session.
+     * Reconnect of an existing ml_user_id keeps/sets that account as active.
+     */
+    public static function shouldSetActiveAccountAfterOAuth(
+        ?int $previousActiveId,
+        int $authorizedAccountId,
+        bool $isExistingMlAccount
+    ): bool {
+        if ($authorizedAccountId <= 0) {
+            return false;
+        }
+        if ($isExistingMlAccount) {
+            return true;
+        }
+        if ($previousActiveId === null || $previousActiveId <= 0) {
+            return true;
+        }
+        return $previousActiveId === $authorizedAccountId;
     }
 
     public function getOAuthConfigDiagnostics(): array

@@ -121,20 +121,9 @@ class DashboardController extends BaseController
      */
     private function buildAndSendMetrics(): void
     {
-        $requestedAccountId = $this->request->get('account_id');
-        $accountId = null;
-        if (is_scalar($requestedAccountId) && is_numeric((string)$requestedAccountId)) {
-            $parsedAccountId = (int)$requestedAccountId;
-            if ($parsedAccountId > 0) {
-                $accountId = $parsedAccountId;
-            }
-        }
-
-        if ($accountId === null) {
-            $accountId = $this->userService->getActiveAccountId();
-            if ($accountId !== null && $accountId <= 0) {
-                $accountId = null;
-            }
+        $accountId = $this->userService->getActiveAccountId();
+        if ($accountId !== null && $accountId <= 0) {
+            $accountId = null;
         }
 
         $currentUser = $this->userService->getCurrentUser();

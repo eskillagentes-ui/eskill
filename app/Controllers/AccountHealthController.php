@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Core\Request;
 use App\Database;
 use App\Services\AccountHealthService;
+use App\Helpers\SessionHelper;
 use App\Services\UserService;
 
 /**
@@ -41,7 +42,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = $_SESSION['active_ml_account_id'] ?? null;
+        $accountId = SessionHelper::getActiveAccountId();
 
         $pageTitle = 'Diagnóstico da Conta';
         $currentPage = 'account-health';
@@ -69,7 +70,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = $_SESSION['active_ml_account_id'] ?? null;
+        $accountId = SessionHelper::getActiveAccountId();
 
         if (!$accountId) {
             http_response_code(400);
@@ -128,7 +129,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = $_SESSION['active_ml_account_id'] ?? null;
+        $accountId = SessionHelper::getActiveAccountId();
         if (!$accountId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
@@ -183,7 +184,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = $_SESSION['active_ml_account_id'] ?? null;
+        $accountId = SessionHelper::getActiveAccountId();
         if (!$accountId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
@@ -344,7 +345,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = $_SESSION['active_ml_account_id'] ?? null;
+        $accountId = SessionHelper::getActiveAccountId();
         if (!$accountId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
@@ -386,7 +387,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = $_SESSION['active_ml_account_id'] ?? null;
+        $accountId = SessionHelper::getActiveAccountId();
         if (!$accountId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
@@ -425,7 +426,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = $_SESSION['active_ml_account_id'] ?? null;
+        $accountId = SessionHelper::getActiveAccountId();
         if (!$accountId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
@@ -464,7 +465,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = $_SESSION['active_ml_account_id'] ?? null;
+        $accountId = SessionHelper::getActiveAccountId();
         if (!$accountId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
@@ -503,7 +504,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = $_SESSION['active_ml_account_id'] ?? null;
+        $accountId = SessionHelper::getActiveAccountId();
         if (!$accountId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);

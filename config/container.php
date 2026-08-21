@@ -27,8 +27,8 @@ function activeAccountId(): ?int
     if (session_status() !== PHP_SESSION_ACTIVE) {
         return null;
     }
-    $id = $_SESSION['active_ml_account_id'] ?? $_SESSION['account_id'] ?? null;
-    return $id !== null ? (int) $id : null;
+    $id = \App\Helpers\SessionHelper::getActiveAccountId();
+    return ($id !== null && $id > 0) ? $id : null;
 }
 
 /**

@@ -616,16 +616,27 @@ class AuthController extends BaseController
         }
 
         $userId = $_SESSION['user_id'];
+        $activeId = SessionHelper::getActiveAccountId();
 
         $db = Database::getInstance();
-        $stmt = $db->prepare("
-            SELECT id, ml_user_id, nickname, status, token_expires_at, access_token
-            FROM ml_accounts
-            WHERE user_id = :user_id AND status = 'active'
-            ORDER BY token_expires_at DESC
-            LIMIT 1
-        ");
-        $stmt->execute(['user_id' => $userId]);
+        if ($activeId) {
+            $stmt = $db->prepare("
+                SELECT id, ml_user_id, nickname, status, token_expires_at, access_token
+                FROM ml_accounts
+                WHERE id = :id AND user_id = :user_id
+                LIMIT 1
+            ");
+            $stmt->execute(['id' => $activeId, 'user_id' => $userId]);
+        } else {
+            $stmt = $db->prepare("
+                SELECT id, ml_user_id, nickname, status, token_expires_at, access_token
+                FROM ml_accounts
+                WHERE user_id = :user_id AND status = 'active'
+                ORDER BY created_at ASC
+                LIMIT 1
+            ");
+            $stmt->execute(['user_id' => $userId]);
+        }
         $account = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         if (!$account) {

@@ -42,8 +42,7 @@ class SEOToolsController
         $this->ensureSession();
         
         // Obter account_id da sessão ou query
-        $queryAccountId = $this->request->getInt('account_id', 0) ?: null;
-        $this->accountId = $_SESSION['current_account_id'] ?? $queryAccountId;
+        $this->accountId = \App\Helpers\SessionHelper::getActiveAccountId();
         if ($this->accountId) {
             $this->accountId = (int)$this->accountId;
         }

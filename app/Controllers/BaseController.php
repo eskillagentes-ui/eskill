@@ -95,11 +95,10 @@ abstract class BaseController
      */
     protected function getActiveAccountId(): ?int
     {
-        // 1) Sessão (fluxo web)
-        $id = $_SESSION['active_ml_account_id'] ?? ($_SESSION['account_id'] ?? null);
-        if ($id !== null) {
-            $id = (int)$id;
-            return $id > 0 ? $id : null;
+        // 1) Sessão (fluxo web) — única chave: SessionHelper::getActiveAccountId()
+        $fromSession = \App\Helpers\SessionHelper::getActiveAccountId();
+        if ($fromSession !== null && $fromSession > 0) {
+            return $fromSession;
         }
 
         // 2) Header (fluxo API/CLI): X-ML-Account-Id
