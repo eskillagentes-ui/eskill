@@ -96,7 +96,7 @@ declare(strict_types=1);
           <div class="card-body">
             <div class="text-muted small mb-2">ANÚNCIOS ANALISADOS</div>
             <div class="d-flex justify-content-between align-items-center mb-2">
-              <span class="small text-muted">Total</span>
+              <span class="small text-muted">Analisados / universo</span>
               <strong id="stat-total">--</strong>
             </div>
             <div class="d-flex justify-content-between align-items-center mb-2">
@@ -341,7 +341,8 @@ declare(strict_types=1);
           <select class="form-select" id="modal-max-items">
             <option value="50">50 anúncios (rápido ~30s)</option>
             <option value="100">100 anúncios (~1min)</option>
-            <option value="200" selected>200 anúncios (~2min) — Recomendado</option>
+            <option value="200">200 anúncios (~2min)</option>
+            <option value="400" selected>400 anúncios — catálogo completo (recomendado)</option>
             <option value="500">500 anúncios (~5min)</option>
           </select>
         </div>
@@ -1001,7 +1002,10 @@ declare(strict_types=1);
       const diag = r.diagnosis || {};
       const meta = r.meta || {};
 
-      document.getElementById('stat-total').textContent = meta.items_fetched || 0;
+      const analyzed = meta.analyzed ?? meta.items_analyzed ?? meta.items_fetched ?? 0;
+      const universe = meta.universe ?? meta.items_fetched ?? 0;
+      document.getElementById('stat-total').textContent = analyzed + '/' + universe;
+
       document.getElementById('stat-below50').textContent = seo.items_below_50 || 0;
       document.getElementById('stat-critical').textContent = diag.critical_count || 0;
       document.getElementById('stat-recovery').textContent =

@@ -192,6 +192,10 @@
             <file>tests/Unit/Services/BrandCentralServiceTest.php</file>
             <file>tests/Unit/Scripts/AutomatedReportsWorkerTest.php</file>
             <file>tests/Unit/AccountGovernanceServiceTest.php</file>
+            <file>tests/Unit/AccountXRayCoverageTest.php</file>
+            <file>tests/Unit/Scripts/SyncIrregularitiesCliTest.php</file>
+            <file>tests/Unit/Services/Catalog/ListingIrregularityScanServiceTest.php</file>
+            <file>tests/Unit/Services/Catalog/SalesBlockerStoreTest.php</file>
             <file>tests/Unit/AccountGovernanceIntegrationServiceTest.php</file>
             <!-- Batch 5: New structural tests (DB-free) -->
             <file>tests/Unit/Services/RealTimeNotificationServiceTest.php</file>
