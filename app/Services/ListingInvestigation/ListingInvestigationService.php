@@ -728,7 +728,16 @@ PROMPT;
      */
     public function realModel(array $item): ?string
     {
-        return $this->attributeValue($item, 'MODEL');
+        $v = $this->attributeValue($item, 'MODEL');
+        if ($v === null || $v === '') {
+            return null;
+        }
+        // Attribute already stuffed with search words is not a real model.
+        if ($this->looksLikeLongTail($v)) {
+            return null;
+        }
+
+        return $v;
     }
 
     /**

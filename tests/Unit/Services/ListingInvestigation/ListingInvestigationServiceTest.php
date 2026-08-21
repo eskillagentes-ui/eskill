@@ -132,6 +132,12 @@ final class ListingInvestigationServiceTest extends TestCase
         self::assertStringNotContainsString('Titan Fan Start Today Kit Farol', $row['draft_title']);
         self::assertFalse($row['published']);
         self::assertTrue($service->looksLikeLongTail('CG 160 Titan Fan Start Today Kit Farol'));
+        self::assertNull($service->realModel([
+            'attributes' => [['id' => 'MODEL', 'value_name' => 'Awa Preto Texturizado Modelo Original Rosca Interna Sem Peso']],
+        ]));
+        self::assertSame('CG 160', $service->realModel([
+            'attributes' => [['id' => 'MODEL', 'value_name' => 'CG 160']],
+        ]));
     }
 
     public function testInvestigationDoesNotCallMlWrite(): void
