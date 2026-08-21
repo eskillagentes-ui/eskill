@@ -396,6 +396,75 @@ class ItemSyncService
     }
 
     /**
+     * Merge ML item payload over existing local JSON (items.data).
+     *
+     * /items multiget does not send local-only keys written by other workers
+     * (performance_score / performance_* from item-performance-sync, SEO cache, etc.).
+     * Those keys are kept unless the incoming payload explicitly contains them.
+     *
+     * @param array<string, mixed> $incomingMlPayload
+     */
+    public static function mergeItemDataJson(array $incomingMlPayload, ?string $existingJson): string
+    {
+        $existing = [];
+        if (is_string($existingJson) && $existingJson !== '') {
+            $decoded = json_decode($existingJson, true);
+            if (is_array($decoded)) {
+                $existing = $decoded;
+            }
+        }
+
+        foreach ($existing as $key => $value) {
+            if (!array_key_exists($key, $incomingMlPayload)) {
+                $incomingMlPayload[$key] = $value;
+            }
+        }
+
+        $encoded = json_encode($incomingMlPayload, JSON_UNESCAPED_UNICODE);
+        return is_string($encoded) ? $encoded : '{}';
+    }
+
+    /**
+     * @param list<string> $mlItemIds
+     * @return array<string, string> ml_item_id => items.data JSON
+     */
+    private function loadExistingItemDataJsonByMlIds(int $accountId, array $mlItemIds): array
+    {
+        $mlItemIds = array_values(array_unique(array_filter(
+            $mlItemIds,
+            static fn($id) => is_string($id) && $id !== ''
+        )));
+        if ($mlItemIds === []) {
+            return [];
+        }
+
+        try {
+            $placeholders = implode(',', array_fill(0, count($mlItemIds), '?'));
+            $sql = "SELECT ml_item_id, data FROM items WHERE account_id = ? AND ml_item_id IN ({$placeholders})";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(array_merge([$accountId], $mlItemIds));
+            $map = [];
+            while ($row = $stmt->fetch(PDO::FETCH_ASSOC)) {
+                $id = (string) ($row['ml_item_id'] ?? '');
+                if ($id === '') {
+                    continue;
+                }
+                $json = $row['data'] ?? null;
+                if (is_string($json) && $json !== '') {
+                    $map[$id] = $json;
+                }
+            }
+            return $map;
+        } catch (\Throwable $e) {
+            $this->logger->warning('ITEM_SYNC_EXISTING_DATA_LOOKUP_FAILED', 'Falha ao ler items.data local para merge', [
+                'account_id' => $accountId,
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
+    }
+
+    /**
      * Sincroniza itens para a tabela 'items' (usada pelo TechSheet e outros módulos)
      */
     private function syncToItemsTable(array $items, int $accountId): int
@@ -428,6 +497,20 @@ class ItemSyncService
                 updated_at = NOW()
         ";
 
+        $mlIds = [];
+        foreach ($items as $item) {
+            if (!isset($item['body']) || !is_array($item['body']) || isset($item['body']['error'])) {
+                continue;
+            }
+            $id = $item['body']['id'] ?? null;
+            if (is_string($id) && $id !== '') {
+                $mlIds[] = $id;
+            } elseif (is_int($id) || is_float($id)) {
+                $mlIds[] = (string) $id;
+            }
+        }
+        $existingJsonById = $this->loadExistingItemDataJsonByMlIds($accountId, $mlIds);
+
         $stmt = $this->db->prepare($sql);
         $count = 0;
 
@@ -446,6 +529,8 @@ class ItemSyncService
                     }
                 }
 
+                $mlId = isset($itemData['id']) ? (string) $itemData['id'] : '';
+
                 try {
                     $stmt->execute([
                         ':ml_item_id' => $itemData['id'],
@@ -459,7 +544,7 @@ class ItemSyncService
                         ':condition_type' => $itemData['condition'] ?? null,
                         ':catalog_product_id' => $itemData['catalog_product_id'] ?? null,
                         ':sku' => $sku,
-                        ':data' => json_encode($itemData),
+                        ':data' => self::mergeItemDataJson($itemData, $existingJsonById[$mlId] ?? null),
                     ]);
                     $count++;
                 } catch (\Throwable $e) {
