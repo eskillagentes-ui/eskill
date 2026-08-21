@@ -2363,7 +2363,7 @@ class MercadoLivreClient
             return $results;
         }
 
-        $defaultAttributes = ['id', 'title', 'price', 'sold_quantity', 'status', 'category_id', 'available_quantity', 'thumbnail'];
+        $defaultAttributes = ['id', 'title', 'price', 'sold_quantity', 'status', 'category_id', 'available_quantity', 'thumbnail', 'permalink', 'listing_type_id', 'currency_id'];
         $attrs = !empty($attributes) ? $attributes : $defaultAttributes;
 
         $chunks = array_chunk($itemIds, 20);

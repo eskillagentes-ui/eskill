@@ -40,6 +40,9 @@ class ItemController extends BaseController
         // Remover filtros vazios opcionais
         $filters = array_filter($filters, fn($value) => $value !== null && $value !== '');
 
+        // Listagem padrão não chama visitas (skip_visits). Use skip_visits=0 para incluir.
+        $filters['skip_visits'] = $this->request->getBool('skip_visits', true);
+
         $filters['limit'] = $this->request->getInt('limit', 50);
         $filters['page'] = max(1, $this->request->getInt('page', 1));
         $offset = $this->request->get('offset');
