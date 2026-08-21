@@ -88,7 +88,7 @@ class SEOKillerEngine
 
         [$problems, $opportunities] = $this->collectAnalysisResults($items);
 
-        return $this->assembleDiagnosis($diagnosis, $problems, $opportunities);
+        return $this->assembleDiagnosis($diagnosis, $problems, $opportunities, $items);
     }
 
     /**
@@ -121,13 +121,34 @@ class SEOKillerEngine
     /**
      * Monta o diagnóstico final com scores e prioridades
      */
-    private function assembleDiagnosis(array $diagnosis, array $problems, array $opportunities): array
+    private function assembleDiagnosis(array $diagnosis, array $problems, array $opportunities, array $items = []): array
     {
         usort($problems, fn($a, $b) => $b['impact'] <=> $a['impact']);
         usort($opportunities, fn($a, $b) => $b['potential'] <=> $a['potential']);
 
         $totalImpact = array_sum(array_column($problems, 'impact'));
-        $diagnosis['health_score'] = max(0, 100 + $totalImpact);
+        $customScore = max(0, 100 + $totalImpact);
+
+        $scoreStats = $this->collectOfficialScoreStats($items);
+        $officialScores = $scoreStats['scores'];
+        $sample = count($officialScores);
+        $totalItems = max(1, count($items));
+        $minSample = max(10, (int) ceil($totalItems * 0.1));
+        $diagnosis['official_score_sample'] = $sample;
+        $diagnosis['performance_unknown'] = $scoreStats['unknown'];
+        $diagnosis['performance_status'] = $sample === 0
+            ? 'pending'
+            : ($scoreStats['unknown'] > 0 ? 'partial' : 'ready');
+
+        if ($sample >= $minSample) {
+            $diagnosis['health_score'] = (int) round(array_sum($officialScores) / $sample);
+            $diagnosis['official_score'] = true;
+        } else {
+            // Missing official scores are pending/unknown — never treat as 0.
+            $diagnosis['health_score'] = $customScore;
+            $diagnosis['official_score'] = false;
+        }
+
         $diagnosis['status'] = $this->resolveHealthStatus($diagnosis['health_score']);
         $diagnosis['problems'] = array_slice($problems, 0, 20);
         $diagnosis['opportunities'] = array_slice($opportunities, 0, 10);
@@ -544,6 +565,11 @@ class SEOKillerEngine
     }
 
     private const LOW_LISTING_TYPES = ['bronze', 'free'];
+    private const LOW_PERFORMANCE_SCORE = 40;
+    /** Cruzamento de “sem venda” com visitas: só account_index_metrics (conta), nunca getMultiItemVisits. */
+    private const MIN_VISITS_FOR_CONVERSION = 20;
+    private const PERFORMANCE_HREF = '/dashboard/seo-killer#performance-tracker';
+    private const FICHA_SAMPLE_LIMIT = 8;
 
     /**
      * Analisar Visibilidade
@@ -575,7 +601,13 @@ class SEOKillerEngine
             ];
         }
 
-        return ['problems' => $problems, 'opportunities' => $opportunities];
+        $quality = $this->evaluateOfficialQualityStats($this->collectOfficialScoreStats($items));
+        $traffic = $this->evaluateVisitConversionStats($this->collectVisitConversionStats($items));
+
+        return [
+            'problems' => array_merge($problems, $quality['problems'], $traffic['problems']),
+            'opportunities' => array_merge($opportunities, $quality['opportunities'], $traffic['opportunities']),
+        ];
     }
 
     /**
@@ -642,11 +674,428 @@ class SEOKillerEngine
         $score = $diagnosis['health_score'];
         $n = count($diagnosis['problems']);
 
-        return match (true) {
+        $summary = match (true) {
             $score < 30 => "🔴 CONTA CRÍTICA: Score {$score}/100. {$n} problemas graves. Otimização urgente necessária.",
             $score < 60 => "🟡 CONTA COM PROBLEMAS: Score {$score}/100. {$n} issues. Potencial de melhoria com SEO.",
             default => "🟢 CONTA SAUDÁVEL: Score {$score}/100. Foco em otimizações finas.",
         };
+        $pending = (int) ($diagnosis['performance_unknown'] ?? 0);
+        if ($pending > 0) {
+            $summary .= " {$pending} anúncios com performance oficial pendente (não é score 0).";
+        }
+
+        return $summary;
+    }
+
+
+    /**
+     * Overlay performance_* + sold_quantity from items.data (item-performance-sync).
+     * listItems / ml_items do not carry these keys. Never calls getMultiItemVisits.
+     *
+     * @param list<array<string, mixed>> $items
+     * @return list<array<string, mixed>>
+     */
+    private function hydrateOfficialPerformanceFromLocalItems(array $items): array
+    {
+        if ($items === [] || !isset($this->db) || !$this->db instanceof \PDO || ($this->accountId ?? 0) <= 0) {
+            return $items;
+        }
+
+        $indexById = [];
+        foreach ($items as $i => $item) {
+            $mlb = strtoupper(trim((string) ($item['id'] ?? $item['ml_item_id'] ?? '')));
+            if ($mlb === '') {
+                continue;
+            }
+            $indexById[$mlb][] = $i;
+        }
+        if ($indexById === []) {
+            return $items;
+        }
+
+        foreach (array_chunk(array_keys($indexById), 200) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = null;
+            try {
+                $sql = "SELECT ml_item_id, sold_quantity, data FROM items WHERE account_id = ? AND ml_item_id IN ({$placeholders})";
+                $stmt = $this->db->prepare($sql);
+                $stmt->execute(array_merge([$this->accountId], $chunk));
+            } catch (\Throwable) {
+                try {
+                    $sql = "SELECT ml_item_id, data FROM items WHERE account_id = ? AND ml_item_id IN ({$placeholders})";
+                    $stmt = $this->db->prepare($sql);
+                    $stmt->execute(array_merge([$this->accountId], $chunk));
+                } catch (\Throwable) {
+                    return $items;
+                }
+            }
+
+            while (($row = $stmt->fetch(\PDO::FETCH_ASSOC)) !== false) {
+                $mlb = strtoupper(trim((string) ($row['ml_item_id'] ?? '')));
+                if ($mlb === '' || !isset($indexById[$mlb])) {
+                    continue;
+                }
+                $data = json_decode((string) ($row['data'] ?? ''), true);
+                if (!is_array($data)) {
+                    $data = [];
+                }
+                $overlay = $this->extractOfficialPerformanceFields($data, $row);
+                if ($overlay === []) {
+                    continue;
+                }
+                foreach ($indexById[$mlb] as $idx) {
+                    $items[$idx] = array_merge($items[$idx], $overlay);
+                }
+            }
+        }
+
+        return $items;
+    }
+
+    /**
+     * @param array<string, mixed> $data
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function extractOfficialPerformanceFields(array $data, array $row): array
+    {
+        $overlay = [];
+        foreach (['performance_score', 'performance_level', 'performance_level_wording', 'performance_updated_at'] as $key) {
+            if (array_key_exists($key, $data) && $data[$key] !== null && $data[$key] !== '') {
+                $overlay[$key] = $data[$key];
+            }
+        }
+        if (isset($row['sold_quantity']) && is_numeric($row['sold_quantity'])) {
+            $overlay['sold_quantity'] = (int) $row['sold_quantity'];
+        } elseif (isset($data['sold_quantity']) && is_numeric($data['sold_quantity'])) {
+            $overlay['sold_quantity'] = (int) $data['sold_quantity'];
+        }
+
+        return $overlay;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $items
+     * @return array{
+     *   scores: list<float>,
+     *   unknown: int,
+     *   low: int,
+     *   low_ids: list<string>,
+     *   unknown_ids: list<string>
+     * }
+     */
+    private function collectOfficialScoreStats(array $items): array
+    {
+        $stats = [
+            'scores' => [],
+            'unknown' => 0,
+            'low' => 0,
+            'low_ids' => [],
+            'unknown_ids' => [],
+        ];
+
+        foreach ($items as $item) {
+            $mlb = strtoupper(trim((string) ($item['id'] ?? $item['ml_item_id'] ?? '')));
+            if (array_key_exists('performance_score', $item) && is_numeric($item['performance_score'])) {
+                $score = (float) $item['performance_score'];
+                $stats['scores'][] = $score;
+                if ($score < self::LOW_PERFORMANCE_SCORE) {
+                    $stats['low']++;
+                    $this->pushFichaSampleId($stats['low_ids'], $mlb);
+                }
+            } else {
+                $stats['unknown']++;
+                $this->pushFichaSampleId($stats['unknown_ids'], $mlb);
+            }
+        }
+
+        return $stats;
+    }
+
+    /**
+     * @param array{
+     *   scores: list<float>,
+     *   unknown: int,
+     *   low: int,
+     *   low_ids: list<string>,
+     *   unknown_ids: list<string>
+     * } $stats
+     * @return array{problems: list<array<string, mixed>>, opportunities: list<array<string, mixed>>}
+     */
+    private function evaluateOfficialQualityStats(array $stats): array
+    {
+        $problems = [];
+        $opportunities = [];
+
+        if ($stats['low'] > 0) {
+            $opportunities[] = [
+                'category' => 'visibility',
+                'opportunity' => "{$stats['low']} anúncios com performance_score oficial < " . self::LOW_PERFORMANCE_SCORE,
+                'potential' => 18,
+                'affected_items' => $stats['low'],
+                'sample_item_ids' => $stats['low_ids'],
+                'strategy' => 'Priorizar ficha/título desses MLBs — score vem de items.data (item-performance-sync), não do cache morto',
+            ];
+        }
+
+        if ($stats['unknown'] > 0) {
+            $opportunities[] = [
+                'category' => 'visibility',
+                'opportunity' => "{$stats['unknown']} anúncios com performance oficial pendente (unknown) — não tratar como score 0",
+                'potential' => 5,
+                'affected_items' => $stats['unknown'],
+                'sample_item_ids' => $stats['unknown_ids'],
+                'performance_pending' => true,
+                'strategy' => 'Aguardar item-performance-sync gravar performance_score em items.data',
+            ];
+        }
+
+        return ['problems' => $problems, 'opportunities' => $opportunities];
+    }
+
+    /**
+     * Sem venda: ml_orders (30d) + items.sold_quantity. Visitas só em nível de conta
+     * (account_index_metrics) quando não há visitas por anúncio. Sem GET /visits.
+     *
+     * @param list<array<string, mixed>> $items
+     * @return array{
+     *   known: bool,
+     *   zero_visits: int,
+     *   no_sales: int,
+     *   zero_sample_ids: list<string>,
+     *   no_sales_sample_ids: list<string>,
+     *   visits_source: string,
+     *   account_visits: ?float,
+     *   account_zero_visits: bool
+     * }
+     */
+    private function collectVisitConversionStats(array $items): array
+    {
+        $empty = [
+            'known' => false,
+            'zero_visits' => 0,
+            'no_sales' => 0,
+            'zero_sample_ids' => [],
+            'no_sales_sample_ids' => [],
+            'visits_source' => 'none',
+            'account_visits' => null,
+            'account_zero_visits' => false,
+        ];
+        if (!isset($this->db) || !$this->db instanceof \PDO || ($this->accountId ?? 0) <= 0) {
+            return $empty;
+        }
+
+        $sales = $this->loadSalesByItem($items);
+        $accountVisits = $this->loadAccountVisits7d();
+
+        $stats = $empty;
+        $stats['known'] = true;
+        $stats['account_visits'] = $accountVisits;
+        $stats['visits_source'] = $accountVisits === null ? 'sales_only' : 'account_index_metrics';
+        $stats['account_zero_visits'] = $accountVisits === 0.0;
+
+        foreach ($items as $item) {
+            if ((string) ($item['status'] ?? '') !== 'active') {
+                continue;
+            }
+            $mlb = strtoupper(trim((string) ($item['id'] ?? $item['ml_item_id'] ?? '')));
+            if ($mlb === '') {
+                continue;
+            }
+            $soldLifetime = (int) ($sales[$mlb]['sold_quantity'] ?? $item['sold_quantity'] ?? 0);
+            $soldRecent = (int) ($sales[$mlb]['recent_qty'] ?? 0);
+            $noSale = $soldRecent <= 0 && $soldLifetime <= 0;
+
+            // Per-item visits are not loaded on page load (no getMultiItemVisits,
+            // no seo_performance_metrics). Cross with account-level visits only.
+            if ($noSale && $accountVisits !== 0.0) {
+                $stats['no_sales']++;
+                $this->pushFichaSampleId($stats['no_sales_sample_ids'], $mlb);
+            }
+        }
+
+        return $stats;
+    }
+
+    /**
+     * @param list<array<string, mixed>> $items
+     * @return array<string, array{sold_quantity: int, recent_qty: int}>
+     */
+    private function loadSalesByItem(array $items): array
+    {
+        $map = [];
+        foreach ($items as $item) {
+            $mlb = strtoupper(trim((string) ($item['id'] ?? $item['ml_item_id'] ?? '')));
+            if ($mlb === '') {
+                continue;
+            }
+            $map[$mlb] = [
+                'sold_quantity' => (int) ($item['sold_quantity'] ?? 0),
+                'recent_qty' => 0,
+            ];
+        }
+
+        $cutoff = (new \DateTimeImmutable('-30 days'))->format('Y-m-d H:i:s');
+        $sqlVariants = [
+            'SELECT order_data, status FROM ml_orders WHERE account_id = :account_id AND date_created >= :cutoff',
+            'SELECT order_data, status FROM ml_orders WHERE ml_account_id = :account_id AND date_created >= :cutoff',
+        ];
+        $rows = null;
+        foreach ($sqlVariants as $sql) {
+            try {
+                $stmt = $this->db->prepare($sql);
+                $stmt->execute([
+                    'account_id' => $this->accountId,
+                    'cutoff' => $cutoff,
+                ]);
+                $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+                break;
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+        if (!is_array($rows)) {
+            return $map;
+        }
+
+        $paid = ['paid', 'delivered', 'confirmed', 'ready_to_ship', 'shipped', 'handling'];
+        foreach ($rows as $row) {
+            $status = strtolower((string) ($row['status'] ?? ''));
+            if ($status !== '' && !in_array($status, $paid, true)) {
+                continue;
+            }
+            $data = json_decode((string) ($row['order_data'] ?? ''), true);
+            if (!is_array($data)) {
+                continue;
+            }
+            $orderItems = $data['order_items'] ?? [];
+            if (!is_array($orderItems)) {
+                continue;
+            }
+            foreach ($orderItems as $orderItem) {
+                if (!is_array($orderItem)) {
+                    continue;
+                }
+                $itemRef = $orderItem['item'] ?? [];
+                $id = '';
+                if (is_array($itemRef)) {
+                    $id = strtoupper(trim((string) ($itemRef['id'] ?? '')));
+                }
+                if ($id === '') {
+                    $id = strtoupper(trim((string) ($orderItem['item_id'] ?? '')));
+                }
+                if ($id === '') {
+                    continue;
+                }
+                $qty = (int) ($orderItem['quantity'] ?? 0);
+                if (!isset($map[$id])) {
+                    $map[$id] = ['sold_quantity' => 0, 'recent_qty' => 0];
+                }
+                $map[$id]['recent_qty'] += $qty;
+            }
+        }
+
+        return $map;
+    }
+
+    private function loadAccountVisits7d(): ?float
+    {
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT visitas_7d FROM account_index_metrics WHERE account_id = :account_id ORDER BY updated_at DESC LIMIT 1'
+            );
+            $stmt->execute(['account_id' => $this->accountId]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        } catch (\Throwable) {
+            return null;
+        }
+        if (!is_array($row) || !array_key_exists('visitas_7d', $row) || $row['visitas_7d'] === null || $row['visitas_7d'] === '') {
+            return null;
+        }
+
+        return (float) $row['visitas_7d'];
+    }
+
+    /**
+     * @param array{
+     *   known: bool,
+     *   zero_visits: int,
+     *   no_sales: int,
+     *   zero_sample_ids: list<string>,
+     *   no_sales_sample_ids: list<string>,
+     *   visits_source?: string,
+     *   account_visits?: ?float,
+     *   account_zero_visits?: bool
+     * } $stats
+     * @return array{problems: list<array<string, mixed>>, opportunities: list<array<string, mixed>>}
+     */
+    private function evaluateVisitConversionStats(array $stats): array
+    {
+        $problems = [];
+        $opportunities = [];
+        if (empty($stats['known'])) {
+            return ['problems' => $problems, 'opportunities' => $opportunities];
+        }
+
+        if (!empty($stats['account_zero_visits'])) {
+            $problems[] = [
+                'severity' => 'high',
+                'category' => 'visits',
+                'issue' => 'Conta com 0 visitas (7d) em account_index_metrics — visitas por anúncio não são carregadas nesta tela',
+                'impact' => -10,
+                'affected_items' => 0,
+                'visits_cta' => true,
+                'href' => self::PERFORMANCE_HREF,
+                'sample_item_ids' => [],
+                'solution' => 'Revisar exposição da conta (Pregão/Analytics). Sem GET /visits em lote no diagnose.',
+            ];
+        } elseif ((int) ($stats['zero_visits'] ?? 0) > 0) {
+            $problems[] = [
+                'severity' => 'high',
+                'category' => 'visits',
+                'issue' => "{$stats['zero_visits']} anúncios ativos sem visitas (30d)",
+                'impact' => -15,
+                'affected_items' => $stats['zero_visits'],
+                'visits_cta' => true,
+                'href' => self::PERFORMANCE_HREF,
+                'sample_item_ids' => $stats['zero_sample_ids'] ?? [],
+                'solution' => 'Abrir Performance Tracker — zero visita = não ranqueia; revisar título/ficha (apply 1335 só com GO item a item)',
+            ];
+        }
+
+        $noSales = (int) ($stats['no_sales'] ?? 0);
+        if ($noSales > 0) {
+            $accountVisits = $stats['account_visits'] ?? null;
+            $src = (string) ($stats['visits_source'] ?? 'none');
+            if ($src === 'account_index_metrics' && is_numeric($accountVisits) && (float) $accountVisits > 0) {
+                $issue = "{$noSales} anúncios ativos sem venda (pedidos 30d + sold_quantity) — conta tem visitas 7d";
+            } else {
+                $issue = "{$noSales} anúncios ativos sem venda (pedidos 30d + sold_quantity)";
+            }
+            $problems[] = [
+                'severity' => 'high',
+                'category' => 'conversion',
+                'issue' => $issue,
+                'impact' => -18,
+                'affected_items' => $noSales,
+                'visits_cta' => true,
+                'href' => self::PERFORMANCE_HREF,
+                'sample_item_ids' => $stats['no_sales_sample_ids'] ?? [],
+                'solution' => 'Sem venda: cruzar título/ficha/preço — apply 1335 só com GO item a item. Fonte: ml_orders + items.sold_quantity, não seo_performance_metrics.',
+            ];
+        }
+
+        return ['problems' => $problems, 'opportunities' => $opportunities];
+    }
+
+    private function pushFichaSampleId(array &$ids, string $mlb): void
+    {
+        if ($mlb === '' || count($ids) >= self::FICHA_SAMPLE_LIMIT) {
+            return;
+        }
+        if (!in_array($mlb, $ids, true)) {
+            $ids[] = $mlb;
+        }
     }
 
     /**
@@ -667,6 +1116,7 @@ class SEOKillerEngine
                     'limit' => $limit,
                     'offset' => $offset,
                     'allow_local_cache' => true, // Permitir fallback para cache local
+                    'skip_visits' => true, // Nunca getMultiItemVisits no diagnose
                 ]);
 
                 $items = $result['items'] ?? [];
@@ -685,6 +1135,8 @@ class SEOKillerEngine
                 }
             }
 
+            $allItems = $this->hydrateOfficialPerformanceFromLocalItems($allItems);
+
             log_info('SEOKillerEngine: itens carregados', [
                 'service' => 'SEOKillerEngine',
                 'count' => count($allItems),
@@ -697,7 +1149,7 @@ class SEOKillerEngine
                 'partial_count' => count($allItems),
             ]);
             // Retorna o que conseguiu buscar até o erro
-            return $allItems;
+            return $this->hydrateOfficialPerformanceFromLocalItems($allItems);
         }
     }
 
