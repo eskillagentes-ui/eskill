@@ -138,3 +138,15 @@ storage/             # Logs, cache
 - **Mercado Livre** — principal canal de vendas, API: api.mercadolibre.com
 - **eskill.com.br** — Sistema SEO Optimizer para automação de e-commerce
 - **Foco:** Otimização de anúncios, clonagem de catálogo, pricing dinâmico, análise de competidores, integração IA
+
+
+## Agentes 24/7 (observe + queue only) — 2026-08-21
+
+Aprovado pelo dono Jess Stai. Prompts oficiais: `docs/agentes-24-7-prompts.md`.
+
+Inbox: Pregão Hoje (`/dashboard/pregao`). Conta ativa da sessão. FACILYTY 1335 isolada da Falcão 1336.
+`SAFE_MODE=true`, `ML_WRITE_AUTOMATION=false`, `FORBIDDEN_ACCOUNTS=1335`.
+
+Os três agentes (Ficha, Perguntas, Ads) **observam e enfileiram**. Não escrevem no Mercado Livre. Não postam respostas. Não pausam anúncios. Não ligam campanha de ads. Não iniciam Hermes. Não reativam clone cron.
+
+Nunca: clone, scrape ML, encher MODEL/título, inventar desconto pra busca, pausar TRAVADA/MORTO/TOXICO, auto-reprice, auto-answer, ads sem CMV.

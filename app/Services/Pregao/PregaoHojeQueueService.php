@@ -19,7 +19,25 @@ final class PregaoHojeQueueService
         'visits_no_sales',
         'ficha',
         'cmv',
+        'perguntas_sla',
+        'ads_sem_cogs',
+        'ads_cogs_acos',
     ];
+
+    /** Filas dos três agentes 24/7 observe+queue (Ficha / Perguntas / Ads). */
+    public const OBSERVE_QUEUE_IDS = [
+        'ficha',
+        'perguntas_sla',
+        'ads_sem_cogs',
+        'ads_cogs_acos',
+    ];
+
+    /** ACOS alto: gasto / receita_atribuída > 30%. Não inventa receita. */
+    public const ACOS_HIGH_THRESHOLD_PCT = 30.0;
+
+    public const ADS_LOOKBACK_DAYS = 7;
+
+    public const PERGUNTAS_SLA_SECONDS = 3600;
 
     private PDO $db;
 
@@ -53,6 +71,9 @@ final class PregaoHojeQueueService
             $this->bucketVisitsNoSales($accountId, $items),
             $this->bucketFicha($accountId, $items),
             $this->bucketCmv($accountId, $items),
+            $this->bucketPerguntasSla($accountId),
+            $this->bucketAdsSemCogs($accountId, $items),
+            $this->bucketAdsCogsAcos($accountId, $items),
         ];
 
         $open = 0;
@@ -92,11 +113,17 @@ final class PregaoHojeQueueService
             'visits_no_sales' => 'Visitas sem venda',
             'ficha' => 'Ficha (fotos, frete, catálogo)',
             'cmv' => 'Vendidos sem CMV',
+            'perguntas_sla' => 'Perguntas sem resposta ≥1h',
+            'ads_sem_cogs' => 'Ads sem CMV',
+            'ads_cogs_acos' => 'Ads com CMV e ACOS ruim',
         ];
         $hrefs = [
             'visits_no_sales' => '/dashboard/items',
             'ficha' => '/dashboard/seo-killer#technical-sheet',
             'cmv' => '/dashboard/cogs',
+            'perguntas_sla' => '/dashboard/questions',
+            'ads_sem_cogs' => '/dashboard/cogs',
+            'ads_cogs_acos' => '/dashboard/ads',
         ];
         $out = [];
         foreach (self::BUCKETS as $i => $id) {
@@ -413,6 +440,9 @@ final class PregaoHojeQueueService
     private function loadActiveItems(int $accountId): ?array
     {
         $sqlVariants = [
+            "SELECT ml_item_id, title, status, available_quantity, sold_quantity, catalog_product_id, cost_price, data
+             FROM items
+             WHERE account_id = ? AND status IN ('active', 'paused')",
             "SELECT ml_item_id, title, status, available_quantity, sold_quantity, catalog_product_id, data
              FROM items
              WHERE account_id = ? AND status IN ('active', 'paused')",
@@ -479,6 +509,9 @@ final class PregaoHojeQueueService
         }
         $catalog = trim((string) ($row['catalog_product_id'] ?? $data['catalog_product_id'] ?? ''));
         $item['catalog_product_id'] = $catalog !== '' ? $catalog : null;
+        if (isset($row['cost_price']) && is_numeric($row['cost_price']) && (float) $row['cost_price'] > 0) {
+            $item['cost_price'] = (float) $row['cost_price'];
+        }
         if (!array_key_exists('catalog_listing', $item)) {
             $item['catalog_listing'] = false;
         }
@@ -553,6 +586,277 @@ final class PregaoHojeQueueService
             'no_free_shipping' => !$freeShipping,
             'catalog_not_listing' => $catalogId !== '' && !$isCatalogListing,
         ];
+    }
+
+    /**
+     * Unanswered from local ml_questions of the active account. Not the legacy
+     * questions table (account mix). Not the API-first Pregão collector.
+     *
+     * @return array<string, mixed>
+     */
+    private function bucketPerguntasSla(int $accountId): array
+    {
+        $cutoff = (new \DateTimeImmutable('now'))
+            ->modify('-' . self::PERGUNTAS_SLA_SECONDS . ' seconds')
+            ->format('Y-m-d H:i:s');
+
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT
+                    SUM(CASE WHEN UPPER(status) = 'UNANSWERED' THEN 1 ELSE 0 END) AS pending,
+                    SUM(CASE WHEN UPPER(status) = 'UNANSWERED'
+                              AND date_created IS NOT NULL
+                              AND date_created <= ?
+                         THEN 1 ELSE 0 END) AS ge_1h
+                 FROM ml_questions
+                 WHERE account_id = ?"
+            );
+            $stmt->execute([$cutoff, $accountId]);
+            $row = $stmt->fetch(PDO::FETCH_ASSOC) ?: [];
+        } catch (Throwable) {
+            return $this->row(
+                'perguntas_sla',
+                4,
+                'Perguntas sem resposta ≥1h',
+                0,
+                'nd',
+                false,
+                '/dashboard/questions',
+                'ml_questions indisponível · sem API-first · POST /answers bloqueado'
+            );
+        }
+
+        $pending = (int) ($row['pending'] ?? 0);
+        $ge1h = (int) ($row['ge_1h'] ?? 0);
+        $severity = $ge1h > 0 ? 'alto' : 'ok';
+
+        return $this->row(
+            'perguntas_sla',
+            4,
+            'Perguntas sem resposta ≥1h',
+            $ge1h,
+            $severity,
+            true,
+            '/dashboard/questions',
+            $ge1h . ' ≥1h / ' . $pending . ' em aberto · fonte ml_questions · sem POST /answers'
+        );
+    }
+
+    /**
+     * SKUs with recent ads spend and no known CMV (sku_custos.custo_produto>0
+     * or items.cost_price>0). Missing CMV is n/d, never profit 0.
+     *
+     * @param list<array<string, mixed>>|null $items
+     * @return array<string, mixed>
+     */
+    private function bucketAdsSemCogs(int $accountId, ?array $items): array
+    {
+        $spend = $this->recentAdsSpendByMlb($accountId);
+        if ($spend === null) {
+            return $this->row(
+                'ads_sem_cogs',
+                5,
+                'Ads sem CMV',
+                0,
+                'nd',
+                false,
+                '/dashboard/cogs',
+                'ads_sku_metrics_daily indisponível · CMV n/d (não 0) · sem ligar campanha'
+            );
+        }
+
+        $known = $this->knownCogsForMlb($accountId, $items, array_keys($spend));
+        if ($known === null) {
+            return $this->row(
+                'ads_sem_cogs',
+                5,
+                'Ads sem CMV',
+                0,
+                'nd',
+                false,
+                '/dashboard/cogs',
+                'sku_custos indisponível · CMV n/d (não 0) · sem ligar campanha'
+            );
+        }
+
+        $missing = 0;
+        foreach ($spend as $mlb => $row) {
+            if (($row['gasto'] ?? 0) > 0 && !isset($known[$mlb])) {
+                $missing++;
+            }
+        }
+
+        $severity = $missing > 0 ? 'alto' : 'ok';
+
+        return $this->row(
+            'ads_sem_cogs',
+            5,
+            'Ads sem CMV',
+            $missing,
+            $severity,
+            true,
+            '/dashboard/cogs',
+            $missing . ' SKU com gasto ads recente sem CMV · n/d não 0 · sem campanha on/off'
+        );
+    }
+
+    /**
+     * SKUs that HAVE CMV and recent ads spend with ACOS > 30% (or spend with
+     * zero attributed revenue). Does not invent receita.
+     *
+     * @param list<array<string, mixed>>|null $items
+     * @return array<string, mixed>
+     */
+    private function bucketAdsCogsAcos(int $accountId, ?array $items): array
+    {
+        $spend = $this->recentAdsSpendByMlb($accountId);
+        if ($spend === null) {
+            return $this->row(
+                'ads_cogs_acos',
+                6,
+                'Ads com CMV e ACOS ruim',
+                0,
+                'nd',
+                false,
+                '/dashboard/ads',
+                'ads_sku_metrics_daily indisponível · sem inventar receita · sem campanha on/off'
+            );
+        }
+
+        $known = $this->knownCogsForMlb($accountId, $items, array_keys($spend));
+        if ($known === null) {
+            return $this->row(
+                'ads_cogs_acos',
+                6,
+                'Ads com CMV e ACOS ruim',
+                0,
+                'nd',
+                false,
+                '/dashboard/ads',
+                'sku_custos indisponível · ACOS de contribuição n/d · sem campanha on/off'
+            );
+        }
+
+        $bad = 0;
+        foreach ($spend as $mlb => $row) {
+            if (!isset($known[$mlb])) {
+                continue;
+            }
+            $gasto = (float) ($row['gasto'] ?? 0);
+            if ($gasto <= 0) {
+                continue;
+            }
+            $receita = (float) ($row['receita'] ?? 0);
+            if ($receita <= 0) {
+                $bad++;
+                continue;
+            }
+            $acos = ($gasto / $receita) * 100;
+            if ($acos > self::ACOS_HIGH_THRESHOLD_PCT) {
+                $bad++;
+            }
+        }
+
+        $severity = $bad > 0 ? 'alto' : 'ok';
+
+        return $this->row(
+            'ads_cogs_acos',
+            6,
+            'Ads com CMV e ACOS ruim',
+            $bad,
+            $severity,
+            true,
+            '/dashboard/ads',
+            $bad . ' SKU com CMV e ACOS>' . (int) self::ACOS_HIGH_THRESHOLD_PCT . '% · sem inventar receita · sem campanha on/off'
+        );
+    }
+
+    /**
+     * Recent ads spend by MLB. Null = table missing. Does not invent receita.
+     *
+     * @return array<string, array{gasto: float, receita: float}>|null
+     */
+    private function recentAdsSpendByMlb(int $accountId): ?array
+    {
+        $since = (new \DateTimeImmutable('now', new \DateTimeZone('America/Sao_Paulo')))
+            ->modify('-' . self::ADS_LOOKBACK_DAYS . ' days')
+            ->format('Y-m-d');
+
+        $sqlVariants = [
+            'SELECT mlb_id, SUM(gasto) AS gasto, SUM(receita_atribuida) AS receita
+             FROM ads_sku_metrics_daily
+             WHERE account_id = ? AND `date` >= ?
+             GROUP BY mlb_id',
+            'SELECT mlb_id, SUM(gasto) AS gasto, SUM(receita_atribuida) AS receita
+             FROM ads_sku_metrics_daily
+             WHERE account_id = ? AND date >= ?
+             GROUP BY mlb_id',
+        ];
+
+        $stmt = null;
+        foreach ($sqlVariants as $sql) {
+            try {
+                $prepared = $this->db->prepare($sql);
+                $prepared->execute([$accountId, $since]);
+                $stmt = $prepared;
+                break;
+            } catch (Throwable) {
+                $stmt = null;
+            }
+        }
+        if ($stmt === null) {
+            return null;
+        }
+
+        $out = [];
+        while (($row = $stmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+            $mlb = strtoupper(trim((string) ($row['mlb_id'] ?? '')));
+            if ($mlb === '') {
+                continue;
+            }
+            $gasto = (float) ($row['gasto'] ?? 0);
+            if ($gasto <= 0) {
+                continue;
+            }
+            $out[$mlb] = [
+                'gasto' => $gasto,
+                'receita' => (float) ($row['receita'] ?? 0),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Known CMV: sku_custos.custo_produto>0 or items.cost_price>0.
+     * Null = cannot know (sku_custos missing). Zero cost is not known CMV.
+     *
+     * @param list<array<string, mixed>>|null $items
+     * @param list<string> $mlbIds
+     * @return array<string, true>|null
+     */
+    private function knownCogsForMlb(int $accountId, ?array $items, array $mlbIds): ?array
+    {
+        $fromSku = $this->knownCogsIds($accountId, $mlbIds);
+        if ($fromSku === null) {
+            return null;
+        }
+
+        $known = $fromSku;
+        if ($items !== null) {
+            foreach ($items as $item) {
+                $mlb = strtoupper(trim((string) ($item['ml_item_id'] ?? $item['id'] ?? '')));
+                if ($mlb === '') {
+                    continue;
+                }
+                $cost = $item['cost_price'] ?? null;
+                if (is_numeric($cost) && (float) $cost > 0) {
+                    $known[$mlb] = true;
+                }
+            }
+        }
+
+        return $known;
     }
 
     /**

@@ -9,6 +9,8 @@ use App\Services\Agents\AgentRuntimeAccountSourceInterface;
 use App\Services\Agents\AgentRuntimeExecutorInterface;
 use App\Services\Agents\AgentRuntimeReporterInterface;
 use App\Services\Agents\AgentRuntimeWorker;
+use App\Services\Pregao\PregaoHojeQueueService;
+use PDO;
 use PHPUnit\Framework\TestCase;
 use RuntimeException;
 use UnexpectedValueException;
@@ -132,4 +134,53 @@ final class AgentRuntimeWorkerTest extends TestCase
         self::assertSame('success', $records[0]['status']);
         self::assertStringNotContainsString('secret', json_encode($records, JSON_THROW_ON_ERROR));
     }
+
+    public function testHeartbeatObserveQueueLogaFilasAbertasSemFerramentaDeEscrita(): void
+    {
+        $db = new PDO('sqlite::memory:');
+        $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $db->exec(
+            'CREATE TABLE items (
+                account_id INTEGER, ml_item_id TEXT, title TEXT, status TEXT,
+                available_quantity INTEGER, sold_quantity INTEGER,
+                catalog_product_id TEXT, cost_price REAL, data TEXT
+            )'
+        );
+        $db->exec('CREATE TABLE sku_custos (account_id INTEGER, mlb_id TEXT, custo_produto REAL)');
+        $db->exec('CREATE TABLE ml_orders (ml_account_id INTEGER, account_id INTEGER, order_data TEXT)');
+        $db->exec(
+            "INSERT INTO items (account_id, ml_item_id, title, status, available_quantity, sold_quantity, catalog_product_id, data)
+             VALUES (10, 'MLB-GAP', 'gap', 'active', 1, 0, NULL, '{\"pictures\":[1],\"shipping\":{\"free_shipping\":false}}')"
+        );
+
+        $source = $this->createMock(AgentRuntimeAccountSourceInterface::class);
+        $source->method('activeAccountIds')->willReturn([10]);
+        $executor = $this->createMock(AgentRuntimeExecutorInterface::class);
+        $executor->expects(self::once())
+            ->method('execute')
+            ->with(10, 'cycle-q:10', 'production', 'monitor')
+            ->willReturn(AgentResult::success('orquestrador', 'aggregated'));
+
+        $records = (new AgentRuntimeWorker(
+            $source,
+            $executor,
+            null,
+            new PregaoHojeQueueService($db)
+        ))->runCycle('production', 'cycle-q', 1);
+
+        self::assertTrue($records[0]['queues']['refreshed']);
+        self::assertContains('ficha', $records[0]['queues']['open']);
+        self::assertTrue($records[0]['queues']['apply_blocked']);
+        self::assertFalse($records[0]['queues']['ml_write']);
+        self::assertSame('local', $records[0]['queues']['source']);
+        self::assertNotContains('visits_no_sales', $records[0]['queues']['open']);
+
+        $src = file_get_contents(dirname(__DIR__, 4) . '/app/Services/Agents/AgentRuntimeWorker.php');
+        self::assertIsString($src);
+        self::assertStringContainsString('observe-queue heartbeat', $src);
+        self::assertStringNotContainsString('MercadoLivreClient', $src);
+        self::assertStringNotContainsString('->post(', $src);
+        self::assertStringNotContainsString('pauseItem', $src);
+    }
+
 }

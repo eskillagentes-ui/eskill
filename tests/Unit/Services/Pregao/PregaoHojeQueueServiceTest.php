@@ -279,9 +279,14 @@ final class PregaoHojeQueueServiceTest extends TestCase
         self::assertStringNotContainsString('auto-reprice', $src);
         self::assertStringNotContainsString('PATCH', $src);
         self::assertStringContainsString('ml_write', $src);
+        self::assertStringNotContainsString('fetchFromApi', $src);
+        self::assertStringNotContainsString('answerQuestion', $src);
+        self::assertStringNotContainsString('publishAnswer', $src);
+        self::assertStringNotContainsString('campaign_activated', $src);
+        self::assertStringNotContainsString('FROM questions', $src);
     }
 
-    public function testSnapshotExpoeHojeComTresBaldesSemTravada(): void
+    public function testSnapshotExpoeHojeComSeisBaldesSemTravada(): void
     {
         $db = new PDO('sqlite::memory:');
         $db->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
@@ -345,13 +350,179 @@ final class PregaoHojeQueueServiceTest extends TestCase
         self::assertTrue($snapshot['hoje']['apply_blocked']);
         self::assertTrue($snapshot['hoje']['read_only']);
         self::assertSame('local', $snapshot['hoje']['source']);
-        self::assertCount(3, $snapshot['hoje']['items']);
+        self::assertCount(6, $snapshot['hoje']['items']);
         self::assertSame(PregaoHojeQueueService::BUCKETS, array_column($snapshot['hoje']['items'], 'id'));
         self::assertTrue($snapshot['read_only']);
         $json = json_encode($snapshot['hoje'], JSON_THROW_ON_ERROR);
         self::assertStringNotContainsString('TRAVADA', $json);
         self::assertStringNotContainsString('R$', $json);
         self::assertSame(88, $snapshot['account_id']);
+    }
+
+
+    public function testPerguntasSlaUsaMlQuestionsNaoTabelaQuestionsNemContaVizinha(): void
+    {
+        $db = $this->sqliteCatalog();
+        $db->exec(
+            'CREATE TABLE ml_questions (
+                question_id TEXT PRIMARY KEY,
+                account_id INTEGER,
+                status TEXT,
+                date_created TEXT
+            )'
+        );
+        $db->exec(
+            'CREATE TABLE questions (
+                id INTEGER PRIMARY KEY,
+                account_id INTEGER,
+                status TEXT,
+                created_at TEXT
+            )'
+        );
+        $old = (new \DateTimeImmutable('now'))->modify('-3 hours')->format('Y-m-d H:i:s');
+        $fresh = (new \DateTimeImmutable('now'))->modify('-10 minutes')->format('Y-m-d H:i:s');
+        $db->exec("INSERT INTO ml_questions (question_id, account_id, status, date_created) VALUES ('F1', 1335, 'UNANSWERED', '{$old}')");
+        $db->exec("INSERT INTO ml_questions (question_id, account_id, status, date_created) VALUES ('F2', 1335, 'unanswered', '{$fresh}')");
+        $db->exec("INSERT INTO ml_questions (question_id, account_id, status, date_created) VALUES ('F3', 1335, 'ANSWERED', '{$old}')");
+        $db->exec("INSERT INTO ml_questions (question_id, account_id, status, date_created) VALUES ('X1', 1336, 'UNANSWERED', '{$old}')");
+        $db->exec("INSERT INTO questions (account_id, status, created_at) VALUES (1, 'UNANSWERED', '{$old}')");
+        $db->exec("INSERT INTO questions (account_id, status, created_at) VALUES (2, 'UNANSWERED', '{$old}')");
+
+        $tile = $this->byId((new PregaoHojeQueueService($db))->build(1335))['perguntas_sla'];
+        self::assertSame(1, $tile['count']);
+        self::assertSame('alto', $tile['severity']);
+        self::assertTrue($tile['available']);
+        self::assertTrue($tile['apply_blocked']);
+        self::assertSame('/dashboard/questions', $tile['href']);
+        self::assertStringContainsString('ml_questions', $tile['hint']);
+        self::assertStringContainsString('POST /answers', $tile['hint']);
+
+        $falcao = $this->byId((new PregaoHojeQueueService($db))->build(1336))['perguntas_sla'];
+        self::assertSame(1, $falcao['count']);
+    }
+
+    public function testAdsSemCogsNaoContaCmvZeroNemContaVizinha(): void
+    {
+        $db = $this->sqliteCatalog();
+        $this->createAdsSkuTable($db);
+        $today = (new \DateTimeImmutable('now', new \DateTimeZone('America/Sao_Paulo')))->format('Y-m-d');
+        $this->insertItem($db, 1335, 'MLB-NO-COGS', 'active', 0, [
+            'pictures' => [1, 2, 3],
+            'shipping' => ['free_shipping' => true],
+        ]);
+        $this->insertItem($db, 1335, 'MLB-HAS-SKU', 'active', 0, [
+            'pictures' => [1, 2, 3],
+            'shipping' => ['free_shipping' => true],
+        ]);
+        $this->insertItem($db, 1335, 'MLB-HAS-PRICE', 'active', 0, [
+            'pictures' => [1, 2, 3],
+            'shipping' => ['free_shipping' => true],
+        ]);
+        $db->exec("UPDATE items SET cost_price = 8.5 WHERE ml_item_id = 'MLB-HAS-PRICE'");
+        $db->exec("INSERT INTO sku_custos (account_id, mlb_id, custo_produto) VALUES (1335, 'MLB-HAS-SKU', 12.5)");
+        $db->exec("INSERT INTO sku_custos (account_id, mlb_id, custo_produto) VALUES (1335, 'MLB-NO-COGS', 0)");
+        $db->exec("INSERT INTO sku_custos (account_id, mlb_id, custo_produto) VALUES (1336, 'MLB-FALCAO', 40)");
+        $this->insertAdsSpend($db, 1335, 'MLB-NO-COGS', $today, 20, 50);
+        $this->insertAdsSpend($db, 1335, 'MLB-HAS-SKU', $today, 10, 40);
+        $this->insertAdsSpend($db, 1335, 'MLB-HAS-PRICE', $today, 5, 20);
+        $this->insertAdsSpend($db, 1336, 'MLB-FALCAO', $today, 999, 10);
+
+        $queue = (new PregaoHojeQueueService($db))->build(1335);
+        self::assertTrue($queue['apply_blocked']);
+        self::assertFalse($queue['ml_write']);
+        self::assertSame('local', $queue['source']);
+        $tile = $this->byId($queue)['ads_sem_cogs'];
+        self::assertSame(1, $tile['count']);
+        self::assertSame('alto', $tile['severity']);
+        self::assertTrue($tile['apply_blocked']);
+        self::assertStringContainsString('n/d', $tile['hint']);
+        self::assertStringNotContainsString('R$', $tile['hint']);
+        self::assertStringNotContainsString('999', $tile['hint']);
+        self::assertStringNotContainsString('lucro', $tile['hint']);
+    }
+
+    public function testAdsCogsAcosSoComCmvENaoInventaReceita(): void
+    {
+        $db = $this->sqliteCatalog();
+        $this->createAdsSkuTable($db);
+        $today = (new \DateTimeImmutable('now', new \DateTimeZone('America/Sao_Paulo')))->format('Y-m-d');
+        $this->insertItem($db, 1335, 'MLB-HIGH', 'active', 0, [
+            'pictures' => [1, 2, 3],
+            'shipping' => ['free_shipping' => true],
+        ]);
+        $this->insertItem($db, 1335, 'MLB-OK', 'active', 0, [
+            'pictures' => [1, 2, 3],
+            'shipping' => ['free_shipping' => true],
+        ]);
+        $this->insertItem($db, 1335, 'MLB-NO-REV', 'active', 0, [
+            'pictures' => [1, 2, 3],
+            'shipping' => ['free_shipping' => true],
+        ]);
+        $this->insertItem($db, 1335, 'MLB-NO-COGS', 'active', 0, [
+            'pictures' => [1, 2, 3],
+            'shipping' => ['free_shipping' => true],
+        ]);
+        $db->exec("INSERT INTO sku_custos (account_id, mlb_id, custo_produto) VALUES (1335, 'MLB-HIGH', 10)");
+        $db->exec("INSERT INTO sku_custos (account_id, mlb_id, custo_produto) VALUES (1335, 'MLB-OK', 10)");
+        $db->exec("INSERT INTO sku_custos (account_id, mlb_id, custo_produto) VALUES (1335, 'MLB-NO-REV', 10)");
+        $this->insertAdsSpend($db, 1335, 'MLB-HIGH', $today, 40, 100);
+        $this->insertAdsSpend($db, 1335, 'MLB-OK', $today, 10, 100);
+        $this->insertAdsSpend($db, 1335, 'MLB-NO-REV', $today, 15, 0);
+        $this->insertAdsSpend($db, 1335, 'MLB-NO-COGS', $today, 80, 10);
+        $this->insertAdsSpend($db, 1336, 'MLB-FALCAO', $today, 500, 10);
+
+        $byId = $this->byId((new PregaoHojeQueueService($db))->build(1335));
+        $acos = $byId['ads_cogs_acos'];
+        self::assertSame(2, $acos['count']);
+        self::assertSame('alto', $acos['severity']);
+        self::assertTrue($acos['apply_blocked']);
+        self::assertStringContainsString('ACOS>30%', $acos['hint']);
+        self::assertStringContainsString('sem inventar receita', $acos['hint']);
+        self::assertStringNotContainsString('R$', $acos['hint']);
+        self::assertSame(1, $byId['ads_sem_cogs']['count']);
+        self::assertSame(30.0, PregaoHojeQueueService::ACOS_HIGH_THRESHOLD_PCT);
+    }
+
+    public function testAdsTabelaAusenteEFailSoftNd(): void
+    {
+        $db = $this->sqliteCatalog();
+        $byId = $this->byId((new PregaoHojeQueueService($db))->build(1335));
+        self::assertFalse($byId['ads_sem_cogs']['available']);
+        self::assertSame('nd', $byId['ads_sem_cogs']['severity']);
+        self::assertFalse($byId['ads_cogs_acos']['available']);
+        self::assertSame('nd', $byId['ads_cogs_acos']['severity']);
+        self::assertFalse($byId['perguntas_sla']['available']);
+        self::assertSame('nd', $byId['perguntas_sla']['severity']);
+        self::assertTrue($byId['ads_sem_cogs']['apply_blocked']);
+    }
+
+    private function createAdsSkuTable(PDO $db): void
+    {
+        $db->exec(
+            'CREATE TABLE ads_sku_metrics_daily (
+                account_id INTEGER,
+                campaign_id TEXT,
+                mlb_id TEXT,
+                date TEXT,
+                gasto REAL,
+                receita_atribuida REAL
+            )'
+        );
+    }
+
+    private function insertAdsSpend(
+        PDO $db,
+        int $accountId,
+        string $mlb,
+        string $date,
+        float $gasto,
+        float $receita
+    ): void {
+        $stmt = $db->prepare(
+            'INSERT INTO ads_sku_metrics_daily (account_id, campaign_id, mlb_id, date, gasto, receita_atribuida)
+             VALUES (?, ?, ?, ?, ?, ?)'
+        );
+        $stmt->execute([$accountId, 'c1', $mlb, $date, $gasto, $receita]);
     }
 
     /**
@@ -380,6 +551,7 @@ final class PregaoHojeQueueServiceTest extends TestCase
                 available_quantity INTEGER,
                 sold_quantity INTEGER,
                 catalog_product_id TEXT,
+                cost_price REAL,
                 data TEXT
             )'
         );

@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\Agents;
 
+use App\Services\Pregao\PregaoHojeQueueService;
 use InvalidArgumentException;
 use Throwable;
 use UnexpectedValueException;
@@ -15,15 +16,18 @@ final class AgentRuntimeWorker
     private AgentRuntimeAccountSourceInterface $accountSource;
     private AgentRuntimeExecutorInterface $executor;
     private ?AgentRuntimeReporterInterface $reporter;
+    private ?PregaoHojeQueueService $hojeQueue;
 
     public function __construct(
         AgentRuntimeAccountSourceInterface $accountSource,
         AgentRuntimeExecutorInterface $executor,
-        ?AgentRuntimeReporterInterface $reporter = null
+        ?AgentRuntimeReporterInterface $reporter = null,
+        ?PregaoHojeQueueService $hojeQueue = null
     ) {
         $this->accountSource = $accountSource;
         $this->executor = $executor;
         $this->reporter = $reporter;
+        $this->hojeQueue = $hojeQueue;
     }
 
     /**
@@ -32,7 +36,8 @@ final class AgentRuntimeWorker
      *   correlation: string,
      *   status: string,
      *   reason: string,
-     *   attempts: int
+     *   attempts: int,
+     *   queues: array<string, mixed>
      * }>
      */
     public function runCycle(string $environment, string $cycleId, int $maxAttempts = 2): array
@@ -82,12 +87,14 @@ final class AgentRuntimeWorker
                 }
             }
 
+            $queues = $this->observeQueueHeartbeat($accountId);
             $records[] = [
                 'accountId' => $accountId,
                 'correlation' => $correlationId,
                 'status' => $result->status(),
                 'reason' => $result->reason(),
                 'attempts' => $attempts,
+                'queues' => $queues,
             ];
         }
 
@@ -130,6 +137,53 @@ final class AgentRuntimeWorker
                 static fn (array $entry): bool => $entry['status'] === 'failed'
             )),
         ]);
+    }
+
+    /**
+     * Read-only: which of the three observe+queue buckets are open.
+     * No write tools. Fail-soft.
+     *
+     * @return array<string, mixed>
+     */
+    private function observeQueueHeartbeat(int $accountId): array
+    {
+        if ($this->hojeQueue === null) {
+            return ['refreshed' => false];
+        }
+
+        try {
+            $snap = $this->hojeQueue->build($accountId);
+        } catch (Throwable) {
+            return ['refreshed' => false];
+        }
+
+        $open = [];
+        foreach ($snap['items'] ?? [] as $item) {
+            if (!is_array($item)) {
+                continue;
+            }
+            $id = (string) ($item['id'] ?? '');
+            if (!in_array($id, PregaoHojeQueueService::OBSERVE_QUEUE_IDS, true)) {
+                continue;
+            }
+            if (in_array((string) ($item['severity'] ?? ''), ['critico', 'alto', 'medio'], true)) {
+                $open[] = $id;
+            }
+        }
+
+        $payload = [
+            'refreshed' => true,
+            'account_id' => $accountId,
+            'open' => $open,
+            'apply_blocked' => (bool) ($snap['apply_blocked'] ?? true),
+            'ml_write' => (bool) ($snap['ml_write'] ?? false),
+            'source' => (string) ($snap['source'] ?? 'local'),
+        ];
+        if (function_exists('log_info')) {
+            log_info('observe-queue heartbeat: ficha/perguntas/ads refreshed', $payload);
+        }
+
+        return $payload;
     }
 
     /** @param array<array-key, mixed> $accountIds */
