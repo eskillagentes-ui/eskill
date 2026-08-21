@@ -101,6 +101,7 @@ class SEOKillerEngine
         $opportunities = [];
 
         $analyzers = [
+            'analyzeOfficialListingGaps',
             'analyzeTitles',
             'analyzeDescriptions',
             'analyzeAttributes',
@@ -154,6 +155,9 @@ class SEOKillerEngine
         $diagnosis['opportunities'] = array_slice($opportunities, 0, 10);
         $diagnosis['priority_actions'] = $this->generatePriorityActions($problems, $opportunities);
         $diagnosis['summary'] = $this->generateDiagnosisSummary($diagnosis);
+        $diagnosis['ficha_gaps'] = $this->summarizeOfficialListingGaps(
+            $this->collectOfficialListingGapStats($items)
+        );
 
         return $diagnosis;
     }
@@ -293,7 +297,18 @@ class SEOKillerEngine
             return;
         }
 
-        $desc = $this->resolveDescriptionText((string) $mlItemId);
+        $desc = null;
+        foreach (['description', 'plain_text'] as $key) {
+            $cached = $item[$key] ?? null;
+            if (is_string($cached) && $cached !== '') {
+                $desc = $cached;
+                break;
+            }
+        }
+        if ($desc === null) {
+            // items.data does not store /description; missing local text is unknown, not empty.
+            return;
+        }
         $this->classifyDescriptionLength($desc, $stats);
 
         if (!$this->hasStructuredContent($desc)) {
@@ -1098,12 +1113,335 @@ class SEOKillerEngine
         }
     }
 
+    public function officialListingCompletenessReport(): array
+    {
+        $items = $this->getAllItems();
+        $stats = $this->collectOfficialListingGapStats($items);
+        $summary = $this->summarizeOfficialListingGaps($stats);
+
+        return [
+            'success' => true,
+            'source' => 'local_items',
+            'account_id' => $this->accountId,
+            'total_items' => $summary['universe_active'],
+            'analyzed' => $summary['universe_active'],
+            'pending' => $summary['pending_unique'],
+            'optimized' => max(0, $summary['universe_active'] - $summary['pending_unique']),
+            'ficha_gaps' => $summary,
+            'items' => $stats['item_rows'],
+        ];
+    }
+
+    /**
+     * Official listing completeness (local items.data). Not title/MODEL/price apply.
+     *
+     * @param list<array<string, mixed>> $items
+     * @return array{problems: list<array<string, mixed>>, opportunities: list<array<string, mixed>>}
+     */
+    private function analyzeOfficialListingGaps(array $items): array
+    {
+        $stats = $this->collectOfficialListingGapStats($items);
+        $problems = [];
+        $opportunities = [];
+
+        if ($stats['photos_lt3'] > 0) {
+            $problems[] = [
+                'severity' => 'high',
+                'category' => 'ficha',
+                'issue' => "{$stats['photos_lt3']} anúncios ativos com menos de 3 fotos",
+                'impact' => -15,
+                'affected_items' => $stats['photos_lt3'],
+                'sample_item_ids' => $stats['photos_lt3_ids'],
+                'solution' => 'Completar ficha: mínimo 3 fotos (sinal oficial ML). Sem apply automático.',
+            ];
+        }
+        if ($stats['stock_0'] > 0) {
+            $problems[] = [
+                'severity' => 'critical',
+                'category' => 'ficha',
+                'issue' => "{$stats['stock_0']} anúncios ativos com estoque 0",
+                'impact' => -20,
+                'affected_items' => $stats['stock_0'],
+                'sample_item_ids' => $stats['stock_0_ids'],
+                'solution' => 'Reposição de estoque — anúncio sem stock some da busca. Sem apply automático.',
+            ];
+        }
+        if ($stats['catalog_not_listing'] > 0) {
+            $problems[] = [
+                'severity' => 'high',
+                'category' => 'ficha',
+                'issue' => "{$stats['catalog_not_listing']} anúncios com catalog_product_id local mas sem catalog_listing",
+                'impact' => -12,
+                'affected_items' => $stats['catalog_not_listing'],
+                'sample_item_ids' => $stats['catalog_not_listing_ids'],
+                'solution' => 'Migrar para catálogo/buy box só quando o id local existir. Sem scrape ML.',
+            ];
+        }
+        if ($stats['no_free_shipping'] > 0) {
+            $problems[] = [
+                'severity' => 'medium',
+                'category' => 'ficha',
+                'issue' => "{$stats['no_free_shipping']} anúncios ativos sem frete grátis",
+                'impact' => -10,
+                'affected_items' => $stats['no_free_shipping'],
+                'sample_item_ids' => $stats['no_free_shipping_ids'],
+                'solution' => 'Frete grátis é sinal oficial de visibilidade. Sem apply automático.',
+            ];
+        }
+        if ($stats['not_premium'] > 0) {
+            $problems[] = [
+                'severity' => 'medium',
+                'category' => 'ficha',
+                'issue' => "{$stats['not_premium']} anúncios ativos que não são Premium (gold_pro)",
+                'impact' => -8,
+                'affected_items' => $stats['not_premium'],
+                'sample_item_ids' => $stats['not_premium_ids'],
+                'solution' => 'Premium (gold_pro) ajuda exposição. Clássico não é gap inventado de TRAVADA.',
+            ];
+        }
+        if ($stats['performance_pending'] > 0) {
+            $problems[] = [
+                'severity' => 'pending',
+                'category' => 'ficha',
+                'issue' => "{$stats['performance_pending']} anúncios ativos com performance oficial pendente (unknown — não tratar como 0)",
+                'impact' => 0,
+                'affected_items' => $stats['performance_pending'],
+                'sample_item_ids' => $stats['performance_pending_ids'],
+                'performance_pending' => true,
+                'solution' => 'Aguardar item-performance-sync gravar performance_score em items.data.',
+            ];
+        }
+
+        return ['problems' => $problems, 'opportunities' => $opportunities];
+    }
+
+    /**
+     * @param list<array<string, mixed>> $items
+     * @return array<string, mixed>
+     */
+    private function collectOfficialListingGapStats(array $items): array
+    {
+        $stats = [
+            'universe_active' => 0,
+            'universe_paused' => 0,
+            'photos_lt3' => 0,
+            'stock_0' => 0,
+            'catalog_not_listing' => 0,
+            'no_free_shipping' => 0,
+            'not_premium' => 0,
+            'performance_pending' => 0,
+            'pending_unique' => 0,
+            'pending_ids' => [],
+            'photos_lt3_ids' => [],
+            'stock_0_ids' => [],
+            'catalog_not_listing_ids' => [],
+            'no_free_shipping_ids' => [],
+            'not_premium_ids' => [],
+            'performance_pending_ids' => [],
+            'item_rows' => [],
+        ];
+
+        foreach ($items as $item) {
+            $status = (string) ($item['status'] ?? '');
+            if ($status === 'paused') {
+                $stats['universe_paused']++;
+                continue;
+            }
+            if ($status !== '' && $status !== 'active') {
+                continue;
+            }
+            $stats['universe_active']++;
+            $mlb = strtoupper(trim((string) ($item['id'] ?? $item['ml_item_id'] ?? '')));
+            $flags = $this->officialListingGapFlags($item);
+            if ($flags['photos_lt3']) {
+                $stats['photos_lt3']++;
+                $this->pushFichaSampleId($stats['photos_lt3_ids'], $mlb);
+            }
+            if ($flags['stock_0']) {
+                $stats['stock_0']++;
+                $this->pushFichaSampleId($stats['stock_0_ids'], $mlb);
+            }
+            if ($flags['catalog_not_listing']) {
+                $stats['catalog_not_listing']++;
+                $this->pushFichaSampleId($stats['catalog_not_listing_ids'], $mlb);
+            }
+            if ($flags['no_free_shipping']) {
+                $stats['no_free_shipping']++;
+                $this->pushFichaSampleId($stats['no_free_shipping_ids'], $mlb);
+            }
+            if ($flags['not_premium']) {
+                $stats['not_premium']++;
+                $this->pushFichaSampleId($stats['not_premium_ids'], $mlb);
+            }
+            if ($flags['performance_pending']) {
+                $stats['performance_pending']++;
+                $this->pushFichaSampleId($stats['performance_pending_ids'], $mlb);
+            }
+            if ($flags['any']) {
+                $stats['pending_unique']++;
+                $this->pushFichaSampleId($stats['pending_ids'], $mlb);
+                $stats['item_rows'][] = [
+                    'id' => $mlb,
+                    'title' => (string) ($item['title'] ?? ''),
+                    'gaps' => array_keys(array_filter([
+                        'photos_lt3' => $flags['photos_lt3'],
+                        'stock_0' => $flags['stock_0'],
+                        'catalog_not_listing' => $flags['catalog_not_listing'],
+                        'no_free_shipping' => $flags['no_free_shipping'],
+                        'not_premium' => $flags['not_premium'],
+                        'performance_pending' => $flags['performance_pending'],
+                    ])),
+                ];
+            }
+        }
+
+        return $stats;
+    }
+
+    /**
+     * @param array<string, mixed> $stats
+     * @return array<string, int>
+     */
+    private function summarizeOfficialListingGaps(array $stats): array
+    {
+        return [
+            'universe_active' => (int) ($stats['universe_active'] ?? 0),
+            'universe_paused' => (int) ($stats['universe_paused'] ?? 0),
+            'photos_lt3' => (int) ($stats['photos_lt3'] ?? 0),
+            'stock_0' => (int) ($stats['stock_0'] ?? 0),
+            'catalog_not_listing' => (int) ($stats['catalog_not_listing'] ?? 0),
+            'no_free_shipping' => (int) ($stats['no_free_shipping'] ?? 0),
+            'not_premium' => (int) ($stats['not_premium'] ?? 0),
+            'performance_pending' => (int) ($stats['performance_pending'] ?? 0),
+            'pending_unique' => (int) ($stats['pending_unique'] ?? 0),
+        ];
+    }
+
+    /**
+     * @param array<string, mixed> $item
+     * @return array{
+     *   photos_lt3: bool,
+     *   stock_0: bool,
+     *   catalog_not_listing: bool,
+     *   no_free_shipping: bool,
+     *   not_premium: bool,
+     *   performance_pending: bool,
+     *   any: bool
+     * }
+     */
+    private function officialListingGapFlags(array $item): array
+    {
+        $photos = $item['pictures'] ?? [];
+        $photoCount = is_array($photos) ? count($photos) : 0;
+        $stock = (int) ($item['available_quantity'] ?? 0);
+        $catalogId = trim((string) ($item['catalog_product_id'] ?? ''));
+        $catalogListing = $item['catalog_listing'] ?? false;
+        $isCatalogListing = $catalogListing === true || $catalogListing === 1 || $catalogListing === 'true';
+        $shipping = $item['shipping'] ?? [];
+        $freeShipping = is_array($shipping) && !empty($shipping['free_shipping']);
+        $listingType = (string) ($item['listing_type_id'] ?? '');
+        $performancePending = !(array_key_exists('performance_score', $item) && is_numeric($item['performance_score']));
+
+        $flags = [
+            'photos_lt3' => $photoCount < 3,
+            'stock_0' => $stock <= 0,
+            'catalog_not_listing' => $catalogId !== '' && !$isCatalogListing,
+            'no_free_shipping' => !$freeShipping,
+            'not_premium' => $listingType !== 'gold_pro',
+            'performance_pending' => $performancePending,
+        ];
+        $flags['any'] = in_array(true, $flags, true);
+
+        return $flags;
+    }
+
+    /**
+     * Full active+paused universe from local items for this account. No ML GET /items.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function loadLocalListingUniverse(): array
+    {
+        if (!isset($this->db) || !$this->db instanceof \PDO || ($this->accountId ?? 0) <= 0) {
+            return [];
+        }
+
+        $sqlVariants = [
+            "SELECT ml_item_id, title, status, available_quantity, sold_quantity, catalog_product_id, data
+             FROM items
+             WHERE account_id = ? AND status IN ('active', 'paused')
+             ORDER BY ml_item_id ASC",
+            "SELECT ml_item_id, title, status, available_quantity, sold_quantity, catalog_product_id, data
+             FROM ml_items
+             WHERE account_id = ? AND status IN ('active', 'paused')
+             ORDER BY ml_item_id ASC",
+        ];
+
+        $stmt = null;
+        foreach ($sqlVariants as $sql) {
+            try {
+                $stmt = $this->db->prepare($sql);
+                $stmt->execute([$this->accountId]);
+                break;
+            } catch (\Throwable) {
+                $stmt = null;
+            }
+        }
+        if ($stmt === null) {
+            return [];
+        }
+
+        $items = [];
+        while (($row = $stmt->fetch(\PDO::FETCH_ASSOC)) !== false) {
+            $decoded = json_decode((string) ($row['data'] ?? ''), true);
+            $data = is_array($decoded) ? $decoded : [];
+            $mlb = strtoupper(trim((string) ($row['ml_item_id'] ?? $data['id'] ?? '')));
+            if ($mlb === '') {
+                continue;
+            }
+            $item = $data;
+            $item['id'] = $mlb;
+            $item['ml_item_id'] = $mlb;
+            $item['title'] = (string) ($row['title'] ?? $data['title'] ?? '');
+            $item['status'] = (string) ($row['status'] ?? $data['status'] ?? '');
+            if (isset($row['available_quantity']) && is_numeric($row['available_quantity'])) {
+                $item['available_quantity'] = (int) $row['available_quantity'];
+            }
+            if (isset($row['sold_quantity']) && is_numeric($row['sold_quantity'])) {
+                $item['sold_quantity'] = (int) $row['sold_quantity'];
+            }
+            $catalog = trim((string) ($row['catalog_product_id'] ?? ''));
+            if ($catalog === '') {
+                $catalog = trim((string) ($data['catalog_product_id'] ?? ''));
+            }
+            $item['catalog_product_id'] = $catalog !== '' ? $catalog : null;
+            if (!array_key_exists('catalog_listing', $item)) {
+                $item['catalog_listing'] = false;
+            }
+            $items[] = $item;
+        }
+
+        return $items;
+    }
+
     /**
      * Helper: Get all items with pagination
-     * Busca todos os anúncios da conta (ativos e pausados) com safety limit de 1000
+     * Prefers the local items universe (account-scoped). ML list is fallback only.
      */
     private function getAllItems(): array
     {
+        $local = $this->loadLocalListingUniverse();
+        if ($local !== []) {
+            $local = $this->hydrateOfficialPerformanceFromLocalItems($local);
+            log_info('SEOKillerEngine: itens carregados do cache local', [
+                'service' => 'SEOKillerEngine',
+                'count' => count($local),
+                'account_id' => $this->accountId,
+                'source' => 'local_items',
+            ]);
+            return $local;
+        }
+
         $allItems = [];
         $offset = 0;
         $limit = 50;
