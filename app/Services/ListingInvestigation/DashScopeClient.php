@@ -17,14 +17,16 @@ final class DashScopeClient
     public const MODEL_PLUS_FALLBACK = 'qwen-plus';
     public const MODEL_MAX_FALLBACK = 'qwen-max';
 
-    public const DEFAULT_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+    public const CN_BASE = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
     public const INTL_BASE = 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1';
+    public const DEFAULT_BASE = self::INTL_BASE;
 
     private string $apiKey;
     private string $baseUrl;
 
     /** @var callable|null fn(string $url, array $headers, array $payload): ?array */
     private $transport;
+    private ?string $lastError = null;
 
     public function __construct(?string $apiKey = null, ?string $baseUrl = null, ?callable $transport = null)
     {
@@ -39,6 +41,11 @@ final class DashScopeClient
         return $this->apiKey !== '';
     }
 
+    public function lastError(): ?string
+    {
+        return $this->lastError;
+    }
+
     /**
      * @param list<array<string, mixed>> $messages
      * @return array{content:?string, model:string, raw?:array<string,mixed>}|null
@@ -46,8 +53,10 @@ final class DashScopeClient
     public function complete(string $model, array $messages, int $timeoutSeconds = 25): ?array
     {
         if (!$this->isConfigured()) {
+            $this->lastError = 'not_configured';
             return null;
         }
+        $this->lastError = null;
 
         $tried = [];
         foreach ($this->modelCandidates($model) as $candidate) {
@@ -64,6 +73,9 @@ final class DashScopeClient
             }
         }
 
+        if ($this->lastError === null) {
+            $this->lastError = 'no_response';
+        }
         return null;
     }
 
@@ -86,8 +98,10 @@ final class DashScopeClient
     private function baseCandidates(): array
     {
         $bases = [$this->baseUrl];
-        if ($this->baseUrl !== self::INTL_BASE) {
-            $bases[] = self::INTL_BASE;
+        foreach ([self::INTL_BASE, self::CN_BASE] as $extra) {
+            if (!in_array($extra, $bases, true)) {
+                $bases[] = $extra;
+            }
         }
 
         return $bases;
@@ -157,6 +171,14 @@ final class DashScopeClient
         $status = (int) curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
         curl_close($ch);
         if (!is_string($body) || $status < 200 || $status >= 300) {
+            $code = '';
+            if (is_string($body)) {
+                $decodedErr = json_decode($body, true);
+                if (is_array($decodedErr)) {
+                    $code = (string) ($decodedErr['error']['code'] ?? '');
+                }
+            }
+            $this->lastError = 'http_' . $status . ($code !== '' ? (':' . $code) : '');
             return null;
         }
         $decoded = json_decode($body, true);
