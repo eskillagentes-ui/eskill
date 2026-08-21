@@ -194,6 +194,7 @@
             <file>tests/Unit/AccountGovernanceServiceTest.php</file>
             <file>tests/Unit/AccountXRayCoverageTest.php</file>
             <file>tests/Unit/Scripts/SyncIrregularitiesCliTest.php</file>
+            <file>tests/Unit/Scripts/ItemPerformanceSyncWorkerTest.php</file>
             <file>tests/Unit/Services/Catalog/ListingIrregularityScanServiceTest.php</file>
             <file>tests/Unit/Services/Catalog/SalesBlockerStoreTest.php</file>
             <file>tests/Unit/AccountGovernanceIntegrationServiceTest.php</file>
