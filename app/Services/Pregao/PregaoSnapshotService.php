@@ -20,6 +20,7 @@ final class PregaoSnapshotService
     private PregaoDataSourceStatusService $dataSourceStatusService;
     private ?PregaoQaProof $qaProof;
     private ?PregaoQaRunService $qaRuns;
+    private PregaoHojeQueueService $hojeQueue;
 
     /** @var array<string, mixed> */
     private array $config;
@@ -31,7 +32,8 @@ final class PregaoSnapshotService
         ?PregaoAgentStatusService $agentStatusService = null,
         ?PregaoDataSourceStatusService $dataSourceStatusService = null,
         ?PregaoQaProof $qaProof = null,
-        ?PregaoQaRunService $qaRuns = null
+        ?PregaoQaRunService $qaRuns = null,
+        ?PregaoHojeQueueService $hojeQueue = null
     ) {
         $this->db = $db ?? Database::getInstance();
         $this->calculator = $calculator ?? new AccountIndexCalculator();
@@ -40,6 +42,7 @@ final class PregaoSnapshotService
         $this->dataSourceStatusService = $dataSourceStatusService ?? new PregaoDataSourceStatusService();
         $this->qaProof = $qaProof ?? PregaoQaProof::fromEnvironment();
         $this->qaRuns = $qaRuns;
+        $this->hojeQueue = $hojeQueue ?? new PregaoHojeQueueService($this->db);
         if ($this->qaRuns === null && $this->qaProof !== null) {
             try {
                 $this->qaRuns = new PregaoQaRunService(PregaoQaRunService::connectRedis(), $this->qaProof);
@@ -149,6 +152,7 @@ final class PregaoSnapshotService
             'governance' => $this->loadGovernanceStatus($accountId),
             'baselines' => $baselines,
             'sentinela' => $this->loadSentinelaSummary($accountId),
+            'hoje' => $this->loadHojeQueue($accountId),
             'seed_enabled' => (bool) ($this->config['seed_enabled'] ?? false),
             'rank_tracker_enabled' => (bool) ($this->config['rank_tracker_enabled'] ?? false),
             'rank_position_source' => is_array($meta['metrics']['posicao_media'] ?? null)
@@ -160,6 +164,23 @@ final class PregaoSnapshotService
             'read_only' => true,
             'v' => \App\Services\Pregao\PregaoEmitService::VERSION,
         ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function loadHojeQueue(int $accountId): array
+    {
+        try {
+            return $this->hojeQueue->build($accountId);
+        } catch (Throwable $e) {
+            log_warning('PregaoSnapshotService: fila Hoje indisponível', [
+                'account_id' => $accountId,
+                'reason' => 'hoje_queue_unavailable',
+            ]);
+
+            return (new PregaoHojeQueueService($this->db))->build(0);
+        }
     }
 
     /**

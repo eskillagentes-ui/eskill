@@ -909,6 +909,63 @@
         refreshAgentSummary();
     }
 
+    function applyHoje(hoje) {
+        const list = $('hojeList');
+        const summary = $('hojeSummary');
+        if (!list) {
+            return;
+        }
+        list.textContent = '';
+        if (!hoje || !Array.isArray(hoje.items) || hoje.items.length === 0) {
+            const empty = document.createElement('li');
+            empty.className = 'hoje-empty';
+            empty.textContent = 'fila indisponível';
+            list.appendChild(empty);
+            if (summary) {
+                summary.textContent = 'n/d';
+                summary.className = 'hoje-summary';
+            }
+            return;
+        }
+        const open = Number(hoje.open_count || 0);
+        if (summary) {
+            summary.textContent = open > 0 ? (open + ' prioridades') : 'nada crítico agora';
+            summary.className = 'hoje-summary' + (open > 0 ? ' is-open' : '');
+        }
+        hoje.items.forEach((item) => {
+            const li = document.createElement('li');
+            const severity = String((item && item.severity) || 'nd');
+            li.className = 'hoje-row is-' + severity;
+            const a = document.createElement('a');
+            const href = String((item && item.href) || '/dashboard/pregao');
+            a.href = href.indexOf('/dashboard') === 0 ? href : '/dashboard/pregao';
+            const pri = document.createElement('span');
+            pri.className = 'hoje-pri';
+            pri.textContent = String((item && item.priority) || '');
+            const title = document.createElement('span');
+            title.className = 'hoje-title';
+            title.textContent = String((item && (item.title || item.id)) || '');
+            const count = document.createElement('span');
+            count.className = 'hoje-count';
+            count.textContent = item && item.available === false ? 'n/d' : String((item && item.count) != null ? item.count : 0);
+            const sev = document.createElement('span');
+            sev.className = 'hoje-sev';
+            sev.textContent = severity;
+            a.appendChild(pri);
+            a.appendChild(title);
+            a.appendChild(count);
+            a.appendChild(sev);
+            li.appendChild(a);
+            if (item && item.hint) {
+                const hint = document.createElement('small');
+                hint.className = 'hoje-hint';
+                hint.textContent = String(item.hint);
+                li.appendChild(hint);
+            }
+            list.appendChild(li);
+        });
+    }
+
     function applyAgentStatus(payload, eventTs) {
         const normalized = normalizeAgentItem({ ...payload, stale: false }, eventTs);
         if (!normalized || !normalized.updated_at) return;
@@ -1223,6 +1280,7 @@
         );
         applyQa(d.qa);
         applyAgents(d.agents);
+        applyHoje(d.hoje);
         renderObservability(d.observability);
 
         seenOps.clear();
