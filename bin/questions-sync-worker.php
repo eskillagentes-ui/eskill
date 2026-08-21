@@ -23,8 +23,14 @@ declare(strict_types=1);
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../autoload.php';
 
+use App\Database;
 use App\Services\QuestionService;
 use App\Services\StructuredLogService;
+
+$rootPath = dirname(__DIR__);
+if (class_exists(Dotenv\Dotenv::class) && is_file($rootPath . '/.env')) {
+    Dotenv\Dotenv::createImmutable($rootPath)->safeLoad();
+}
 
 // ─── Lock exclusivo para evitar sobreposição ────────────────────────────────
 $lockDir = __DIR__ . '/../storage/locks';
@@ -101,18 +107,7 @@ function logError(StructuredLogService $logger, string $msg, array $ctx = [], bo
 // ─── DB Connection ───────────────────────────────────────────────────────────
 function getDbConnection(): PDO
 {
-    $host   = getenv('DB_HOST') ?: '127.0.0.1';
-    $port   = getenv('DB_PORT') ?: '3306';
-    $dbname = getenv('DB_DATABASE') ?: getenv('DB_NAME') ?: '';
-    $user   = getenv('DB_USERNAME') ?: getenv('DB_USER') ?: '';
-    $pass   = getenv('DB_PASSWORD') ?: '';
-
-    $dsn = "mysql:host={$host};port={$port};dbname={$dbname};charset=utf8mb4";
-    return new PDO($dsn, $user, $pass, [
-        PDO::ATTR_ERRMODE            => PDO::ERRMODE_EXCEPTION,
-        PDO::ATTR_DEFAULT_FETCH_MODE => PDO::FETCH_ASSOC,
-        PDO::ATTR_TIMEOUT            => 10,
-    ]);
+    return Database::getInstance();
 }
 
 // ─── Sync function ───────────────────────────────────────────────────────────

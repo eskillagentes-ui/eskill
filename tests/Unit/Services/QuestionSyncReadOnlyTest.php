@@ -210,5 +210,10 @@ final class QuestionSyncReadOnlyTest extends TestCase
         self::assertStringNotContainsString('->post(', $source);
         self::assertStringNotContainsString('answerQuestion', $source);
         self::assertStringContainsString('new QuestionService($mlAccountId)', $source);
+        self::assertStringContainsString('Database::getInstance()', $source);
+        self::assertStringContainsString('Dotenv', $source);
+
+        $svc = (string) file_get_contents(dirname(__DIR__, 3) . '/app/Services/QuestionService.php');
+        self::assertStringContainsString('account_id = VALUES(account_id)', $svc);
     }
 }
