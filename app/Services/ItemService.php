@@ -1780,6 +1780,9 @@ class ItemService
      * Hidrata linhas da listagem via GET /items?ids= (chunk 20 no client).
      * Não busca /items/{id}/description.
      *
+     * Se o multi-get 403/4xx/5xx (ou falhar), preenche a página com a tabela
+     * local `items` em vez de devolver a listagem vazia. Não chama visitas.
+     *
      * @param list<string> $itemIds
      * @param array<string, mixed> $filters
      * @return list<array<string, mixed>>
@@ -1795,18 +1798,220 @@ class ItemService
             return [];
         }
 
-        $details = $this->client->getMultiItemDetails($itemIds, self::LIST_MULTI_GET_ATTRIBUTES);
+        $details = [];
+        $multiGetFailed = false;
+
+        try {
+            $details = $this->client->getMultiItemDetails($itemIds, self::LIST_MULTI_GET_ATTRIBUTES);
+            if (!is_array($details) || $this->isMlHttpFailurePayload($details)) {
+                $multiGetFailed = true;
+                $status = is_array($details)
+                    ? ($details['status'] ?? $details['error'] ?? 'unknown')
+                    : 'invalid';
+                log_warning('ItemService: multi-get falhou; hidratando listagem pelo cache local', [
+                    'service' => 'ItemService',
+                    'ids_count' => count($itemIds),
+                    'status' => $status,
+                ]);
+                $details = [];
+            } elseif ($details === []) {
+                // getMultiItemDetails engole 403/4xx/5xx e devolve []. Não zerar a página.
+                $multiGetFailed = true;
+                log_warning('ItemService: multi-get vazio; hidratando listagem pelo cache local', [
+                    'service' => 'ItemService',
+                    'ids_count' => count($itemIds),
+                ]);
+            }
+        } catch (\Throwable $e) {
+            $multiGetFailed = true;
+            log_warning('ItemService: exceção no multi-get; hidratando listagem pelo cache local', [
+                'service' => 'ItemService',
+                'ids_count' => count($itemIds),
+                'error' => $e->getMessage(),
+            ]);
+            $details = [];
+        }
+
+        $itemsById = [];
+        foreach ($itemIds as $itemId) {
+            $item = $details[$itemId] ?? null;
+            if ($this->isUsableMlListItem($item)) {
+                $itemsById[$itemId] = $this->formatItemForList($item);
+            }
+        }
+
+        if ($multiGetFailed) {
+            $missingIds = [];
+            foreach ($itemIds as $itemId) {
+                if (!isset($itemsById[$itemId])) {
+                    $missingIds[] = $itemId;
+                }
+            }
+
+            $localById = $this->loadLocalItemsForList($missingIds);
+            foreach ($missingIds as $itemId) {
+                if (!isset($localById[$itemId])) {
+                    continue;
+                }
+                $itemsById[$itemId] = $this->formatItemForList($localById[$itemId]);
+            }
+
+            log_warning('ItemService: listagem hidratada do cache local items', [
+                'service' => 'ItemService',
+                'requested' => count($itemIds),
+                'from_ml' => count($itemIds) - count($missingIds),
+                'from_local' => count($localById),
+                'still_missing' => count($missingIds) - count($localById),
+            ]);
+        }
 
         $items = [];
         foreach ($itemIds as $itemId) {
-            $item = $details[$itemId] ?? null;
-            if (!is_array($item) || isset($item['error'])) {
-                continue;
+            if (isset($itemsById[$itemId])) {
+                $items[] = $itemsById[$itemId];
             }
-            $items[] = $this->formatItemForList($item);
         }
 
         return $this->filterItemsByCustomCriteria($items, $filters);
+    }
+
+    /**
+     * @param array<string, mixed> $payload
+     */
+    private function isMlHttpFailurePayload(array $payload): bool
+    {
+        foreach ($payload as $key => $value) {
+            if (is_string($key) && preg_match('/^ML[A-Z]*\d+/i', $key) === 1 && is_array($value)) {
+                return false;
+            }
+        }
+
+        $status = $payload['status'] ?? $payload['http_status'] ?? $payload['code'] ?? null;
+        if (is_numeric($status) && (int) $status >= 400) {
+            return true;
+        }
+
+        $error = $payload['error'] ?? null;
+
+        return is_string($error) && $error !== '';
+    }
+
+    private function isUsableMlListItem(mixed $item): bool
+    {
+        if (!is_array($item) || isset($item['error'])) {
+            return false;
+        }
+
+        $httpStatus = $item['http_status'] ?? $item['code'] ?? null;
+        if (is_numeric($httpStatus) && (int) $httpStatus >= 400) {
+            return false;
+        }
+
+        $status = $item['status'] ?? null;
+        if (is_numeric($status) && (int) $status >= 400) {
+            return false;
+        }
+        if (is_string($status) && in_array(strtolower($status), ['401', '403', '404', '500'], true)) {
+            return false;
+        }
+
+        $id = $item['id'] ?? null;
+
+        return is_string($id) && $id !== '';
+    }
+
+    /**
+     * @param list<string> $itemIds
+     * @return array<string, array<string, mixed>>
+     */
+    private function loadLocalItemsForList(array $itemIds): array
+    {
+        if ($this->db === null || $itemIds === []) {
+            return [];
+        }
+
+        $itemIds = array_values(array_unique($itemIds));
+        $placeholders = implode(',', array_fill(0, count($itemIds), '?'));
+        $sql = 'SELECT ml_item_id, title, price, status, available_quantity, sold_quantity, thumbnail, permalink, data'
+            . " FROM items WHERE ml_item_id IN ({$placeholders})";
+        $params = $itemIds;
+
+        if ($this->accountId !== null) {
+            $sql .= ' AND account_id = ?';
+            $params[] = $this->accountId;
+        }
+
+        try {
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute($params);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        } catch (\Throwable $e) {
+            log_warning('ItemService: falha ao ler items locais para listagem', [
+                'service' => 'ItemService',
+                'error' => $e->getMessage(),
+            ]);
+            return [];
+        }
+
+        $byId = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $id = trim((string) ($row['ml_item_id'] ?? ''));
+            if ($id === '') {
+                continue;
+            }
+            $byId[$id] = $this->mapLocalItemRowForList($row);
+        }
+
+        return $byId;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>
+     */
+    private function mapLocalItemRowForList(array $row): array
+    {
+        $data = $row['data'] ?? null;
+        if (is_string($data) && $data !== '') {
+            $decoded = json_decode($data, true);
+            $data = is_array($decoded) ? $decoded : [];
+        } elseif (!is_array($data)) {
+            $data = [];
+        }
+
+        $pick = static function (string $column, string ...$jsonKeys) use ($row, $data): mixed {
+            $value = $row[$column] ?? null;
+            if ($value !== null && $value !== '') {
+                return $value;
+            }
+            foreach ($jsonKeys as $key) {
+                if (array_key_exists($key, $data) && $data[$key] !== null && $data[$key] !== '') {
+                    return $data[$key];
+                }
+            }
+
+            return $value;
+        };
+
+        $id = (string) $row['ml_item_id'];
+        $price = $pick('price', 'price');
+        $stock = $pick('available_quantity', 'available_quantity', 'stock');
+        $sold = $pick('sold_quantity', 'sold_quantity');
+
+        return [
+            'id' => $id,
+            'ml_item_id' => $id,
+            'title' => $pick('title', 'title'),
+            'price' => is_numeric($price) ? (float) $price : $price,
+            'status' => $pick('status', 'status'),
+            'available_quantity' => is_numeric($stock) ? (int) $stock : $stock,
+            'sold_quantity' => is_numeric($sold) ? (int) $sold : $sold,
+            'thumbnail' => $pick('thumbnail', 'thumbnail', 'secure_thumbnail'),
+            'permalink' => $pick('permalink', 'permalink'),
+        ];
     }
 
     private function attachVisits(array $items, int $days = 7): array

@@ -796,4 +796,92 @@ class ItemServiceTest extends TestCase
         $this->assertSame('MLB1', $items[0]['id']);
         $this->assertArrayNotHasKey('description', $items[0]);
     }
+
+    public function test_hydrateItemsForList_falls_back_to_local_items_on_403(): void
+    {
+        $service = new ItemService(null);
+
+        $mock = $this->getMockBuilder(\App\Services\MercadoLivreClient::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['getMultiItemDetails', 'getMultiItemVisits'])
+            ->getMock();
+
+        $mock->expects($this->once())
+            ->method('getMultiItemDetails')
+            ->willReturn([
+                'error' => 'access_denied',
+                'status' => 403,
+                'message' => 'At least one policy returned UNAUTHORIZED.',
+            ]);
+        $mock->expects($this->never())->method('getMultiItemVisits');
+
+        $stmt = $this->createMock(\PDOStatement::class);
+        $stmt->expects($this->once())
+            ->method('execute')
+            ->with($this->callback(static function ($params): bool {
+                return is_array($params)
+                    && ($params[0] ?? null) === 'MLB403FALLBACK'
+                    && end($params) === 7;
+            }))
+            ->willReturn(true);
+        $stmt->method('fetchAll')->willReturn([
+            [
+                'ml_item_id' => 'MLB403FALLBACK',
+                'title' => '',
+                'price' => null,
+                'status' => '',
+                'available_quantity' => null,
+                'sold_quantity' => null,
+                'thumbnail' => '',
+                'permalink' => '',
+                'data' => json_encode([
+                    'title' => 'From JSON',
+                    'price' => 19.9,
+                    'status' => 'active',
+                    'available_quantity' => 8,
+                    'sold_quantity' => 15,
+                    'thumbnail' => 'https://http2.mlstatic.com/local.jpg',
+                    'permalink' => 'https://produto.mercadolivre.com.br/MLB-403-FALLBACK',
+                ], JSON_UNESCAPED_SLASHES),
+            ],
+        ]);
+
+        $db = $this->createMock(PDO::class);
+        $db->expects($this->once())
+            ->method('prepare')
+            ->with($this->callback(static function ($sql): bool {
+                return is_string($sql)
+                    && str_contains($sql, 'FROM items')
+                    && str_contains($sql, 'account_id');
+            }))
+            ->willReturn($stmt);
+
+        $ref = new \ReflectionClass($service);
+        $clientProp = $ref->getProperty('client');
+        $clientProp->setAccessible(true);
+        $clientProp->setValue($service, $mock);
+
+        $dbProp = $ref->getProperty('db');
+        $dbProp->setAccessible(true);
+        $dbProp->setValue($service, $db);
+
+        $accountProp = $ref->getProperty('accountId');
+        $accountProp->setAccessible(true);
+        $accountProp->setValue($service, 7);
+
+        $method = $ref->getMethod('hydrateItemsForList');
+        $method->setAccessible(true);
+        $items = $method->invoke($service, ['MLB403FALLBACK'], ['skip_visits' => true]);
+
+        $this->assertCount(1, $items);
+        $this->assertSame('MLB403FALLBACK', $items[0]['id']);
+        $this->assertSame('From JSON', $items[0]['title']);
+        $this->assertSame(19.9, $items[0]['price']);
+        $this->assertSame('active', $items[0]['status']);
+        $this->assertSame(8, $items[0]['available_quantity']);
+        $this->assertSame(15, $items[0]['sold_quantity']);
+        $this->assertSame('https://http2.mlstatic.com/local.jpg', $items[0]['thumbnail']);
+        $this->assertSame('https://produto.mercadolivre.com.br/MLB-403-FALLBACK', $items[0]['permalink']);
+        $this->assertArrayNotHasKey('description', $items[0]);
+    }
 }
