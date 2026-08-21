@@ -15,6 +15,21 @@ class ItemService
     private ?\PDO $db;
     private ?int $accountId;
 
+    /** @var list<string> */
+    private const LIST_MULTI_GET_ATTRIBUTES = [
+        'id',
+        'title',
+        'price',
+        'status',
+        'available_quantity',
+        'sold_quantity',
+        'permalink',
+        'thumbnail',
+        'listing_type_id',
+        'category_id',
+        'currency_id',
+    ];
+
     public function __construct(?int $accountId = null)
     {
         $this->accountId = $accountId;
@@ -189,7 +204,8 @@ class ItemService
                 ];
             }
 
-            // Se retornou IDs, buscar detalhes de cada item
+            // Se retornou IDs, hidratar via multi-get oficial (GET /items?ids=, máx. 20).
+            // Não chama getItem() — esse caminho também busca /description por ID.
             $items = [];
             $itemIds = [];
             if (isset($response['results']) && is_array($response['results'])) {
@@ -198,17 +214,14 @@ class ItemService
                         continue;
                     }
                     $itemIds[] = $itemId;
-                    $item = $this->getItem($itemId);
-                    if (!isset($item['error']) && is_array($item)) {
-                        $items[] = $this->formatItemForList($item);
-                    }
                 }
 
-                // Apply custom filters (low_stock, high_sales)
-                $items = $this->filterItemsByCustomCriteria($items, $filters);
+                $items = $this->hydrateItemsForList($itemIds, $filters);
             }
 
-            $items = $this->attachVisits($items);
+            if (!$this->shouldSkipVisits($filters)) {
+                $items = $this->attachVisits($items);
+            }
 
             $total = $response['paging']['total'] ?? count($items);
             $pages = max(1, (int)ceil($total / $limit));
@@ -291,7 +304,9 @@ class ItemService
 
         // Apply custom filters (low_stock, high_sales)
         $items = $this->filterItemsByCustomCriteria($items, $filters);
-        $items = $this->attachVisits($items);
+        if (!$this->shouldSkipVisits($filters)) {
+            $items = $this->attachVisits($items);
+        }
 
         $total = $response['paging']['total'] ?? count($items);
         $pages = max(1, (int)ceil($total / $limit));
@@ -474,7 +489,9 @@ class ItemService
             $items[] = $this->formatItemForList($itemData);
         }
 
-        $items = $this->attachVisits($items);
+        if (!$this->shouldSkipVisits($filters)) {
+            $items = $this->attachVisits($items);
+        }
 
         $pages = $total > 0 ? (int)ceil($total / $limit) : 1;
 
@@ -581,7 +598,11 @@ class ItemService
             }
         }
 
-        if (!isset($item['error'])) {
+        $skipDescription = array_key_exists('skip_description', $options)
+            ? filter_var($options['skip_description'], FILTER_VALIDATE_BOOLEAN)
+            : false;
+
+        if (!isset($item['error']) && !$skipDescription) {
             try {
                 $description = $this->client->get("/items/{$itemId}/description");
                 if (is_array($description) && !isset($description['error'])) {
@@ -1745,6 +1766,49 @@ class ItemService
      * @param list<array<string, mixed>> $items
      * @return list<array<string, mixed>>
      */
+
+    private function shouldSkipVisits(array $filters): bool
+    {
+        if (!array_key_exists('skip_visits', $filters) || $filters['skip_visits'] === null || $filters['skip_visits'] === '') {
+            return false;
+        }
+
+        return filter_var($filters['skip_visits'], FILTER_VALIDATE_BOOLEAN) === true;
+    }
+
+    /**
+     * Hidrata linhas da listagem via GET /items?ids= (chunk 20 no client).
+     * Não busca /items/{id}/description.
+     *
+     * @param list<string> $itemIds
+     * @param array<string, mixed> $filters
+     * @return list<array<string, mixed>>
+     */
+    private function hydrateItemsForList(array $itemIds, array $filters = []): array
+    {
+        $itemIds = array_values(array_unique(array_filter(
+            $itemIds,
+            static fn($id): bool => is_string($id) && $id !== ''
+        )));
+
+        if ($itemIds === []) {
+            return [];
+        }
+
+        $details = $this->client->getMultiItemDetails($itemIds, self::LIST_MULTI_GET_ATTRIBUTES);
+
+        $items = [];
+        foreach ($itemIds as $itemId) {
+            $item = $details[$itemId] ?? null;
+            if (!is_array($item) || isset($item['error'])) {
+                continue;
+            }
+            $items[] = $this->formatItemForList($item);
+        }
+
+        return $this->filterItemsByCustomCriteria($items, $filters);
+    }
+
     private function attachVisits(array $items, int $days = 7): array
     {
         if ($items === []) {

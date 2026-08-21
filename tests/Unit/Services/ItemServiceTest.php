@@ -699,4 +699,101 @@ class ItemServiceTest extends TestCase
             'ItemService deve ter método deleteItem()'
         );
     }
+
+    public function test_listItems_uses_multiget_instead_of_per_item_details(): void
+    {
+        $source = file_get_contents(
+            dirname(__DIR__, 3) . '/app/Services/ItemService.php'
+        );
+
+        $this->assertStringContainsString('getMultiItemDetails', $source);
+        $this->assertStringContainsString('hydrateItemsForList', $source);
+        $this->assertStringContainsString('LIST_MULTI_GET_ATTRIBUTES', $source);
+        $this->assertStringContainsString('shouldSkipVisits', $source);
+        $this->assertStringNotContainsString("buscar detalhes de cada item", $source);
+    }
+
+    public function test_getMultiItemDetails_chunks_ids_by_20(): void
+    {
+        $source = file_get_contents(
+            dirname(__DIR__, 3) . '/app/Services/MercadoLivreClient.php'
+        );
+
+        $this->assertStringContainsString('array_chunk($itemIds, 20)', $source);
+        $this->assertMatchesRegularExpression("/get\\('\\/items'/", $source);
+    }
+
+    public function test_shouldSkipVisits_honors_flag(): void
+    {
+        $service = new ItemService(null);
+        $method = new \ReflectionMethod(ItemService::class, 'shouldSkipVisits');
+        $method->setAccessible(true);
+
+        $this->assertFalse($method->invoke($service, []));
+        $this->assertTrue($method->invoke($service, ['skip_visits' => true]));
+        $this->assertTrue($method->invoke($service, ['skip_visits' => 'true']));
+        $this->assertTrue($method->invoke($service, ['skip_visits' => '1']));
+        $this->assertFalse($method->invoke($service, ['skip_visits' => false]));
+        $this->assertFalse($method->invoke($service, ['skip_visits' => '0']));
+        $this->assertFalse($method->invoke($service, ['skip_visits' => '']));
+    }
+
+    public function test_hydrateItemsForList_requests_list_attributes_without_description(): void
+    {
+        $service = new ItemService(null);
+
+        $ids = [];
+        for ($i = 1; $i <= 25; $i++) {
+            $ids[] = 'MLB' . $i;
+        }
+
+        $mock = $this->getMockBuilder(\App\Services\MercadoLivreClient::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['getMultiItemDetails'])
+            ->getMock();
+
+        $mock->expects($this->once())
+            ->method('getMultiItemDetails')
+            ->with(
+                $ids,
+                $this->callback(static function (array $attributes): bool {
+                    if (in_array('description', $attributes, true)) {
+                        return false;
+                    }
+                    foreach (['id', 'title', 'price', 'status', 'available_quantity', 'sold_quantity', 'permalink', 'thumbnail', 'listing_type_id', 'category_id'] as $field) {
+                        if (!in_array($field, $attributes, true)) {
+                            return false;
+                        }
+                    }
+                    return true;
+                })
+            )
+            ->willReturn([
+                'MLB1' => [
+                    'id' => 'MLB1',
+                    'title' => 'Anúncio 1',
+                    'price' => 10.5,
+                    'status' => 'active',
+                    'available_quantity' => 3,
+                    'sold_quantity' => 1,
+                    'permalink' => 'https://produto.mercadolivre.com.br/MLB-1',
+                    'thumbnail' => 'https://http2.mlstatic.com/x.jpg',
+                    'listing_type_id' => 'gold_special',
+                    'category_id' => 'MLB1234',
+                ],
+            ]);
+
+        $ref = new \ReflectionClass($service);
+        $prop = $ref->getProperty('client');
+        $prop->setAccessible(true);
+        $prop->setValue($service, $mock);
+
+        $method = $ref->getMethod('hydrateItemsForList');
+        $method->setAccessible(true);
+        $items = $method->invoke($service, $ids, ['skip_description' => true, 'skip_visits' => true]);
+
+        $this->assertCount(1, $items);
+        $this->assertSame('MLB1', $items[0]['id']);
+        $this->assertArrayNotHasKey('description', $items[0]);
+    }
 }
