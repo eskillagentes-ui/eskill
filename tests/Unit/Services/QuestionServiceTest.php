@@ -714,6 +714,41 @@ class QuestionServiceTest extends TestCase
         $this->assertFalse($result['success']);
     }
 
+    public function testAnswerQuestionForbiddenAccountDoesNotPost(): void
+    {
+        $client = $this->createMock(MercadoLivreClient::class);
+        $client->expects($this->never())->method('post');
+
+        $service = new QuestionService(
+            accountId: 1335,
+            client: $client,
+            cache: $this->createMockCache(),
+            skipDbAutoConnect: true
+        );
+        $result = $service->answerQuestion('Q1', 'Sim, serve!');
+
+        $this->assertFalse($result['success']);
+        $this->assertTrue($result['apply_blocked']);
+        $this->assertStringContainsString('1335', (string) $result['error']);
+    }
+
+    public function testAnswerQuestionWithoutAccountDoesNotPost(): void
+    {
+        $client = $this->createMock(MercadoLivreClient::class);
+        $client->expects($this->never())->method('post');
+
+        $service = new QuestionService(
+            accountId: null,
+            client: $client,
+            cache: $this->createMockCache(),
+            skipDbAutoConnect: true
+        );
+        $result = $service->answerQuestion('Q1', 'Sim, serve!');
+
+        $this->assertFalse($result['success']);
+        $this->assertTrue($result['apply_blocked']);
+    }
+
     // -------------------------------------------------------
     // syncSingleQuestion Tests
     // -------------------------------------------------------
@@ -789,14 +824,14 @@ class QuestionServiceTest extends TestCase
 
     public function testGetUnansweredCountFromApi(): void
     {
-        $client = $this->createMockClient([
-            '/questions/search' => [
-                'questions' => [],
-                'paging' => ['total' => 7, 'limit' => 1, 'offset' => 0],
-            ],
-        ]);
+        $stmt = $this->createMock(PDOStatement::class);
+        $stmt->method('execute')->willReturn(true);
+        $stmt->method('fetchColumn')->willReturn(7);
 
-        $service = $this->buildService(client: $client);
+        $db = $this->createMock(PDO::class);
+        $db->method('prepare')->willReturn($stmt);
+
+        $service = $this->buildService(db: $db);
         $result = $service->getUnansweredCount();
 
         $this->assertEquals(7, $result);
