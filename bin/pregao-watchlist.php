@@ -10,6 +10,10 @@ declare(strict_types=1);
  *   php bin/pregao-watchlist.php --account-id=1335 --add=MLB123 --apelido="Concorrente X" --keyword="portao pet"
  *   php bin/pregao-watchlist.php --account-id=1335 --collect
  *   php bin/pregao-watchlist.php --account-id=1335 --list
+ *
+ * --collect is read-only (GET /items and GET /products/{id}/items). It must
+ * exit 0 even when some items 403 from this datacenter so systemd does not
+ * map a partial collect to status=2/INVALIDARGUMENT and fail the daily timer.
  */
 
 require dirname(__DIR__) . '/vendor/autoload.php';
@@ -22,6 +26,10 @@ use App\Services\Pregao\PregaoWatchlistCollector;
 
 $opts = getopt('', ['account-id:', 'add:', 'apelido:', 'keyword:', 'collect', 'list', 'json']);
 $accountId = (int) ($opts['account-id'] ?? ($_ENV['PREGAO_ACCOUNT_ID'] ?? 1335));
+if ($accountId <= 0) {
+    fwrite(STDERR, "account-id inválido\n");
+    exit(2);
+}
 $service = new PregaoWatchlistCollector();
 
 if (isset($opts['add'])) {
@@ -78,7 +86,9 @@ if (isset($opts['collect'])) {
             fwrite(STDERR, "  err: {$err}\n");
         }
     }
-    exit($result['errors'] === [] ? 0 : 2);
+    // Soft-fail: missing/403 items are logged above. Exit 2 is reserved for
+    // invalid CLI arguments (systemd INVALIDARGUMENT).
+    exit(0);
 }
 
 fwrite(STDERR, "Informe --add=MLB…, --list ou --collect\n");

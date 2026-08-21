@@ -10,7 +10,8 @@ use PDO;
 use Throwable;
 
 /**
- * Watchlist de concorrentes — multiget /items?ids= (lotes de 20).
+ * Watchlist de concorrentes — multiget /items?ids= (lotes de 20),
+ * com fallback read-only em /products/{id}/items quando /items 403 (datacenter).
  *
  * Emite op na fita quando: preço muda >5%, pausa/zera estoque, ou acelera vendas.
  */
@@ -31,14 +32,14 @@ final class PregaoWatchlistCollector
     /**
      * @return array{checked: int, alerts: int, errors: list<string>}
      */
-    public function collect(int $accountId): array
+    public function collect(int $accountId, ?MercadoLivreClient $client = null): array
     {
         $rows = $this->loadActive($accountId);
         if ($rows === []) {
             return ['checked' => 0, 'alerts' => 0, 'errors' => []];
         }
 
-        $client = new MercadoLivreClient($accountId);
+        $client ??= new MercadoLivreClient($accountId);
         $ids = array_map(static fn (array $r): string => (string) $r['mlb_id'], $rows);
         $byId = [];
         foreach ($rows as $r) {
@@ -48,8 +49,12 @@ final class PregaoWatchlistCollector
         $alerts = 0;
         $errors = [];
         $checked = 0;
+        /** @var array<string, list<array<string, mixed>>> $catalogCache */
+        $catalogCache = [];
+        $itemsForbidden = false;
 
         foreach (array_chunk($ids, self::BATCH_SIZE) as $chunk) {
+            $details = [];
             try {
                 $details = $client->getMultiItemDetails($chunk, [
                     'id', 'title', 'price', 'sold_quantity', 'status', 'available_quantity',
@@ -60,24 +65,136 @@ final class PregaoWatchlistCollector
                     'account_id' => $accountId,
                     'error' => $e->getMessage(),
                 ]);
-                continue;
             }
 
             foreach ($chunk as $mlbId) {
                 $body = $details[$mlbId] ?? null;
-                if (!is_array($body)) {
-                    $errors[] = "item {$mlbId} não retornado";
+                if (is_array($body) && self::isUsableItemBody($body)) {
+                    $alerts += $this->applySnapshot($accountId, $byId[$mlbId], $body);
+                    $checked++;
                     continue;
                 }
-                $prev = $byId[$mlbId];
-                $alerts += $this->applySnapshot($accountId, $prev, $body);
-                $checked++;
+
+                $catalogBody = $this->lookupViaCatalog($client, $byId[$mlbId], $catalogCache);
+                if (is_array($catalogBody)) {
+                    $alerts += $this->applySnapshot($accountId, $byId[$mlbId], $catalogBody);
+                    $checked++;
+                    continue;
+                }
+
+                $itemsForbidden = true;
+                $errors[] = "item {$mlbId} não retornado via /items (datacenter 403) e sem catálogo";
             }
 
             usleep(150000);
         }
 
+        if ($itemsForbidden) {
+            log_warning('PregaoWatchlistCollector: /items bloqueado; fallback catálogo quando havia id', [
+                'account_id' => $accountId,
+                'checked' => $checked,
+                'errors' => count($errors),
+            ]);
+        }
+
         return ['checked' => $checked, 'alerts' => $alerts, 'errors' => $errors];
+    }
+
+    /**
+     * @param array<string, mixed> $body
+     */
+    public static function isUsableItemBody(array $body): bool
+    {
+        if (isset($body['error'])) {
+            return false;
+        }
+        $id = strtoupper(trim((string) ($body['id'] ?? '')));
+        if ($id === '' || preg_match('/^MLB\d+$/', $id) !== 1) {
+            return false;
+        }
+        $status = isset($body['status']) ? strtolower((string) $body['status']) : '';
+        if ($status === '403' || $status === '401') {
+            return false;
+        }
+
+        return array_key_exists('price', $body)
+            || array_key_exists('sold_quantity', $body)
+            || in_array($status, ['active', 'paused', 'closed', 'under_review', 'inactive'], true);
+    }
+
+    public static function catalogIdFromApelido(?string $apelido): ?string
+    {
+        if ($apelido === null || $apelido === '') {
+            return null;
+        }
+        if (preg_match('/cat[aá]logo\s+(MLB\d+)/iu', $apelido, $m) === 1) {
+            return strtoupper($m[1]);
+        }
+
+        return null;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>|null
+     */
+    public static function itemBodyFromProductRow(array $row): ?array
+    {
+        $itemId = strtoupper(trim((string) ($row['item_id'] ?? '')));
+        if ($itemId === '' || preg_match('/^MLB\d+$/', $itemId) !== 1) {
+            return null;
+        }
+        $body = ['id' => $itemId];
+        if (isset($row['price']) && is_numeric($row['price'])) {
+            $body['price'] = (float) $row['price'];
+        }
+        if (isset($row['title']) && is_string($row['title']) && $row['title'] !== '') {
+            $body['title'] = $row['title'];
+        }
+
+        return $body;
+    }
+
+    /**
+     * @param array<string, mixed> $prev
+     * @param array<string, list<array<string, mixed>>> $cache
+     * @return array<string, mixed>|null
+     */
+    private function lookupViaCatalog(MercadoLivreClient $client, array $prev, array &$cache): ?array
+    {
+        $mlbId = strtoupper(trim((string) ($prev['mlb_id'] ?? '')));
+        $catalogId = self::catalogIdFromApelido(isset($prev['apelido']) ? (string) $prev['apelido'] : null);
+        if ($catalogId === null || $mlbId === '') {
+            return null;
+        }
+        if (!isset($cache[$catalogId])) {
+            try {
+                $resp = $client->get('/products/' . $catalogId . '/items', [], 60, false);
+            } catch (Throwable $e) {
+                log_warning('PregaoWatchlistCollector: /products items falhou', [
+                    'catalog_id' => $catalogId,
+                    'error' => $e->getMessage(),
+                ]);
+                $cache[$catalogId] = [];
+                return null;
+            }
+            if (isset($resp['error'])) {
+                $cache[$catalogId] = [];
+                return null;
+            }
+            $cache[$catalogId] = is_array($resp['results'] ?? null) ? $resp['results'] : [];
+        }
+        foreach ($cache[$catalogId] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $body = self::itemBodyFromProductRow($row);
+            if ($body !== null && $body['id'] === $mlbId) {
+                return $body;
+            }
+        }
+
+        return null;
     }
 
     /**
@@ -221,13 +338,20 @@ final class PregaoWatchlistCollector
             }
         }
 
-        $newDelta = ($sold !== null && $prevSold !== null && $sold >= $prevSold)
-            ? ($sold - $prevSold)
-            : 0;
+        if ($sold !== null && $prevSold !== null && $sold >= $prevSold) {
+            $newDelta = $sold - $prevSold;
+        } elseif ($sold === null) {
+            $newDelta = $prevDelta;
+        } else {
+            $newDelta = 0;
+        }
 
         $this->db->prepare(
             'UPDATE competitor_items
-             SET price = ?, sold_quantity = ?, available_quantity = ?, status = ?,
+             SET price = COALESCE(?, price),
+                 sold_quantity = COALESCE(?, sold_quantity),
+                 available_quantity = COALESCE(?, available_quantity),
+                 status = COALESCE(?, status),
                  last_sold_delta = ?, title = COALESCE(NULLIF(title, \'\'), ?),
                  last_checked_at = NOW(), updated_at = CURRENT_TIMESTAMP
              WHERE id = ?'

@@ -195,6 +195,8 @@
             <file>tests/Unit/AccountXRayCoverageTest.php</file>
             <file>tests/Unit/Scripts/SyncIrregularitiesCliTest.php</file>
             <file>tests/Unit/Scripts/ItemPerformanceSyncWorkerTest.php</file>
+            <file>tests/Unit/Scripts/PregaoWatchlistCliTest.php</file>
+            <file>tests/Unit/Services/Pregao/PregaoWatchlistCollectorTest.php</file>
             <file>tests/Unit/SEOKillerEnginePerformanceScoresTest.php</file>
             <file>tests/Unit/Services/ItemSyncServiceDataMergeTest.php</file>
             <file>tests/Unit/Services/Catalog/ListingIrregularityScanServiceTest.php</file>
