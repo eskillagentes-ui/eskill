@@ -65,9 +65,12 @@ class AnalyticsController extends BaseController
         $end = date('Y-m-d');
 
         try {
-            $summary = $this->service->getDashboardSummary($accountId);
+            $summary = $this->service->getDashboardSummary($accountId, $days);
             $trend = $this->service->getRevenueTrend($start, $end, 'day', $accountId);
             $funnel = $this->service->getConversionFunnel($accountId);
+            $topProducts = $this->service->getTopProducts($start, $end, $accountId, 8);
+            $seoOptimizations = $this->service->countSeoOptimizations($start, $end, $accountId);
+            $categories = $this->service->getCategoryDistribution($accountId);
         } catch (\Throwable $e) {
             http_response_code(500);
             echo json_encode(['success' => false, 'error' => 'Erro ao carregar dados de analytics.']);
@@ -92,31 +95,34 @@ class AnalyticsController extends BaseController
             $insights[] = ['icon' => 'chat-dots', 'title' => 'Perguntas Pendentes', 'description' => "{$q} perguntas aguardam resposta."];
         }
 
+        $visits7d = (int)($summary['visits_7d'] ?? 0);
+
         $data = [
             'metrics' => [
                 'revenue'           => $totalRevenue,
                 'orders'            => $totalOrders,
-                'visits'            => 0,
-                'conversion_rate'   => $funnel['conversion_rate'] ?? 0.0,
+                'visits'            => $visits7d,
+                'visits_window'     => '7d',
+                'conversion_rate'   => (float)($summary['conversion_rate'] ?? 0.0),
                 'revenue_change'    => $summary['growth_rate'],
-                'orders_change'     => 0,
-                'visits_change'     => 0,
+                'orders_change'     => $summary['orders_change'] ?? 0,
+                'visits_change'     => $summary['visits_change'] ?? 0,
                 'conversion_change' => 0,
             ],
             'charts' => [
                 'sales_trend'  => ['labels' => $labels, 'data' => $revenueData],
                 'distribution' => ['labels' => [], 'data' => []],
-                'categories'   => ['labels' => [], 'data' => []],
+                'categories'   => $categories,
                 'funnel'       => ['data' => [
+                    $visits7d,
                     $funnel['questions'] ?? 0,
                     0,
-                    0,
-                    $funnel['orders'] ?? 0,
+                    $totalOrders,
                 ]],
             ],
             'insights'     => $insights,
-            'top_products' => [],
-            'ai_stats'     => ['optimizations' => 0, 'cost' => 0, 'roi' => 0.0, 'time_saved' => 0],
+            'top_products' => $topProducts,
+            'ai_stats'     => ['optimizations' => $seoOptimizations, 'cost' => 0, 'roi' => 0.0, 'time_saved' => 0],
         ];
 
         echo json_encode(['success' => true, 'data' => $data]);

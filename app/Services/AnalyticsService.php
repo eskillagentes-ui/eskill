@@ -310,19 +310,23 @@ class AnalyticsService
         }
 
         $currentStmt = $this->db->prepare(
-            "SELECT COALESCE(SUM(total_amount), 0) FROM ml_orders
+            "SELECT COALESCE(SUM(total_amount), 0) AS revenue, COUNT(*) AS orders FROM ml_orders
              WHERE date_created >= DATE_SUB(NOW(), INTERVAL :days DAY)" . $orderSqlSuffix
         );
         $currentStmt->execute(array_merge(['days' => $days], $orderParams));
-        $revenueToday = (float)$currentStmt->fetchColumn();
+        $currentRow = $currentStmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        $revenueToday = (float)($currentRow['revenue'] ?? 0);
+        $ordersToday = (int)($currentRow['orders'] ?? 0);
 
         $previousStmt = $this->db->prepare(
-            "SELECT COALESCE(SUM(total_amount), 0) FROM ml_orders
+            "SELECT COALESCE(SUM(total_amount), 0) AS revenue, COUNT(*) AS orders FROM ml_orders
              WHERE date_created >= DATE_SUB(NOW(), INTERVAL :days2 DAY)
                AND date_created < DATE_SUB(NOW(), INTERVAL :days1 DAY)" . $orderSqlSuffix
         );
         $previousStmt->execute(array_merge(['days2' => $days * 2, 'days1' => $days], $orderParams));
-        $revenueYesterday = (float)$previousStmt->fetchColumn();
+        $previousRow = $previousStmt->fetch(\PDO::FETCH_ASSOC) ?: [];
+        $revenueYesterday = (float)($previousRow['revenue'] ?? 0);
+        $ordersYesterday = (int)($previousRow['orders'] ?? 0);
 
         if ($revenueYesterday > 0) {
             $growth = (($revenueToday - $revenueYesterday) / $revenueYesterday) * 100;
@@ -330,6 +334,12 @@ class AnalyticsService
             // Sem base de comparação: 0% (neutro) se também não há receita atual,
             // ou +100% (crescimento a partir de zero) se passou a vender.
             $growth = $revenueToday > 0 ? 100.0 : 0.0;
+        }
+
+        if ($ordersYesterday > 0) {
+            $ordersChange = (($ordersToday - $ordersYesterday) / $ordersYesterday) * 100;
+        } else {
+            $ordersChange = $ordersToday > 0 ? 100.0 : 0.0;
         }
 
         $questionsSql = "SELECT COUNT(*) FROM ml_questions WHERE status = 'UNANSWERED'";
@@ -353,6 +363,7 @@ class AnalyticsService
         // account_index_metrics, já coletado pelo Pregão (mesma janela de 7d
         // exibida em "Exposição"), em vez de bater na API do ML de novo.
         [$conversionRate, $visits7d, $sales7d] = $this->getConversionRateFromIndexMetrics($accountId);
+        $visitsChange = $this->getVisitsChangeFromBaselines($accountId, $visits7d);
 
         return [
             // Nomes mantidos por compatibilidade com o front-end existente, mas
@@ -365,11 +376,15 @@ class AnalyticsService
             'revenue_previous_period' => $revenueYesterday,
             'period_days' => $days,
             'growth_rate' => round($growth, 2),
+            'orders_period' => $ordersToday,
+            'orders_previous_period' => $ordersYesterday,
+            'orders_change' => round($ordersChange, 2),
             'pending_questions' => $pendingQuestions,
             'active_items' => $activeItems,
             'conversion_rate' => $conversionRate,
             'visits_7d' => $visits7d,
             'sales_7d' => $sales7d,
+            'visits_change' => $visitsChange,
         ];
     }
 
@@ -403,5 +418,153 @@ class AnalyticsService
         $rate = $visits > 0 ? round(($sales / $visits) * 100, 2) : null;
 
         return [$rate, $visits, $sales];
+    }
+
+    /**
+     * Variação de visitas 7d vs baseline local (account_index_baselines).
+     * Leitura apenas — não dispara collector do Pregão nem API do ML.
+     */
+    private function getVisitsChangeFromBaselines(?int $accountId, mixed $visits7d): float
+    {
+        if ($visits7d === null || $accountId === null || $accountId <= 0) {
+            return 0.0;
+        }
+
+        $stmt = $this->db->prepare(
+            'SELECT visitas_baseline FROM account_index_baselines WHERE account_id = :account_id LIMIT 1'
+        );
+        $stmt->execute(['account_id' => $accountId]);
+        $baseline = $stmt->fetchColumn();
+        $baseline = $baseline === false ? 0.0 : (float)$baseline;
+
+        if ($baseline > 0) {
+            return round((((float)$visits7d - $baseline) / $baseline) * 100, 2);
+        }
+
+        return (float)$visits7d > 0 ? 100.0 : 0.0;
+    }
+
+    /**
+     * Top produtos no período a partir de ml_orders.order_data (JSON_TABLE).
+     * Thumbnail vem da tabela items local — sem collector de visitas nem API ML.
+     *
+     * @return list<array{id: string, title: string, thumbnail: ?string, sales: int, revenue: float, conversion_rate: float, trend: float}>
+     */
+    public function getTopProducts(string $startDate, string $endDate, ?int $accountId = null, int $limit = 8): array
+    {
+        $limit = max(1, min(50, $limit));
+        $startBound = strlen($startDate) === 10 ? $startDate . ' 00:00:00' : $startDate;
+        $endBound = strlen($endDate) === 10 ? $endDate . ' 23:59:59' : $endDate;
+
+        $sql = "
+            SELECT
+                jt.item_id AS id,
+                COALESCE(NULLIF(MAX(jt.item_title), ''), MAX(i.title), jt.item_id) AS title,
+                MAX(i.thumbnail) AS thumbnail,
+                SUM(jt.quantity) AS sales,
+                SUM(jt.unit_price * jt.quantity) AS revenue
+            FROM ml_orders o
+            JOIN JSON_TABLE(
+                o.order_data,
+                '$.order_items[*]' COLUMNS (
+                    item_id VARCHAR(50) PATH '$.item.id',
+                    item_title VARCHAR(255) PATH '$.item.title',
+                    quantity INT PATH '$.quantity',
+                    unit_price DECIMAL(12,2) PATH '$.unit_price'
+                )
+            ) AS jt
+            LEFT JOIN items i ON i.ml_item_id = CONVERT(jt.item_id USING utf8mb4) COLLATE utf8mb4_unicode_ci
+            WHERE o.date_created BETWEEN ? AND ?
+              AND " . RevenueHelper::paidStatusesSql('o.status') . "
+              AND o.order_data IS NOT NULL
+              AND JSON_VALID(o.order_data)
+              AND jt.item_id IS NOT NULL
+        ";
+
+        $params = [$startBound, $endBound];
+        if ($accountId !== null && $accountId > 0) {
+            $sql .= " AND o.ml_account_id = ?";
+            $params[] = $accountId;
+        }
+
+        $sql .= "
+            GROUP BY jt.item_id
+            ORDER BY revenue DESC
+            LIMIT {$limit}
+        ";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        $out = [];
+        foreach ($rows as $row) {
+            $thumbnail = $row['thumbnail'] ?? null;
+            $out[] = [
+                'id' => (string)($row['id'] ?? ''),
+                'title' => (string)($row['title'] ?? ''),
+                'thumbnail' => is_string($thumbnail) && $thumbnail !== '' ? $thumbnail : null,
+                'sales' => (int)($row['sales'] ?? 0),
+                'revenue' => round((float)($row['revenue'] ?? 0), 2),
+                'conversion_rate' => 0.0,
+                'trend' => 0.0,
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
+     * Contagem local de otimizações SEO no período (tabela seo_optimization_events).
+     */
+    public function countSeoOptimizations(string $startDate, string $endDate, ?int $accountId = null): int
+    {
+        $startBound = strlen($startDate) === 10 ? $startDate . ' 00:00:00' : $startDate;
+        $endBound = strlen($endDate) === 10 ? $endDate . ' 23:59:59' : $endDate;
+
+        $sql = "SELECT COUNT(*) FROM seo_optimization_events WHERE optimized_at BETWEEN ? AND ?";
+        $params = [$startBound, $endBound];
+        if ($accountId !== null && $accountId > 0) {
+            $sql .= " AND account_id = ?";
+            $params[] = $accountId;
+        }
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * Distribuição de anúncios ativos por categoria (mesmo agrupamento de listingsMetrics).
+     * Usa category_name já persistido em items — sem tracker de performance nem API ML.
+     *
+     * @return array{labels: list<string>, data: list<int>}
+     */
+    public function getCategoryDistribution(?int $accountId = null, int $limit = 8): array
+    {
+        $limit = max(1, min(15, $limit));
+        $labelExpr = "COALESCE(NULLIF(category_name, ''), category_id, 'Sem categoria')";
+        $sql = "
+            SELECT
+                {$labelExpr} AS label,
+                COUNT(*) AS cnt
+            FROM items
+            WHERE status = 'active'
+        ";
+        $params = [];
+        if ($accountId !== null && $accountId > 0) {
+            $sql .= " AND account_id = ?";
+            $params[] = $accountId;
+        }
+        $sql .= " GROUP BY {$labelExpr} ORDER BY cnt DESC LIMIT {$limit}";
+
+        $stmt = $this->db->prepare($sql);
+        $stmt->execute($params);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+
+        return [
+            'labels' => array_map('strval', array_column($rows, 'label')),
+            'data' => array_map('intval', array_column($rows, 'cnt')),
+        ];
     }
 }
