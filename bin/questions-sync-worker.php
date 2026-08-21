@@ -15,7 +15,7 @@ declare(strict_types=1);
  * Opções:
  *   --once          Executa uma vez e sai (ideal para cron)
  *   --account=ID    Processa apenas a conta especificada
- *   --limit=N       Limite de perguntas por conta (padrão: 50)
+ *   --limit=N       Limite de perguntas recentes por conta (padrão: 200; unanswered pagina até 200+)
  *   --verbose       Exibe saída detalhada no console
  *   --help          Exibe esta ajuda
  */
@@ -51,7 +51,7 @@ Uso: php bin/questions-sync-worker.php [opções]
 Opções:
   --once          Executa uma vez e sai (ideal para cron)
   --account=ID    Processa apenas a conta especificada
-  --limit=N       Limite de perguntas por conta (padrão: 50)
+  --limit=N       Limite de perguntas recentes por conta (padrão: 200)
   --verbose       Exibe saída detalhada no console
   --help          Exibe esta ajuda
 
@@ -69,7 +69,7 @@ HELP;
 
 $runOnce    = isset($options['once']);
 $accountId  = isset($options['account']) ? (int) $options['account'] : null;
-$limit      = isset($options['limit']) ? (int) $options['limit'] : 50;
+$limit      = isset($options['limit']) ? (int) $options['limit'] : 200;
 $verbose    = isset($options['verbose']);
 
 // ─── Logger ──────────────────────────────────────────────────────────────────
@@ -127,24 +127,45 @@ function syncAccountQuestions(
         $service = new QuestionService($mlAccountId);
         $result  = $service->syncQuestions($limit);
 
-        $synced  = is_array($result) ? ($result['synced'] ?? $result['count'] ?? 0) : 0;
-        $errors  = is_array($result) ? ($result['errors'] ?? 0) : 0;
+        $synced    = is_array($result) ? (int) ($result['synced'] ?? $result['count'] ?? 0) : 0;
+        $errors    = is_array($result) ? (int) ($result['errors'] ?? 0) : 0;
+        $forbidden = is_array($result) && !empty($result['forbidden']);
+        $lastError = is_array($result) ? (string) ($result['last_error'] ?? '') : '';
 
+        // Always log per-account so 403/empty unanswered is visible without --verbose.
         logInfo($logger, 'Perguntas sincronizadas', [
-            'account_id' => $mlAccountId,
-            'nickname'   => $nickname,
-            'synced'     => $synced,
-            'errors'     => $errors,
-        ], $verbose);
+            'account_id'           => $mlAccountId,
+            'nickname'             => $nickname,
+            'synced'               => $synced,
+            'errors'               => $errors,
+            'forbidden'            => $forbidden,
+            'pages'                => is_array($result) ? ($result['pages'] ?? 0) : 0,
+            'unanswered_fetched'   => is_array($result) ? ($result['unanswered_fetched'] ?? 0) : 0,
+            'recent_fetched'       => is_array($result) ? ($result['recent_fetched'] ?? 0) : 0,
+        ], true);
 
+        if ($lastError !== '') {
+            logError($logger, 'Sync perguntas fail-soft', [
+                'account_id' => $mlAccountId,
+                'nickname'   => $nickname,
+                'error'      => $lastError,
+                'forbidden'  => $forbidden,
+            ], true);
+        }
+
+        // 403 on GET must not fail the worker (no exit 2). Continue other accounts.
         return true;
     } catch (\Throwable $e) {
+        $msg = $e->getMessage();
+        $forbidden = str_contains(strtolower($msg), 'forbidden') || str_contains($msg, 'HTTP 403');
         logError($logger, 'Erro ao sincronizar perguntas', [
             'account_id' => $mlAccountId,
             'nickname'   => $nickname,
-            'error'      => $e->getMessage(),
-        ], $verbose);
-        return false;
+            'error'      => $msg,
+            'forbidden'  => $forbidden,
+        ], true);
+        // Fail-soft: 403/token holes do not abort the cycle.
+        return !$forbidden ? false : true;
     }
 }
 
@@ -161,14 +182,16 @@ do {
     try {
         $db = getDbConnection();
 
+        // Active accounts with tokens only — never last-active-only, never mix ids.
+        $tokenSql = "status != 'disconnected' AND access_token IS NOT NULL AND TRIM(access_token) != ''";
         if ($accountId !== null) {
             $stmt = $db->prepare(
-                "SELECT id, nickname FROM ml_accounts WHERE id = ? AND status != 'disconnected'"
+                "SELECT id, nickname FROM ml_accounts WHERE id = ? AND {$tokenSql}"
             );
             $stmt->execute([$accountId]);
         } else {
             $stmt = $db->prepare(
-                "SELECT id, nickname FROM ml_accounts WHERE status != 'disconnected' ORDER BY id"
+                "SELECT id, nickname FROM ml_accounts WHERE {$tokenSql} ORDER BY id"
             );
             $stmt->execute();
         }
@@ -220,4 +243,5 @@ logInfo($logger, 'Questions Sync Worker encerrado', [], true);
 
 flock($lockHandle, LOCK_UN);
 fclose($lockHandle);
+// Always 0: 403/fail-soft on a single account must not exit 2 for cron.
 exit(0);
