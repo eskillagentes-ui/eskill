@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Helpers\AccountScopeHelper;
 use App\Helpers\SessionHelper;
 use App\Services\AccountXRayService;
 use App\Services\AccountRecoveryApplierService;
@@ -122,10 +123,11 @@ class AccountXRayController
 
         try {
             $input     = $this->jsonInput();
-            $accountId = (int) ($input['account_id'] ?? 0);
+            $requested = (int) ($input['account_id'] ?? 0);
+            $accountId = $this->resolveScopedAccountId($requested);
 
-            if ($accountId <= 0) {
-                $this->error400('account_id obrigatório');
+            if ($accountId === null) {
+                $this->error400('Nenhuma conta ML ativa na sessão');
                 return;
             }
 
@@ -218,7 +220,8 @@ class AccountXRayController
         $this->jsonHeader();
 
         try {
-            $accountId = (int) ($_GET['account_id'] ?? $this->activeAccountId() ?? 0);
+            $requested = (int) ($_GET['account_id'] ?? 0);
+            $accountId = $this->resolveScopedAccountId($requested) ?? 0;
             $limit     = min((int) ($_GET['limit'] ?? 10), 50);
 
             if ($accountId <= 0 || !$this->userOwnsAccount($accountId)) {
@@ -336,8 +339,22 @@ class AccountXRayController
 
     private function activeAccountId(): ?int
     {
-        $id = SessionHelper::getActiveAccountId();
-        return ($id !== null && $id > 0) ? $id : null;
+        return AccountScopeHelper::activeAccountId();
+    }
+
+    /**
+     * Raio X always runs against the session active ML account.
+     * A body/query account_id that differs (e.g. Falcão 1336 while FACILYTY 1335
+     * is active) is ignored so catalogs never mix.
+     */
+    private function resolveScopedAccountId(int $requested = 0): ?int
+    {
+        $active = AccountScopeHelper::activeAccountId();
+        if ($active === null || $active <= 0) {
+            return ($requested > 0) ? $requested : null;
+        }
+
+        return $active;
     }
 
     private function userOwnsAccount(int $accountId): bool
@@ -442,10 +459,11 @@ class AccountXRayController
         $this->jsonHeader();
 
         $body      = $this->jsonInput();
-        $accountId = (int) ($body['account_id'] ?? 0);
+        $requested = (int) ($body['account_id'] ?? 0);
+        $accountId = $this->resolveScopedAccountId($requested);
 
-        if ($accountId <= 0) {
-            $this->error400('account_id obrigatório');
+        if ($accountId === null) {
+            $this->error400('Nenhuma conta ML ativa na sessão');
             return;
         }
 

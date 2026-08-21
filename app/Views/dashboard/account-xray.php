@@ -201,13 +201,17 @@ declare(strict_types=1);
             <div class="d-flex gap-2">
               <select class="form-select form-select-sm" style="width:auto;" id="seo-filter-class" data-changeaction="filter-seo-items">
                 <option value="">Todos</option>
-                <option value="TOXICO">🔴 Tóxico</option>
-                <option value="POLUIDOR">🟠 Poluidor</option>
-                <option value="MORTO">⚫ Morto</option>
-                <option value="FRACO">🟡 Fraco</option>
-                <option value="EM_RISCO">🟡 Em Risco</option>
-                <option value="SAUDAVEL">🟢 Saudável</option>
-                <option value="ANCHOR">⭐ Anchor</option>
+                <option value="SEM_VISITA"> Sem visita</option>
+                <option value="SEM_VENDA"> Sem venda</option>
+                <option value="COM_VENDA"> Com venda</option>
+                <option value="PERFORMANCE_PENDING"> Performance pendente</option>
+                <option value="TOXICO"> Tóxico (tráfego real + conversão ruim)</option>
+                <option value="POLUIDOR"> Poluidor</option>
+                <option value="MORTO"> Morto (visitas reais = 0)</option>
+                <option value="FRACO"> Fraco</option>
+                <option value="EM_RISCO"> Em Risco</option>
+                <option value="SAUDAVEL"> Saudável</option>
+                <option value="ANCHOR"> Anchor</option>
               </select>
               <select class="form-select form-select-sm" style="width:auto;" id="seo-sort" data-changeaction="filter-seo-items">
                 <option value="seo_score_asc">SEO Score ↑</option>
@@ -409,9 +413,9 @@ declare(strict_types=1);
           <label class="form-label fw-semibold small">Ações a aplicar</label>
           <div class="d-flex flex-wrap gap-2">
             <div class="form-check">
-              <input class="form-check-input" type="checkbox" id="apply-action-pause" value="PAUSAR" checked>
+              <input class="form-check-input" type="checkbox" id="apply-action-pause" value="PAUSAR">
               <label class="form-check-label small" for="apply-action-pause">
-                <span class="badge bg-danger me-1">PAUSAR</span> Itens tóxicos/poluidores/mortos
+                <span class="badge bg-secondary me-1">PAUSAR</span> Desligado — Raio X não pausa anúncios
               </label>
             </div>
             <div class="form-check">
@@ -895,10 +899,10 @@ declare(strict_types=1);
       document.getElementById('running-card').classList.remove('d-none');
 
       const phases = [
-        [5, 'Conectando à API do Mercado Livre...'],
-        [10, 'Buscando dados do vendedor e reputação...'],
-        [20, 'Listando anúncios da conta...'],
-        [35, 'Coletando métricas de visitas e conversão...'],
+        [5, 'Lendo catálogo local da conta ativa...'],
+        [10, 'Buscando dados do vendedor (local se ML 403)...'],
+        [20, 'Universo: items ativos/pausados da conta...'],
+        [35, 'Métricas locais (performance_* + ml_orders)...'],
         [50, 'Executando diagnóstico de governança...'],
         [65, 'Auditando qualidade SEO dos títulos...'],
         [75, 'Analisando lacunas vs concorrentes...'],
@@ -1496,7 +1500,8 @@ declare(strict_types=1);
         EM_RECUPERACAO: 'text-warning',
         PENALIZADA: 'text-orange',
         TRAVADA: 'text-danger',
-        UNKNOWN: 'text-muted'
+        UNKNOWN: 'text-muted',
+        PERFORMANCE_PENDING: 'text-muted'
       } [s] || 'text-secondary';
     }
 
@@ -1531,7 +1536,11 @@ declare(strict_types=1);
         MORTO: '⚫',
         TOXICO: '🔴',
         POLUIDOR: '🟠',
-        SEM_ESTOQUE: '🟣'
+        SEM_ESTOQUE: '🟣',
+        SEM_VISITA: '',
+        SEM_VENDA: '',
+        COM_VENDA: '',
+        PERFORMANCE_PENDING: ''
       } [cls] || '';
     }
 

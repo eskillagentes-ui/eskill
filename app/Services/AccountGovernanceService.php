@@ -30,6 +30,10 @@ class AccountGovernanceService
     public const CLASS_EM_RISCO = 'EM_RISCO';
     public const CLASS_SAUDAVEL = 'SAUDAVEL';
     public const CLASS_ANCHOR = 'ANCHOR';
+    public const CLASS_SEM_VISITA = 'SEM_VISITA';
+    public const CLASS_SEM_VENDA = 'SEM_VENDA';
+    public const CLASS_COM_VENDA = 'COM_VENDA';
+    public const CLASS_PERFORMANCE_PENDING = 'PERFORMANCE_PENDING';
 
     // ═══════════════════════════════════════════════════════════════════════
     // CONSTANTS: Account Status
@@ -253,6 +257,18 @@ class AccountGovernanceService
         return $item;
     }
 
+    /**
+     * True when visits/sales keys were never written (ML 403 / not synced).
+     * Missing keys must not be treated as 0 → MORTO → TRAVADA.
+     */
+    public static function itemMetricsUnknown(array $item): bool
+    {
+        $item = self::normalizeItemMetricKeys($item);
+        $hasVisits = array_key_exists('visits_30d', $item) || array_key_exists('_visits_30d', $item);
+        $hasSales = array_key_exists('sales_30d', $item) || array_key_exists('_sales_30d', $item);
+        return !$hasVisits && !$hasSales;
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
     // ACCOUNT METRICS
     // ═══════════════════════════════════════════════════════════════════════
@@ -443,9 +459,21 @@ class AccountGovernanceService
      */
     public function classifyItem(array $item, array $flags, int $score): string
     {
-        // SEM_ESTOQUE: active item with no stock
+        // SEM_ESTOQUE: active item with no stock (local available_quantity is always known)
         if (($flags['OOS'] ?? false) && ($item['status'] ?? '') === 'active') {
             return self::CLASS_SEM_ESTOQUE;
+        }
+
+        if (self::itemMetricsUnknown($item) || !empty($item['_metrics_pending'])) {
+            $item = self::normalizeItemMetricKeys($item);
+            $hasSales = array_key_exists('sales_30d', $item) || array_key_exists('_sales_30d', $item);
+            if ($hasSales && (int) ($item['sales_30d'] ?? $item['_sales_30d'] ?? 0) > 0) {
+                return self::CLASS_COM_VENDA;
+            }
+            if ($hasSales) {
+                return self::CLASS_SEM_VENDA;
+            }
+            return self::CLASS_PERFORMANCE_PENDING;
         }
 
         // TOXICO: high traffic but very bad conversion
@@ -532,8 +560,13 @@ class AccountGovernanceService
         $accountConv = $metrics['account_conv_30d'] ?? 0;
         $reputation = $metrics['reputation_level'] ?? 'unknown';
 
-        // TRAVADA: very low conversion OR problem ratio > 50%
-        if ($accountConv < 0.003 || $problemRatio > 0.5) {
+        // TRAVADA only from real traffic (visits > 0) or a known problem majority.
+        // Conv=0 because visits were never fetched (403 / missing keys) is NOT TRAVADA.
+        $totalVisits = (int) ($metrics['total_visits_30d'] ?? 0);
+        if ($totalVisits > 0 && $accountConv < 0.003) {
+            return self::STATUS_TRAVADA;
+        }
+        if ($problemRatio > 0.5) {
             return self::STATUS_TRAVADA;
         }
 
@@ -613,6 +646,32 @@ class AccountGovernanceService
                     'Margem reduzida',
                     '72h',
                     'Restaurar preço anterior'
+                );
+                break;
+
+            case self::CLASS_PERFORMANCE_PENDING:
+            case self::CLASS_SEM_VISITA:
+            case self::CLASS_SEM_VENDA:
+                $actions[] = $this->buildAction(
+                    self::ACTION_MONITORAR,
+                    self::PRIORITY_BAIXA,
+                    'Métricas locais incompletas ou sem visita/venda — não pausar',
+                    'Aguardar performance oficial / pedidos',
+                    'Nenhum',
+                    '7d',
+                    'Não escrever no Mercado Livre'
+                );
+                break;
+
+            case self::CLASS_COM_VENDA:
+                $actions[] = $this->buildAction(
+                    self::ACTION_MONITORAR,
+                    self::PRIORITY_BAIXA,
+                    'Item com venda local — manter e monitorar',
+                    'Não pausar',
+                    'Nenhum',
+                    '7d',
+                    'Não escrever no Mercado Livre'
                 );
                 break;
 
