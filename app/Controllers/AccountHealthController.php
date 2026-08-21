@@ -7,6 +7,7 @@ namespace App\Controllers;
 use App\Core\Request;
 use App\Database;
 use App\Services\AccountHealthService;
+use App\Helpers\AccountScopeHelper;
 use App\Helpers\SessionHelper;
 use App\Services\UserService;
 
@@ -42,7 +43,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = SessionHelper::getActiveAccountId();
+        $accountId = $this->resolveScopedAccountId();
 
         $pageTitle = 'Diagnóstico da Conta';
         $currentPage = 'account-health';
@@ -70,7 +71,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = SessionHelper::getActiveAccountId();
+        $accountId = $this->resolveScopedAccountId();
 
         if (!$accountId) {
             http_response_code(400);
@@ -129,7 +130,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = SessionHelper::getActiveAccountId();
+        $accountId = $this->resolveScopedAccountId();
         if (!$accountId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
@@ -184,7 +185,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = SessionHelper::getActiveAccountId();
+        $accountId = $this->resolveScopedAccountId();
         if (!$accountId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
@@ -345,7 +346,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = SessionHelper::getActiveAccountId();
+        $accountId = $this->resolveScopedAccountId();
         if (!$accountId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
@@ -387,7 +388,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = SessionHelper::getActiveAccountId();
+        $accountId = $this->resolveScopedAccountId();
         if (!$accountId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
@@ -426,7 +427,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = SessionHelper::getActiveAccountId();
+        $accountId = $this->resolveScopedAccountId();
         if (!$accountId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
@@ -465,7 +466,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = SessionHelper::getActiveAccountId();
+        $accountId = $this->resolveScopedAccountId();
         if (!$accountId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
@@ -504,7 +505,7 @@ class AccountHealthController
             exit;
         }
 
-        $accountId = SessionHelper::getActiveAccountId();
+        $accountId = $this->resolveScopedAccountId();
         if (!$accountId) {
             http_response_code(400);
             echo json_encode(['success' => false, 'error' => 'Nenhuma conta selecionada']);
@@ -547,5 +548,30 @@ class AccountHealthController
             echo json_encode(['success' => false, 'error' => 'Erro ao gerar diagnóstico completo.']);
         }
         exit;
+    }
+
+    /**
+     * Diagnóstico always runs against the session active ML account.
+     * A body/query account_id that differs (e.g. Falcão 1336 while FACILYTY 1335
+     * is active) is ignored so catalogs never mix.
+     */
+    private function resolveScopedAccountId(): ?int
+    {
+        $active = AccountScopeHelper::activeAccountId();
+        $requested = 0;
+        try {
+            $requested = (int) ($this->request->get('account_id') ?? 0);
+        } catch (\Throwable) {
+            $requested = (int) ($_GET['account_id'] ?? $_POST['account_id'] ?? 0);
+        }
+        if ($requested <= 0) {
+            $requested = (int) ($_GET['account_id'] ?? 0);
+        }
+
+        if ($active === null || $active <= 0) {
+            return ($requested > 0) ? $requested : null;
+        }
+
+        return $active;
     }
 }

@@ -28,6 +28,9 @@ class AccountHealthService
     private ?array $cachedUserData = null;
     private ?array $cachedActiveItemIds = null;
     private ?int $cachedTotalActive = null;
+    private ?array $cachedLocalItemsAll = null;
+    private ?array $cachedLocalUniverse = null;
+    private bool $mlForbidden = false;
 
     // Cache de atributos obrigatórios por categoria (evita re-fetch)
     private array $categoryRequiredAttrs = [];
@@ -90,7 +93,17 @@ class AccountHealthService
     private function getCachedSellerId(): ?string
     {
         if ($this->cachedSellerId === null) {
-            $this->cachedSellerId = $this->client->getSellerId() ?: '';
+            $local = $this->loadSellerFromLocal();
+            if (is_array($local) && ($local['seller_id'] ?? '') !== '') {
+                $this->cachedSellerId = (string) $local['seller_id'];
+            } else {
+                try {
+                    $this->cachedSellerId = $this->client->getSellerId() ?: '';
+                } catch (\Throwable $e) {
+                    $this->mlForbidden = true;
+                    $this->cachedSellerId = '';
+                }
+            }
         }
         return $this->cachedSellerId ?: null;
     }
@@ -103,9 +116,16 @@ class AccountHealthService
         if ($this->cachedUserData === null) {
             $sellerId = $this->getCachedSellerId();
             if (!$sellerId) {
-                return null;
+                $local = $this->userDataFromLocal();
+                $this->cachedUserData = ($local['id'] ?? null) ? $local : null;
+                return $this->cachedUserData;
             }
-            $this->cachedUserData = $this->client->get("/users/{$sellerId}");
+            $remote = $this->safeMlGet("/users/{$sellerId}");
+            if ($remote === null) {
+                $this->cachedUserData = $this->userDataFromLocal();
+            } else {
+                $this->cachedUserData = $remote;
+            }
         }
         return $this->cachedUserData;
     }
@@ -117,26 +137,658 @@ class AccountHealthService
     private function getCachedActiveItems(): array
     {
         if ($this->cachedActiveItemIds === null) {
-            $sellerId = $this->getCachedSellerId();
-            if (!$sellerId) {
-                $this->cachedActiveItemIds = [];
-                $this->cachedTotalActive = 0;
-                return ['ids' => [], 'total' => 0];
+            $universe = $this->countLocalUniverseByStatus();
+            $localActive = $this->getCachedLocalItems(false);
+            $ids = [];
+            foreach ($localActive as $item) {
+                $id = strtoupper(trim((string) ($item['id'] ?? '')));
+                if ($id !== '') {
+                    $ids[] = $id;
+                }
             }
-            $response = $this->client->get("/users/{$sellerId}/items/search", [
-                'status' => 'active',
-                'limit'  => 50,
-                'offset' => 0,
-            ]);
-            $this->cachedActiveItemIds = $response['results'] ?? [];
-            $this->cachedTotalActive = (int)($response['paging']['total'] ?? count($this->cachedActiveItemIds));
+
+            $totalActive = (int) ($universe['active'] ?? count($ids));
+            $universeTotal = $totalActive + (int) ($universe['paused'] ?? 0);
+
+            if ($ids === []) {
+                $sellerId = $this->getCachedSellerId();
+                if ($sellerId) {
+                    $response = $this->safeMlGet("/users/{$sellerId}/items/search", [
+                        'status' => 'active',
+                        'limit'  => 50,
+                        'offset' => 0,
+                    ]);
+                    if (is_array($response)) {
+                        $ids = $response['results'] ?? [];
+                        if (!is_array($ids)) {
+                            $ids = [];
+                        }
+                        $totalActive = (int) ($response['paging']['total'] ?? count($ids));
+                        $universeTotal = $totalActive;
+                    }
+                }
+            }
+
+            $this->cachedActiveItemIds = $ids;
+            $this->cachedTotalActive = $totalActive;
+            return [
+                'ids'            => $this->cachedActiveItemIds,
+                'total'          => $this->cachedTotalActive,
+                'universe'       => $universe,
+                'universe_total' => $universeTotal,
+                'analyzed'       => count($ids),
+                'source'         => $ids !== [] ? 'local_items' : ($this->mlForbidden ? 'ml_forbidden' : 'empty'),
+                'ml_forbidden'   => $this->mlForbidden,
+            ];
         }
-        return ['ids' => $this->cachedActiveItemIds, 'total' => $this->cachedTotalActive];
+
+        $universe = $this->countLocalUniverseByStatus();
+        $universeTotal = (int) ($universe['active'] ?? 0) + (int) ($universe['paused'] ?? 0);
+        return [
+            'ids'            => $this->cachedActiveItemIds,
+            'total'          => $this->cachedTotalActive,
+            'universe'       => $universe,
+            'universe_total' => $universeTotal > 0 ? $universeTotal : (int) $this->cachedTotalActive,
+            'analyzed'       => count($this->cachedActiveItemIds),
+            'source'         => $this->cachedActiveItemIds !== [] ? 'local_items' : ($this->mlForbidden ? 'ml_forbidden' : 'empty'),
+            'ml_forbidden'   => $this->mlForbidden,
+        ];
     }
 
     /**
      * Diagnóstico completo da conta - dados para a página inteira
      */
+    /**
+     * ML 403/401/4xx payload (datacenter / policy) — same shape as Raio X / ItemService.
+     *
+     * @param array<string, mixed> $payload
+     */
+    private function isMlHttpFailurePayload(array $payload): bool
+    {
+        foreach ($payload as $key => $value) {
+            if (is_string($key) && preg_match('/^ML[A-Z]*\d+/i', $key) === 1 && is_array($value)) {
+                return false;
+            }
+        }
+
+        $status = $payload['status'] ?? $payload['http_status'] ?? $payload['code'] ?? null;
+        if (is_numeric($status) && (int) $status >= 400) {
+            return true;
+        }
+
+        $error = $payload['error'] ?? null;
+        if (is_string($error) && $error !== '') {
+            $statusStr = strtolower((string) $status);
+            if (in_array($statusStr, ['401', '403', '404', '500'], true)) {
+                return true;
+            }
+            $err = strtolower($error);
+            if (str_contains($err, 'forbidden') || str_contains($err, 'unauthorized') || str_contains($err, 'access_denied')) {
+                return true;
+            }
+            return true;
+        }
+
+        $message = strtolower((string) ($payload['message'] ?? ''));
+        return str_contains($message, '403') || str_contains($message, '401') || str_contains($message, 'forbidden');
+    }
+
+    /**
+     * Fail-soft ML GET. 403/401 never blank Diagnóstico.
+     *
+     * @param array<string, mixed> $params
+     * @return array<string, mixed>|null
+     */
+    private function safeMlGet(string $endpoint, array $params = [], int|bool|null $cacheTtlOrPublic = null, ?bool $public = null): ?array
+    {
+        try {
+            $response = $this->client->get($endpoint, $params, $cacheTtlOrPublic, $public);
+        } catch (\Throwable $e) {
+            $this->mlForbidden = true;
+            log_warning('Diagnóstico: ML GET exception; fail-soft local', [
+                'account_id' => $this->accountId,
+                'endpoint'   => $endpoint,
+                'error'      => $e->getMessage(),
+            ]);
+            return null;
+        }
+
+        if (!is_array($response) || $this->isMlHttpFailurePayload($response)) {
+            $this->mlForbidden = true;
+            log_warning('Diagnóstico: ML GET 4xx; fail-soft local', [
+                'account_id' => $this->accountId,
+                'endpoint'   => $endpoint,
+                'status'     => is_array($response) ? ($response['status'] ?? $response['error'] ?? 'unknown') : 'invalid',
+            ]);
+            return null;
+        }
+
+        return $response;
+    }
+
+    /**
+     * Local catalog universe for the active account: items.status IN (active, paused).
+     * Never mixes another account_id. Does not call Mercado Livre.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function loadLocalListingUniverse(int $max, bool $includePaused): array
+    {
+        if ($this->accountId === null || $this->accountId <= 0) {
+            return [];
+        }
+
+        $statuses = $includePaused ? ['active', 'paused'] : ['active'];
+        $placeholders = implode(',', array_fill(0, count($statuses), '?'));
+        $limit = max(1, $max);
+        $sqlVariants = [
+            "SELECT ml_item_id, title, status, price, available_quantity, sold_quantity,
+                    catalog_product_id, thumbnail, permalink, category_id, data
+             FROM items
+             WHERE account_id = ? AND status IN ({$placeholders})
+             ORDER BY (status = 'active') DESC, ml_item_id ASC
+             LIMIT {$limit}",
+            "SELECT ml_item_id, title, status, price, available_quantity, catalog_product_id, data
+             FROM items
+             WHERE account_id = ? AND status IN ({$placeholders})
+             ORDER BY ml_item_id ASC
+             LIMIT {$limit}",
+        ];
+
+        $rows = [];
+        $lastError = null;
+        foreach ($sqlVariants as $sql) {
+            try {
+                $stmt = $this->db->prepare($sql);
+                $stmt->execute(array_merge([$this->accountId], $statuses));
+                $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+                $lastError = null;
+                break;
+            } catch (\Throwable $e) {
+                $lastError = $e;
+            }
+        }
+        if ($lastError !== null) {
+            log_warning('Diagnóstico: falha ao ler items locais', [
+                'account_id' => $this->accountId,
+                'error' => $lastError->getMessage(),
+            ]);
+            return [];
+        }
+
+        $items = [];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $mapped = $this->mapLocalItemRow($row);
+            if ($mapped !== null) {
+                $items[] = $mapped;
+            }
+        }
+
+        return $items;
+    }
+
+    /**
+     * @param array<string, mixed> $row
+     * @return array<string, mixed>|null
+     */
+    private function mapLocalItemRow(array $row): ?array
+    {
+        $data = $row['data'] ?? null;
+        if (is_string($data) && $data !== '') {
+            $decoded = json_decode($data, true);
+            $data = is_array($decoded) ? $decoded : [];
+        } elseif (!is_array($data)) {
+            $data = [];
+        }
+
+        $id = strtoupper(trim((string) ($row['ml_item_id'] ?? $data['id'] ?? '')));
+        if ($id === '') {
+            return null;
+        }
+
+        $item = $data;
+        $item['id'] = $id;
+        $item['ml_item_id'] = $id;
+        $item['title'] = (string) ($row['title'] ?? $data['title'] ?? '');
+        $item['status'] = (string) ($row['status'] ?? $data['status'] ?? 'unknown');
+        if (isset($row['price']) && is_numeric($row['price'])) {
+            $item['price'] = (float) $row['price'];
+        } elseif (!isset($item['price'])) {
+            $item['price'] = 0.0;
+        }
+        if (isset($row['available_quantity']) && is_numeric($row['available_quantity'])) {
+            $item['available_quantity'] = (int) $row['available_quantity'];
+        } elseif (!isset($item['available_quantity'])) {
+            $item['available_quantity'] = 0;
+        }
+        if (isset($row['sold_quantity']) && is_numeric($row['sold_quantity'])) {
+            $item['sold_quantity'] = (int) $row['sold_quantity'];
+        }
+        $item['category_id'] = (string) ($row['category_id'] ?? $data['category_id'] ?? '');
+        $item['thumbnail'] = (string) ($row['thumbnail'] ?? $data['thumbnail'] ?? '');
+        $item['permalink'] = (string) ($row['permalink'] ?? $data['permalink'] ?? '');
+        $catalog = trim((string) ($row['catalog_product_id'] ?? $data['catalog_product_id'] ?? ''));
+        $item['catalog_product_id'] = $catalog !== '' ? $catalog : null;
+        $item['_source'] = 'local_items';
+
+        foreach (['performance_score', 'performance_level', 'performance_level_wording', 'performance_updated_at'] as $key) {
+            if (array_key_exists($key, $data) && $data[$key] !== null && $data[$key] !== '') {
+                $item[$key] = $data[$key];
+            }
+        }
+
+        foreach (['visits_30d', '_visits_30d', 'sales_30d', '_sales_30d', 'visits_14d', '_visits_14d'] as $key) {
+            if (array_key_exists($key, $data) && $data[$key] !== null && $data[$key] !== '') {
+                $item[$key] = $data[$key];
+            }
+        }
+
+        return $item;
+    }
+
+    /**
+     * @return array{active: int, paused: int, closed: int, under_review: int, inactive: int}
+     */
+    private function countLocalUniverseByStatus(): array
+    {
+        if ($this->cachedLocalUniverse !== null) {
+            return $this->cachedLocalUniverse;
+        }
+
+        $universe = [
+            'active'       => 0,
+            'paused'       => 0,
+            'closed'       => 0,
+            'under_review' => 0,
+            'inactive'     => 0,
+        ];
+        if ($this->accountId === null || $this->accountId <= 0) {
+            $this->cachedLocalUniverse = $universe;
+            return $universe;
+        }
+
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT status, COUNT(*) AS n FROM items WHERE account_id = :account_id GROUP BY status'
+            );
+            $stmt->execute(['account_id' => $this->accountId]);
+            while (($row = $stmt->fetch(\PDO::FETCH_ASSOC)) !== false) {
+                $status = (string) ($row['status'] ?? '');
+                if (array_key_exists($status, $universe)) {
+                    $universe[$status] = (int) ($row['n'] ?? 0);
+                }
+            }
+        } catch (\Throwable $e) {
+            log_warning('Diagnóstico: count local universe failed', [
+                'account_id' => $this->accountId,
+                'error' => $e->getMessage(),
+            ]);
+        }
+
+        $this->cachedLocalUniverse = $universe;
+        return $universe;
+    }
+
+    /**
+     * Seller snapshot from ml_accounts when GET /users/me 403s.
+     *
+     * @return array<string, mixed>|null
+     */
+    private function loadSellerFromLocal(): ?array
+    {
+        if ($this->accountId === null || $this->accountId <= 0) {
+            return null;
+        }
+
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT id, ml_user_id, nickname, email, status, site_id FROM ml_accounts WHERE id = :id LIMIT 1'
+            );
+            $stmt->execute(['id' => $this->accountId]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        } catch (\Throwable) {
+            try {
+                $stmt = $this->db->prepare(
+                    'SELECT id, ml_user_id, nickname, email, status FROM ml_accounts WHERE id = :id LIMIT 1'
+                );
+                $stmt->execute(['id' => $this->accountId]);
+                $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+            } catch (\Throwable) {
+                return null;
+            }
+        }
+
+        if (!is_array($row)) {
+            return null;
+        }
+
+        $sellerId = (string) ($row['ml_user_id'] ?? '');
+        if ($sellerId === '') {
+            return null;
+        }
+
+        return [
+            'seller_id' => $sellerId,
+            'nickname'  => $row['nickname'] ?? null,
+            'email'     => $row['email'] ?? null,
+            'site_id'   => $row['site_id'] ?? 'MLB',
+            'status'    => $row['status'] ?? null,
+            '_source'   => 'local_ml_accounts',
+        ];
+    }
+
+    /**
+     * Reputation fields already persisted locally (ml_accounts / reputation_history).
+     *
+     * @return array<string, mixed>
+     */
+    private function loadReputationFromLocal(): array
+    {
+        if ($this->accountId === null || $this->accountId <= 0) {
+            return [];
+        }
+
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT level_id, power_seller_status, total_transactions, completed_transactions,
+                        cancellations_rate, claims_rate, delayed_handling_time_rate,
+                        positive_rating, neutral_rating, negative_rating, data
+                 FROM reputation_history
+                 WHERE account_id = :account_id
+                 ORDER BY date DESC, id DESC
+                 LIMIT 1'
+            );
+            $stmt->execute(['account_id' => $this->accountId]);
+            $row = $stmt->fetch(\PDO::FETCH_ASSOC);
+        } catch (\Throwable) {
+            return [];
+        }
+
+        if (!is_array($row)) {
+            return [];
+        }
+
+        $rate = static function (mixed $value): float {
+            $n = is_numeric($value) ? (float) $value : 0.0;
+            return $n > 1.0 ? $n / 100 : $n;
+        };
+
+        $data = $row['data'] ?? null;
+        if (is_string($data) && $data !== '') {
+            $decoded = json_decode($data, true);
+            if (is_array($decoded) && isset($decoded['seller_reputation']) && is_array($decoded['seller_reputation'])) {
+                return $decoded['seller_reputation'];
+            }
+        }
+
+        return [
+            'level_id' => $row['level_id'] ?? 'unknown',
+            'power_seller_status' => $row['power_seller_status'] ?? null,
+            'transactions' => [
+                'period' => 'historic',
+                'completed' => (int) ($row['completed_transactions'] ?? $row['total_transactions'] ?? 0),
+                'canceled' => 0,
+                'ratings' => [
+                    'positive' => (float) ($row['positive_rating'] ?? 0),
+                    'neutral'  => (float) ($row['neutral_rating'] ?? 0),
+                    'negative' => (float) ($row['negative_rating'] ?? 0),
+                ],
+            ],
+            'metrics' => [
+                'claims' => ['rate' => $rate($row['claims_rate'] ?? 0), 'value' => 0],
+                'cancellations' => ['rate' => $rate($row['cancellations_rate'] ?? 0), 'value' => 0],
+                'delayed_handling_time' => ['rate' => $rate($row['delayed_handling_time_rate'] ?? 0), 'value' => 0],
+            ],
+        ];
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function userDataFromLocal(): array
+    {
+        $seller = $this->loadSellerFromLocal() ?? [];
+        return [
+            'id' => $seller['seller_id'] ?? null,
+            'nickname' => $seller['nickname'] ?? null,
+            'email' => $seller['email'] ?? null,
+            'site_id' => $seller['site_id'] ?? 'MLB',
+            'seller_reputation' => $this->loadReputationFromLocal(),
+            '_source' => 'local_ml_accounts',
+        ];
+    }
+
+    /**
+     * Cached local active+paused rows for this account only.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function getCachedLocalItems(bool $includePaused = true): array
+    {
+        if ($this->cachedLocalItemsAll === null) {
+            $this->cachedLocalItemsAll = $this->loadLocalListingUniverse(500, true);
+        }
+
+        if ($includePaused) {
+            return $this->cachedLocalItemsAll;
+        }
+
+        return array_values(array_filter(
+            $this->cachedLocalItemsAll,
+            static fn(array $item): bool => ($item['status'] ?? '') === 'active'
+        ));
+    }
+
+    /**
+     * Item bodies from local items.data; ML /items only if local miss. 403 → local.
+     * Never calls deprecated getItemHealth.
+     *
+     * @param list<string> $ids
+     * @return list<array<string, mixed>>
+     */
+    private function loadItemDetails(array $ids): array
+    {
+        $wanted = [];
+        foreach ($ids as $id) {
+            $key = strtoupper(trim((string) $id));
+            if ($key !== '') {
+                $wanted[$key] = true;
+            }
+        }
+        if ($wanted === []) {
+            return [];
+        }
+
+        $found = [];
+        foreach ($this->getCachedLocalItems(true) as $item) {
+            $id = strtoupper((string) ($item['id'] ?? ''));
+            if (isset($wanted[$id])) {
+                $found[$id] = $item;
+            }
+        }
+
+        $missing = array_values(array_diff(array_keys($wanted), array_keys($found)));
+        if ($missing !== [] && !$this->mlForbidden) {
+            foreach (array_chunk($missing, 20) as $batch) {
+                $response = $this->safeMlGet('/items', ['ids' => implode(',', $batch)]);
+                if ($response === null) {
+                    break;
+                }
+                foreach ($response as $wrapper) {
+                    if (!is_array($wrapper)) {
+                        continue;
+                    }
+                    $item = $wrapper['body'] ?? $wrapper;
+                    if (!is_array($item) || empty($item['id'])) {
+                        continue;
+                    }
+                    $id = strtoupper((string) $item['id']);
+                    if (isset($wanted[$id])) {
+                        $found[$id] = $item;
+                    }
+                }
+            }
+        }
+
+        $ordered = [];
+        foreach (array_keys($wanted) as $id) {
+            if (isset($found[$id])) {
+                $ordered[] = $found[$id];
+            }
+        }
+        return $ordered;
+    }
+
+    /**
+     * Official performance_* (0-100). Do not invent TRAVADA from missing health.
+     */
+    private function itemPerformanceScore(array $item): ?float
+    {
+        if (isset($item['performance_score']) && is_numeric($item['performance_score'])) {
+            return (float) $item['performance_score'];
+        }
+        if (isset($item['_health_score']) && is_numeric($item['_health_score'])) {
+            return (float) $item['_health_score'];
+        }
+        return null;
+    }
+
+    /**
+     * Sales 30d from local ml_orders for this account only.
+     *
+     * @param list<string> $itemIds
+     * @return array<string, int>
+     */
+    private function fetchLocalRecentSales(array $itemIds): array
+    {
+        $salesMap = [];
+        $wanted = [];
+        foreach ($itemIds as $id) {
+            $key = strtoupper(trim((string) $id));
+            if ($key !== '') {
+                $wanted[$key] = true;
+            }
+        }
+        if ($wanted === [] || $this->accountId === null || $this->accountId <= 0) {
+            return $salesMap;
+        }
+
+        $cutoff = date('Y-m-d H:i:s', strtotime('-30 days'));
+        $sqlVariants = [
+            'SELECT order_data, status FROM ml_orders WHERE account_id = :account_id AND date_created >= :cutoff',
+            'SELECT order_data, status FROM ml_orders WHERE ml_account_id = :account_id AND date_created >= :cutoff',
+        ];
+        $rows = null;
+        foreach ($sqlVariants as $sql) {
+            try {
+                $stmt = $this->db->prepare($sql);
+                $stmt->execute([
+                    'account_id' => $this->accountId,
+                    'cutoff'     => $cutoff,
+                ]);
+                $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+                break;
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+        if (!is_array($rows)) {
+            return $salesMap;
+        }
+
+        $paid = ['paid', 'delivered', 'confirmed', 'ready_to_ship', 'shipped', 'handling'];
+        foreach ($rows as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $status = strtolower((string) ($row['status'] ?? ''));
+            if ($status !== '' && !in_array($status, $paid, true)) {
+                continue;
+            }
+            $data = json_decode((string) ($row['order_data'] ?? ''), true);
+            if (!is_array($data)) {
+                continue;
+            }
+            foreach ($data['order_items'] ?? [] as $oi) {
+                if (!is_array($oi)) {
+                    continue;
+                }
+                $itemRef = $oi['item'] ?? [];
+                $id = '';
+                if (is_array($itemRef)) {
+                    $id = strtoupper(trim((string) ($itemRef['id'] ?? '')));
+                }
+                if ($id === '') {
+                    $id = strtoupper(trim((string) ($oi['item_id'] ?? '')));
+                }
+                if ($id === '' || !isset($wanted[$id])) {
+                    continue;
+                }
+                $salesMap[$id] = ($salesMap[$id] ?? 0) + (int) ($oi['quantity'] ?? 1);
+            }
+        }
+
+        return $salesMap;
+    }
+
+    /**
+     * Local ml_orders stats for the active account (never another account_id).
+     *
+     * @return array{count: int, revenue: float}|null
+     */
+    private function fetchLocalOrderStats(string $dateFrom, ?string $dateTo): ?array
+    {
+        if ($this->accountId === null || $this->accountId <= 0) {
+            return null;
+        }
+
+        $from = date('Y-m-d H:i:s', strtotime($dateFrom) ?: time());
+        $params = ['account_id' => $this->accountId, 'date_from' => $from];
+        $toSql = '';
+        if ($dateTo !== null && $dateTo !== '') {
+            $toSql = ' AND date_created < :date_to';
+            $params['date_to'] = date('Y-m-d H:i:s', strtotime($dateTo) ?: time());
+        }
+
+        $sqlVariants = [
+            "SELECT status, total_amount, date_created FROM ml_orders WHERE account_id = :account_id AND date_created >= :date_from{$toSql}",
+            "SELECT status, total_amount, date_created FROM ml_orders WHERE ml_account_id = :account_id AND date_created >= :date_from{$toSql}",
+        ];
+
+        $rows = null;
+        foreach ($sqlVariants as $sql) {
+            try {
+                $stmt = $this->db->prepare($sql);
+                $stmt->execute($params);
+                $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+                break;
+            } catch (\Throwable) {
+                continue;
+            }
+        }
+        if (!is_array($rows)) {
+            return null;
+        }
+
+        $paid = ['paid', 'delivered', 'confirmed', 'ready_to_ship', 'shipped', 'handling'];
+        $count = 0;
+        $revenue = 0.0;
+        foreach ($rows as $row) {
+            $status = strtolower((string) ($row['status'] ?? ''));
+            if ($status !== '' && !in_array($status, $paid, true)) {
+                continue;
+            }
+            $count++;
+            $revenue += (float) ($row['total_amount'] ?? 0);
+        }
+
+        return ['count' => $count, 'revenue' => $revenue];
+    }
+
+
     public function getFullDiagnostic(): array
     {
         $cacheKey = "account_health_{$this->accountId}";
@@ -198,6 +850,12 @@ class AccountHealthService
             'generated_at'       => date('Y-m-d H:i:s'),
             'data_quality'       => $dataQuality, // NEW: Indica se dados são reais
             'account_id'         => $this->accountId,
+            'universe'           => $this->countLocalUniverseByStatus(),
+            'universe_total'     => (int) (($this->countLocalUniverseByStatus()['active'] ?? 0)
+                                     + ($this->countLocalUniverseByStatus()['paused'] ?? 0)),
+            'catalog_source'     => $this->mlForbidden && ($this->cachedActiveItemIds === [] || $this->cachedActiveItemIds === null)
+                                    ? 'ml_forbidden' : 'local_items',
+            'ml_forbidden'       => $this->mlForbidden,
         ];
 
         if ($this->cache) {
@@ -500,6 +1158,10 @@ class AccountHealthService
             $activeData = $this->getCachedActiveItems();
             $itemIds = $activeData['ids'];
             $details['total_active'] = $activeData['total'];
+            $details['universe'] = $activeData['universe'] ?? $this->countLocalUniverseByStatus();
+            $details['universe_total'] = $activeData['universe_total']
+                ?? ((int) ($details['universe']['active'] ?? 0) + (int) ($details['universe']['paused'] ?? 0));
+            $details['catalog_source'] = $activeData['source'] ?? 'local_items';
             $details['analyzed'] = 0;
 
             if (empty($itemIds)) {
@@ -535,8 +1197,8 @@ class AccountHealthService
             // Score oficial ML de qualidade dos anúncios (1 request)
             $mlQuality = null;
             try {
-                $mlQualityData = $this->client->get("/users/{$sellerId}/listings_quality");
-                if (!isset($mlQualityData['error'])) {
+                $mlQualityData = $this->safeMlGet("/users/{$sellerId}/listings_quality");
+                if (is_array($mlQualityData) && !isset($mlQualityData['error'])) {
                     $mlQuality = [
                         'overall_score' => $mlQualityData['score'] ?? null,
                         'total'         => $mlQualityData['total_items'] ?? 0,
@@ -551,35 +1213,21 @@ class AccountHealthService
             }
             $details['ml_quality'] = $mlQuality;
 
-            // Buscar descrições individualmente (endpoint correto)
-            $descriptionsMap = [];
-            foreach ($itemIds as $itemId) {
-                try {
-                    $descData = $this->client->get("/items/{$itemId}/description");
-                    if (is_array($descData) && isset($descData['plain_text'])) {
-                        $descriptionsMap[$itemId] = $descData['plain_text'];
-                    } elseif (is_array($descData) && isset($descData['text'])) {
-                        $descriptionsMap[$itemId] = strip_tags($descData['text']);
-                    }
-                } catch (\Exception $e) {
-                    // Descrição indisponível, continuar com próximo item
-                }
-            }
+            // Detalhes do universo local (fail-soft se ML /items 403)
+            $allSeoItems = $this->loadItemDetails($itemIds);
 
-            // Buscar detalhes dos itens em lote (max 20 por request)
-            $batches = array_chunk($itemIds, 20);
-            foreach ($batches as $batch) {
-                $idsParam = implode(',', $batch);
-                $itemsData = $this->client->get("/items", ['ids' => $idsParam]);
-
-                foreach ($itemsData as $itemWrapper) {
-                    $item = $itemWrapper['body'] ?? $itemWrapper;
-                    if (empty($item['id'])) {
+            foreach ($allSeoItems as $item) {
+                    if (!is_array($item) || empty($item['id'])) {
                         continue;
                     }
 
-                    // Passar descrição pré-buscada
-                    $preloadedDesc = $descriptionsMap[$item['id']] ?? null;
+                    // Descrição local se existir; não varrer /description em 403
+                    $preloadedDesc = null;
+                    if (isset($item['plain_text']) && is_string($item['plain_text'])) {
+                        $preloadedDesc = $item['plain_text'];
+                    } elseif ($this->mlForbidden) {
+                        $preloadedDesc = '';
+                    }
                     $itemScore = $this->analyzeItemSeo($item, $preloadedDesc);
                     $seoScores[] = $itemScore['score'];
                     $details['analyzed']++;
@@ -630,7 +1278,6 @@ class AccountHealthService
                             'missing_required' => $itemScore['missing_required'],
                         ];
                     }
-                }
             }
 
             // Score médio local (análise por item)
@@ -913,13 +1560,15 @@ class AccountHealthService
         if ($preloadedDescription !== null) {
             $descriptionText = $preloadedDescription;
             $descPlainLen = mb_strlen(trim($descriptionText));
-        } else {
+        } elseif (!$this->mlForbidden) {
             try {
                 $itemId = $item['id'] ?? '';
                 if ($itemId) {
-                    $descData = $this->client->get("/items/{$itemId}/description");
-                    $descriptionText = $descData['plain_text'] ?? strip_tags($descData['text'] ?? '');
-                    $descPlainLen = mb_strlen(trim($descriptionText));
+                    $descData = $this->safeMlGet("/items/{$itemId}/description");
+                    if (is_array($descData)) {
+                        $descriptionText = $descData['plain_text'] ?? strip_tags($descData['text'] ?? '');
+                        $descPlainLen = mb_strlen(trim($descriptionText));
+                    }
                 }
             } catch (\Exception $e) {
                 // Descrição não disponível, score neutro
@@ -927,7 +1576,10 @@ class AccountHealthService
         }
 
         $descriptionScore = 0;
-        if ($descPlainLen >= 500) {
+        $descriptionPending = ($preloadedDescription === null && $descPlainLen === 0 && $this->mlForbidden);
+        if ($descriptionPending) {
+            $descriptionScore = 5;
+        } elseif ($descPlainLen >= 500) {
             $descriptionScore = 10;
         } elseif ($descPlainLen >= 300) {
             $descriptionScore = 7;
@@ -938,9 +1590,9 @@ class AccountHealthService
         }
         // Score % para compatibilidade com threshold check externo
         $descriptionScorePct = min(100, $descPlainLen >= 500 ? 100 : (int)($descPlainLen / 5));
-        if ($descPlainLen < 100) {
+        if (!$descriptionPending && $descPlainLen < 100) {
             $problems[] = 'Descrição muito curta (' . $descPlainLen . ' chars)';
-        } elseif ($descPlainLen < 300) {
+        } elseif (!$descriptionPending && $descPlainLen < 300) {
             $problems[] = 'Descrição curta (recomendado 500+ chars)';
         }
 
@@ -1032,7 +1684,7 @@ class AccountHealthService
         }
 
         try {
-            $attrs = $this->client->get("/categories/{$categoryId}/attributes");
+            $attrs = $this->safeMlGet("/categories/{$categoryId}/attributes") ?? [];
             $required = [];
             if (is_array($attrs)) {
                 foreach ($attrs as $attr) {
@@ -1078,19 +1730,7 @@ class AccountHealthService
                 return $this->emptyPillar('competitiveness', 'Nenhum anúncio para analisar');
             }
 
-            // Buscar detalhes dos itens (20 de cada vez)
-            $allItems = [];
-            $chunks = array_chunk($itemIds, 20);
-            foreach (array_slice($chunks, 0, 3) as $chunk) { // max 60 itens
-                $idsParam = implode(',', $chunk);
-                $batchData = $this->client->get("/items", ['ids' => $idsParam]);
-                foreach ($batchData as $wrapper) {
-                    $item = $wrapper['body'] ?? $wrapper;
-                    if (!empty($item['id'])) {
-                        $allItems[] = $item;
-                    }
-                }
-            }
+            $allItems = $this->loadItemDetails(array_slice($itemIds, 0, 60));
 
             // Buscar tendências da categoria principal (para relevância)
             $categoryCount = [];
@@ -1105,7 +1745,7 @@ class AccountHealthService
             $trendKeywords = [];
             if ($mainCategory) {
                 try {
-                    $trends = $this->client->get("/trends/MLB/{$mainCategory}", [], 600, true);
+                    $trends = $this->safeMlGet("/trends/MLB/{$mainCategory}", [], 600, true) ?? [];
                     foreach ($trends as $trend) {
                         if (isset($trend['keyword'])) {
                             $trendKeywords[] = mb_strtolower($trend['keyword']);
@@ -1154,9 +1794,9 @@ class AccountHealthService
                 if ($listingType !== 'gold_pro') {
                     $noGoldPro[] = array_merge($itemSummary, ['listing_type' => $listingType]);
                 }
-                $health = is_numeric($item['health'] ?? null) ? (float)$item['health'] : null;
-                if ($health !== null && $health < 0.7) {
-                    $lowHealth[] = array_merge($itemSummary, ['health' => $health]);
+                $perf = $this->itemPerformanceScore($item);
+                if ($perf !== null && $perf < 70) {
+                    $lowHealth[] = array_merge($itemSummary, ['health' => $perf / 100, 'performance_score' => $perf]);
                 }
                 $logistic = $item['shipping']['logistic_type'] ?? '';
                 if (!in_array($logistic, ['fulfillment', 'cross_docking'])) {
@@ -1249,8 +1889,8 @@ class AccountHealthService
                 $issues[] = [
                     'type'     => 'low_health',
                     'severity' => count($lowHealth) > 5 ? 'critical' : 'warning',
-                    'message'  => count($lowHealth) . " anúncios com saúde baixa no ML (< 70%)",
-                    'impact'   => 'Anúncios com saúde baixa perdem posição nos resultados',
+                    'message'  => count($lowHealth) . " anúncios com performance baixa (< 70)",
+                    'impact'   => 'Anúncios com performance oficial baixa perdem posição nos resultados',
                     'action'   => 'Melhore título, fotos e atributos desses anúncios',
                     'count'    => count($lowHealth),
                     'items'    => array_slice($lowHealth, 0, 5),
@@ -1326,12 +1966,12 @@ class AccountHealthService
             default                                             => 0,
         };
 
-        // ML Health (15pts)
-        $health = is_numeric($item['health'] ?? null) ? (float)$item['health'] : null;
-        if ($health !== null) {
-            $scores['health'] = (int) round($health * 15);
+        // Official performance_* (15pts). Missing keys stay pending — never invent TRAVADA.
+        $perf = $this->itemPerformanceScore($item);
+        if ($perf !== null) {
+            $scores['health'] = (int) round(max(0.0, min(100.0, $perf)) / 100 * 15);
         } else {
-            $scores['health'] = 7; // default se não disponível
+            $scores['health'] = 7; // PERFORMANCE_PENDING, not a zero penalty
         }
 
         // Catalog (10pts) — item vinculado ao catálogo oficial ML
@@ -1453,7 +2093,7 @@ class AccountHealthService
             // ── Perguntas sem resposta + tempo de resposta (0-15 pts) ──
             $questionsScore = 0;
             try {
-                $questions = $this->client->get("/questions/search", [
+                $questions = $this->safeMlGet("/questions/search", [
                     'seller_id' => $sellerId,
                     'status'    => 'unanswered',
                     'limit'     => 1,
@@ -1463,7 +2103,7 @@ class AccountHealthService
                 // Tempo médio de resposta (baseado nas últimas 20 perguntas respondidas)
                 $avgResponseMinutes = null;
                 try {
-                    $answered = $this->client->get("/questions/search", [
+                    $answered = $this->safeMlGet("/questions/search", [
                         'seller_id' => $sellerId,
                         'status'    => 'answered',
                         'sort_fields' => 'date_created',
@@ -1532,7 +2172,7 @@ class AccountHealthService
 
             // ── Shipping preferences / Fulfillment (0-20 pts) ──
             try {
-                $shippingPrefs = $this->client->get("/users/{$sellerId}/shipping_preferences");
+                $shippingPrefs = $this->safeMlGet("/users/{$sellerId}/shipping_preferences");
                 $fullEnabled = false;
 
                 $modes = $shippingPrefs['modes'] ?? [];
@@ -1571,11 +2211,15 @@ class AccountHealthService
             $ordersScore = 0;
             try {
                 $since30d = date('Y-m-d\TH:i:s', strtotime('-30 days')) . '.000-00:00';
-                $recentOrders = $this->client->get('/orders/search', [
+                $localPaid = $this->fetchLocalOrderStats($since30d, null);
+                $recentOrders = $this->safeMlGet('/orders/search', [
                     'seller' => $sellerId,
                     'order.date_created.from' => $since30d,
                     'limit' => 1,
-                ]);
+                ]) ?? [];
+                if ($recentOrders === [] && is_array($localPaid)) {
+                    $recentOrders = ['paging' => ['total' => $localPaid['count']]];
+                }
 
                 if (
                     isset($recentOrders['error'])
@@ -1594,12 +2238,12 @@ class AccountHealthService
 
                     $cancelledOrders = 0;
                     try {
-                        $cancelledResult = $this->client->get('/orders/search', [
+                        $cancelledResult = $this->safeMlGet('/orders/search', [
                             'seller' => $sellerId,
                             'order.status' => 'cancelled',
                             'order.date_created.from' => $since30d,
                             'limit' => 1,
-                        ]);
+                        ]) ?? [];
                         $cancelledOrders = (int)($cancelledResult['paging']['total'] ?? 0);
                     } catch (\Exception $e) {
                         log_warning('Falha ao buscar pedidos cancelados', [
@@ -1634,15 +2278,15 @@ class AccountHealthService
                     'offset' => 0,
                 ];
                 try {
-                    $me = $this->client->get('/users/me', [], 600);
-                    if (isset($me['id']) && $me['id'] !== '' && $me['id'] !== null) {
+                    $me = $this->safeMlGet('/users/me', [], 600);
+                    if (is_array($me) && isset($me['id']) && $me['id'] !== '' && $me['id'] !== null) {
                         $claimsParams['players.user_id'] = (string) $me['id'];
                         $claimsParams['players.role'] = 'respondent';
                     }
                 } catch (\Throwable) {
                     // segue sem filtro de player
                 }
-                $claimsResult = $this->client->get('/post-purchase/v1/claims/search', $claimsParams, 600);
+                $claimsResult = $this->safeMlGet('/post-purchase/v1/claims/search', $claimsParams, 600) ?? [];
                 $allClaims = $claimsResult['data'] ?? $claimsResult['results'] ?? [];
                 $totalClaims = (int)($claimsResult['paging']['total'] ?? count($allClaims));
 
@@ -1723,19 +2367,28 @@ class AccountHealthService
             $complianceScore = 15; // assume perfeito
             try {
                 // Itens inativos (pode incluir moderação, deleteção, etc.)
-                $inactiveResult = $this->client->get("/users/{$sellerId}/items/search", [
-                    'status' => 'inactive',
-                    'limit'  => 1,
-                ], 600);
-                $inactiveTotal = (int)($inactiveResult['paging']['total'] ?? 0);
+                $localUniverse = $this->countLocalUniverseByStatus();
+                $inactiveTotal = (int) ($localUniverse['inactive'] ?? 0);
+                $underReviewTotal = (int) ($localUniverse['under_review'] ?? 0);
+                if (!$this->mlForbidden && $inactiveTotal === 0) {
+                    $inactiveResult = $this->safeMlGet("/users/{$sellerId}/items/search", [
+                        'status' => 'inactive',
+                        'limit'  => 1,
+                    ], 600);
+                    if (is_array($inactiveResult)) {
+                        $inactiveTotal = (int) ($inactiveResult['paging']['total'] ?? 0);
+                    }
+                }
+                if (!$this->mlForbidden && $underReviewTotal === 0) {
+                    $reviewResult = $this->safeMlGet("/users/{$sellerId}/items/search", [
+                        'status' => 'under_review',
+                        'limit'  => 1,
+                    ], 600);
+                    if (is_array($reviewResult)) {
+                        $underReviewTotal = (int) ($reviewResult['paging']['total'] ?? 0);
+                    }
+                }
                 $details['inactive_items'] = $inactiveTotal;
-
-                // Itens em revisão (under_review = infrações pendentes)
-                $reviewResult = $this->client->get("/users/{$sellerId}/items/search", [
-                    'status' => 'under_review',
-                    'limit'  => 1,
-                ], 600);
-                $underReviewTotal = (int)($reviewResult['paging']['total'] ?? 0);
                 $details['under_review_items'] = $underReviewTotal;
 
                 $problemItems = $underReviewTotal + min($inactiveTotal, 50); // cap para não penalizar demais
@@ -1831,11 +2484,14 @@ class AccountHealthService
             $details = array_merge($details, $salesData);
 
             // Visitas (últimos 30 dias) - resposta é objeto com total_visits e results[]
-            try {
-                $visitsData = $this->client->get("/users/{$sellerId}/items_visits/time_window", [
-                    'last' => 30,
-                    'unit' => 'day',
-                ]);
+            $visitsPending = false;
+            $visitsData = $this->safeMlGet("/users/{$sellerId}/items_visits/time_window", [
+                'last' => 30,
+                'unit' => 'day',
+            ]);
+            if (!is_array($visitsData)) {
+                $visitsPending = true;
+            } else {
                 $totalVisits = $visitsData['total_visits'] ?? 0;
                 if ($totalVisits === 0 && !empty($visitsData['results'])) {
                     foreach ($visitsData['results'] as $dayData) {
@@ -1843,15 +2499,18 @@ class AccountHealthService
                     }
                 }
                 $details['visits_30d'] = $totalVisits;
-            } catch (\Exception $e) {
-                $details['visits_30d'] = 0;
+            }
+            if ($visitsPending) {
+                $details['visits_pending'] = true;
             }
 
             // Conversão
             $sales30d = $details['sales_30d'] ?? 0;
-            $visits30d = $details['visits_30d'] ?? 1;
-            $conversionRate = $visits30d > 0 ? ($sales30d / $visits30d) * 100 : 0;
-            $details['conversion_rate'] = round($conversionRate, 2);
+            $visits30d = $details['visits_30d'] ?? null;
+            $visitsPending = !empty($details['visits_pending']) || $visits30d === null;
+            $conversionRate = (!$visitsPending && is_numeric($visits30d) && $visits30d > 0)
+                ? ($sales30d / $visits30d) * 100 : 0;
+            $details['conversion_rate'] = $visitsPending ? null : round($conversionRate, 2);
 
             // Score baseado na tendência
             $salesGrowth = $details['sales_growth'] ?? 0;
@@ -1877,8 +2536,8 @@ class AccountHealthService
                 default          => 0,
             };
 
-            // Conversion score (0-30 pts)
-            $conversionScore = match (true) {
+            // Conversion score (0-30 pts). Missing visits (403) stay pending — not TRAVADA.
+            $conversionScore = $visitsPending ? 15 : match (true) {
                 $conversionRate >= 5  => 30,
                 $conversionRate >= 3  => 25,
                 $conversionRate >= 2  => 20,
@@ -1900,7 +2559,7 @@ class AccountHealthService
                 ];
             }
 
-            if ($conversionRate < 1 && $visits30d > 100) {
+            if (!$visitsPending && $conversionRate < 1 && (float) $visits30d > 100) {
                 $issues[] = [
                     'type'     => 'low_conversion',
                     'severity' => 'warning',
@@ -1933,7 +2592,7 @@ class AccountHealthService
                 $details['revenue_per_item'] = round($revenuePerItem, 2);
             }
 
-            if ($visits30d < 50 && $details['total_active_items'] > 0) {
+            if (!$visitsPending && is_numeric($visits30d) && $visits30d < 50 && ($details['total_active_items'] ?? 0) > 0) {
                 $avgVisitsPerItem = $visits30d / max(1, $details['total_active_items']);
                 if ($avgVisitsPerItem < 2) {
                     $issues[] = [
@@ -2063,6 +2722,11 @@ class AccountHealthService
      */
     private function fetchOrderStats(string $sellerId, string $dateFrom, ?string $dateTo): array
     {
+        $local = $this->fetchLocalOrderStats($dateFrom, $dateTo);
+        if (is_array($local) && ($local['count'] ?? 0) > 0) {
+            return $local;
+        }
+
         try {
             $params = [
                 'seller' => $sellerId,
@@ -2076,7 +2740,10 @@ class AccountHealthService
             }
 
             // Primeiro request para pegar o total
-            $response = $this->client->get('/orders/search', $params);
+            $response = $this->safeMlGet('/orders/search', $params);
+            if ($response === null) {
+                return $local ?? ['count' => 0, 'revenue' => 0];
+            }
 
             if (
                 isset($response['error'])
@@ -2106,7 +2773,10 @@ class AccountHealthService
             $maxFetch = min($totalOrders, 200);
             while ($fetched < $maxFetch) {
                 $params['offset'] = $fetched;
-                $response = $this->client->get('/orders/search', $params);
+                $response = $this->safeMlGet('/orders/search', $params);
+                if ($response === null) {
+                    break;
+                }
                 $results = $response['results'] ?? [];
                 if (empty($results)) {
                     break;
@@ -2173,23 +2843,7 @@ class AccountHealthService
             $totalActive = $cachedActive['total'];
             $maxFetch = 200;
 
-            // Se há mais de 50 itens, buscar os restantes
-            $offset = count($activeItemIds);
-            while ($offset < $maxFetch && $offset < $totalActive) {
-                $response = $this->client->get("/users/{$sellerId}/items/search", [
-                    'status' => 'active',
-                    'limit'  => 50,
-                    'offset' => $offset,
-                ]);
-
-                $ids = $response['results'] ?? [];
-                if (empty($ids)) {
-                    break;
-                }
-
-                $activeItemIds = array_merge($activeItemIds, $ids);
-                $offset += 50;
-            }
+            // Universo local já traz até 500 active/paused; não paginar ML search.
 
             if (empty($activeItemIds)) {
                 return $this->emptyStaleListings();
@@ -2202,18 +2856,13 @@ class AccountHealthService
             $staleThreshold = 90 * 86400;    // 90 dias = crítico
             $warningThreshold = 60 * 86400;  // 60 dias = alerta
 
-            $batches = array_chunk($activeItemIds, 20);
-            foreach ($batches as $batch) {
-                $idsParam = implode(',', $batch);
+            $staleSourceItems = $this->loadItemDetails(array_slice($activeItemIds, 0, $maxFetch));
+            foreach ([$staleSourceItems] as $itemsData) {
                 try {
-                    $itemsData = $this->client->get('/items', [
-                        'ids'        => $idsParam,
-                        'attributes' => 'id,title,price,thumbnail,date_created,sold_quantity,available_quantity,permalink,listing_type_id,category_id,health,shipping,catalog_product_id',
-                    ]);
-
                     foreach ($itemsData as $wrapper) {
-                        $item = $wrapper['body'] ?? $wrapper;
-                        if (empty($item['id'])) {
+                        $item = is_array($wrapper) && isset($wrapper['body']) && is_array($wrapper['body'])
+                            ? $wrapper['body'] : $wrapper;
+                        if (!is_array($item) || empty($item['id'])) {
                             continue;
                         }
 
@@ -2234,7 +2883,8 @@ class AccountHealthService
                                 'permalink'     => $item['permalink'] ?? '',
                                 'listing_type'  => $item['listing_type_id'] ?? '',
                                 'category_id'   => $item['category_id'] ?? '',
-                                'health'        => $item['health'] ?? null,
+                                'health'        => $this->itemPerformanceScore($item),
+                                'performance_score' => $this->itemPerformanceScore($item),
                             ];
 
                             // Diagnóstico de causa raiz
@@ -2246,8 +2896,8 @@ class AccountHealthService
                             if (!($item['shipping']['free_shipping'] ?? false)) {
                                 $causes[] = 'sem_frete_gratis';
                             }
-                            $h = $item['health'] ?? null;
-                            if ($h !== null && (float)$h < 0.5) {
+                            $h = $this->itemPerformanceScore($item);
+                            if ($h !== null && (float)$h < 50) {
                                 $causes[] = 'saude_baixa';
                             }
                             if (empty($item['catalog_product_id'])) {
@@ -2387,13 +3037,18 @@ class AccountHealthService
 
             $items = [];
 
+            $localUniverse = $this->countLocalUniverseByStatus();
+
             // Itens pausados
             try {
-                $paused = $this->client->get("/users/{$sellerId}/items/search", [
-                    'status' => 'paused',
-                    'limit'  => 10,
-                ]);
-                $pausedTotal = $paused['paging']['total'] ?? 0;
+                $pausedTotal = (int) ($localUniverse['paused'] ?? 0);
+                if ($pausedTotal === 0 && !$this->mlForbidden) {
+                    $paused = $this->safeMlGet("/users/{$sellerId}/items/search", [
+                        'status' => 'paused',
+                        'limit'  => 10,
+                    ]);
+                    $pausedTotal = (int) ($paused['paging']['total'] ?? 0);
+                }
                 if ($pausedTotal > 0) {
                     $items[] = [
                         'type'    => 'paused_items',
@@ -2413,12 +3068,20 @@ class AccountHealthService
 
             // Itens sem estoque
             try {
-                $noStock = $this->client->get("/users/{$sellerId}/items/search", [
-                    'status'    => 'active',
-                    'available_quantity' => '0',
-                    'limit'     => 1,
-                ]);
-                $noStockTotal = $noStock['paging']['total'] ?? 0;
+                $noStockTotal = 0;
+                foreach ($this->getCachedLocalItems(false) as $localItem) {
+                    if ((int) ($localItem['available_quantity'] ?? 0) === 0) {
+                        $noStockTotal++;
+                    }
+                }
+                if ($noStockTotal === 0 && !$this->mlForbidden) {
+                    $noStock = $this->safeMlGet("/users/{$sellerId}/items/search", [
+                        'status'    => 'active',
+                        'available_quantity' => '0',
+                        'limit'     => 1,
+                    ]);
+                    $noStockTotal = (int) ($noStock['paging']['total'] ?? 0);
+                }
                 if ($noStockTotal > 0) {
                     $items[] = [
                         'type'    => 'no_stock',
@@ -2438,11 +3101,14 @@ class AccountHealthService
 
             // Itens under_review
             try {
-                $underReview = $this->client->get("/users/{$sellerId}/items/search", [
-                    'status' => 'under_review',
-                    'limit'  => 1,
-                ]);
-                $reviewTotal = $underReview['paging']['total'] ?? 0;
+                $reviewTotal = (int) ($localUniverse['under_review'] ?? 0);
+                if ($reviewTotal === 0 && !$this->mlForbidden) {
+                    $underReview = $this->safeMlGet("/users/{$sellerId}/items/search", [
+                        'status' => 'under_review',
+                        'limit'  => 1,
+                    ]);
+                    $reviewTotal = (int) ($underReview['paging']['total'] ?? 0);
+                }
                 if ($reviewTotal > 0) {
                     $items[] = [
                         'type'    => 'under_review',
@@ -2491,13 +3157,10 @@ class AccountHealthService
                 if (!empty($activeIds)) {
                     $lowStockCount = 0;
                     $sampleBatch = array_slice($activeIds, 0, 20);
-                    $idsParam = implode(',', $sampleBatch);
-                    $batchItems = $this->client->get('/items', [
-                        'ids'        => $idsParam,
-                        'attributes' => 'id,available_quantity',
-                    ]);
+                    $batchItems = $this->loadItemDetails($sampleBatch);
                     foreach ($batchItems as $wrapper) {
-                        $body = $wrapper['body'] ?? $wrapper;
+                        $body = is_array($wrapper) && isset($wrapper['body']) && is_array($wrapper['body'])
+                            ? $wrapper['body'] : $wrapper;
                         $qty = (int)($body['available_quantity'] ?? 0);
                         if ($qty > 0 && $qty <= 3) {
                             $lowStockCount++;
@@ -2823,17 +3486,12 @@ class AccountHealthService
             }
 
             // Buscar dados mínimos dos itens já em cache (multiget)
-            $batches = array_chunk($itemIds, 20);
-            foreach (array_slice($batches, 0, 3) as $batch) {
-                $idsParam = implode(',', $batch);
+            $catItems = $this->loadItemDetails(array_slice($itemIds, 0, 60));
+            foreach ([$catItems] as $itemsData) {
                 try {
-                    $itemsData = $this->client->get('/items', [
-                        'ids'        => $idsParam,
-                        'attributes' => 'id,category_id,sold_quantity,health,listing_type_id,shipping',
-                    ]);
-
                     foreach ($itemsData as $wrapper) {
-                        $item = $wrapper['body'] ?? $wrapper;
+                        $item = is_array($wrapper) && isset($wrapper['body']) && is_array($wrapper['body'])
+                            ? $wrapper['body'] : $wrapper;
                         $catId = $item['category_id'] ?? '';
                         if (!$catId) {
                             continue;
@@ -2857,8 +3515,8 @@ class AccountHealthService
                         if ($soldQty === 0) {
                             $categories[$catId]['zero_sales']++;
                         }
-                        $health = is_numeric($item['health'] ?? null) ? (float) $item['health'] : null;
-                        if ($health !== null && $health < 0.7) {
+                        $perf = $this->itemPerformanceScore($item);
+                        if ($perf !== null && $perf < 70) {
                             $categories[$catId]['low_health']++;
                         }
                         if (!($item['shipping']['free_shipping'] ?? false)) {
@@ -2898,7 +3556,7 @@ class AccountHealthService
 
             foreach ($topCategories as $catId => &$cat) {
                 try {
-                    $catData = $this->client->get("/categories/{$catId}", [], 3600, true);
+                    $catData = $this->safeMlGet("/categories/{$catId}", [], 3600, true) ?? [];
                     $cat['name'] = $catData['name'] ?? $catId;
                 } catch (\Exception $e) {
                     $cat['name'] = $catId;
@@ -2932,33 +3590,29 @@ class AccountHealthService
                 return ['total_paused' => 0, 'items' => [], 'recovery_value' => 0];
             }
 
-            // Contar e buscar itens pausados
-            $pausedResult = $this->client->get("/users/{$sellerId}/items/search", [
-                'status' => 'paused',
-                'limit'  => 50,
-                'offset' => 0,
-            ], 600);
+            $pausedLocal = array_values(array_filter(
+                $this->getCachedLocalItems(true),
+                static fn(array $i): bool => ($i['status'] ?? '') === 'paused'
+            ));
+            $totalPaused = (int) ($this->countLocalUniverseByStatus()['paused'] ?? count($pausedLocal));
+            $pausedIds = array_values(array_filter(array_map(
+                static fn(array $i): string => strtoupper((string) ($i['id'] ?? '')),
+                $pausedLocal
+            )));
 
-            $totalPaused = (int) ($pausedResult['paging']['total'] ?? 0);
-            $pausedIds = $pausedResult['results'] ?? [];
-
-            if ($totalPaused === 0 || empty($pausedIds)) {
+            if ($totalPaused === 0 || $pausedIds === []) {
                 return ['total_paused' => 0, 'items' => [], 'recovery_value' => 0];
             }
 
-            // Buscar detalhes dos itens pausados (máx 20)
-            $idsParam = implode(',', array_slice($pausedIds, 0, 20));
-            $itemsData = $this->client->get('/items', [
-                'ids'        => $idsParam,
-                'attributes' => 'id,title,price,thumbnail,sold_quantity,available_quantity,permalink,listing_type_id,date_created,health,shipping',
-            ]);
+            $itemsData = $this->loadItemDetails(array_slice($pausedIds, 0, 20));
 
             $items = [];
             $totalRecoveryValue = 0;
 
             foreach ($itemsData as $wrapper) {
-                $item = $wrapper['body'] ?? $wrapper;
-                if (empty($item['id'])) {
+                $item = is_array($wrapper) && isset($wrapper['body']) && is_array($wrapper['body'])
+                    ? $wrapper['body'] : $wrapper;
+                if (!is_array($item) || empty($item['id'])) {
                     continue;
                 }
 
@@ -2983,11 +3637,11 @@ class AccountHealthService
                 if ($availQty > 0) {
                     $reactivateScore += 30;
                 }
-                $health = is_numeric($item['health'] ?? null) ? (float) $item['health'] : null;
-                if ($health !== null && $health >= 0.7) {
+                $health = $this->itemPerformanceScore($item);
+                if ($health !== null && $health >= 70) {
                     $reactivateScore += 30;
                 } elseif ($health === null) {
-                    $reactivateScore += 15;
+                    $reactivateScore += 15; // PERFORMANCE_PENDING
                 }
 
                 $recommendation = match (true) {
@@ -3436,13 +4090,15 @@ class AccountHealthService
                 return $this->emptyAccountStatus();
             }
 
-            // Get user detailed info
-            $user = $this->client->get("/users/{$sellerId}");
+            $user = $this->safeMlGet("/users/{$sellerId}");
+            if ($user === null) {
+                $user = $this->getCachedUserData() ?? $this->userDataFromLocal();
+            }
 
             // Get shipping preferences
             $shippingPrefs = null;
             try {
-                $shippingPrefs = $this->client->get("/users/{$sellerId}/shipping_preferences");
+                $shippingPrefs = $this->safeMlGet("/users/{$sellerId}/shipping_preferences") ?? [];
                 if (is_array($shippingPrefs) && isset($shippingPrefs['error'])) {
                     $shippingPrefs = null;
                 }
@@ -3453,7 +4109,7 @@ class AccountHealthService
             // Check official store
             $isOfficialStore = false;
             try {
-                $officialStore = $this->client->get("/users/{$sellerId}/brands_official_store");
+                $officialStore = $this->safeMlGet("/users/{$sellerId}/brands_official_store");
                 $isOfficialStore = is_array($officialStore)
                     && !isset($officialStore['error'])
                     && !empty($officialStore);
@@ -3604,14 +4260,14 @@ class AccountHealthService
             }
 
             // Get unanswered questions
-            $unanswered = $this->client->get('/questions/search', [
+            $unanswered = $this->safeMlGet('/questions/search', [
                 'seller_id' => $sellerId,
                 'status' => 'UNANSWERED',
                 'limit' => 50,
             ]);
 
             // Get all recent questions for metrics
-            $recent = $this->client->get('/questions/search', [
+            $recent = $this->safeMlGet('/questions/search', [
                 'seller_id' => $sellerId,
                 'limit' => 100,
             ]);
@@ -3818,24 +4474,7 @@ class AccountHealthService
                 return $this->emptyCatalogHealth();
             }
 
-            $items = [];
-            $itemBatches = array_chunk(array_slice($itemIds, 0, 200), 20);
-            foreach ($itemBatches as $batch) {
-                $idsParam = implode(',', $batch);
-                $batchItems = $this->client->get('/items', [
-                    'ids'        => $idsParam,
-                    'attributes' => 'id,title,catalog_product_id',
-                ]);
-
-                foreach ($batchItems as $wrapper) {
-                    $item = $wrapper['body'] ?? $wrapper;
-                    if (!is_array($item) || empty($item['id'])) {
-                        continue;
-                    }
-
-                    $items[] = $item;
-                }
-            }
+            $items = $this->loadItemDetails(array_slice($itemIds, 0, 200));
 
             if (empty($items)) {
                 return $this->emptyCatalogHealth();
