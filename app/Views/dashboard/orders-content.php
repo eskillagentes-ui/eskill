@@ -17,6 +17,7 @@
     .margin-good { background: #dcfce7; color: #166534; }
     .margin-mid { background: #fef3c7; color: #92400e; }
     .margin-low { background: #fee2e2; color: #991b1b; }
+    .margin-nd { background: #f1f5f9; color: #64748b; }
     .unlinked-banner { background: #fff7ed; color: #9a3412; border-radius: 10px; padding: .75rem 1rem; }
     .sale-expand { border: 0; background: transparent; color: #64748b; width: 100%; padding: .35rem; }
     .sale-detail { background: #f8fafc; border-top: 1px solid #f1f5f9; padding: 1rem 1.1rem; display: none; }
@@ -42,13 +43,13 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card kpi-card h-100"><div class="card-body py-3">
             <div class="kpi-label">Lucro</div>
-            <div class="kpi-value text-success" id="kpi-profit">R$ 0</div>
+            <div class="kpi-value text-muted" id="kpi-profit">n/d</div>
         </div></div>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
         <div class="card kpi-card h-100"><div class="card-body py-3">
             <div class="kpi-label">Margem média</div>
-            <div class="kpi-value" id="kpi-margin">0%</div>
+            <div class="kpi-value text-muted" id="kpi-margin">n/d</div>
         </div></div>
     </div>
     <div class="col-6 col-md-4 col-xl-2">
@@ -74,7 +75,7 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
 <div id="unlinked-alert" class="unlinked-banner mb-3" style="display:none;">
     <i class="bi bi-exclamation-triangle-fill me-2"></i>
     <strong id="unlinked-alert-text">0</strong> linhas de venda sem CMV
-    (<span id="unlinked-alert-unique">0</span> anúncios) — o lucro dessas linhas ignora custo do produto.
+    (<span id="unlinked-alert-unique">0</span> anúncios) — lucro e margem dessas linhas ficam n/d (custo desconhecido, não é R$ 0).
     <a href="/dashboard/pricing" class="ms-2 fw-semibold">Cadastrar custos</a>
 </div>
 <div id="tax-alert" class="unlinked-banner mb-3" style="display:none; background:#eff6ff; color:#1e40af;">
@@ -153,16 +154,24 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
     let currentPage = 1;
     const perPage = 20;
 
-    const money = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
+    const isNumeric = (v) => v !== null && v !== undefined && v !== '' && Number.isFinite(Number(v));
+    const money = (v) => {
+        if (!isNumeric(v)) return 'n/d';
+        return new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v));
+    };
+    const moneyKnown = (v) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(v || 0));
     const escapeHtml = (str) => String(str ?? '').replace(/[&<>"']/g, (c) => ({
         '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
     }[c]));
     const marginClass = (pct) => {
-        const n = Number(pct || 0);
+        if (!isNumeric(pct)) return 'margin-nd';
+        const n = Number(pct);
         if (n >= 30) return 'margin-good';
         if (n >= 15) return 'margin-mid';
         return 'margin-low';
     };
+    const profitClass = (v) => !isNumeric(v) ? 'text-muted' : (Number(v) >= 0 ? 'text-success' : 'text-danger');
+    const marginText = (pct) => isNumeric(pct) ? `${Number(pct).toFixed(2).replace('.', ',')}%` : 'n/d';
     const statusDot = (status) => {
         const s = String(status || '').toLowerCase();
         if (['cancelled', 'canceled'].includes(s)) return 'danger';
@@ -246,11 +255,26 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
         const unlinkedUnique = hasUnique ? Number(summary.unlinked_unique_items || 0) : null;
         const total = Number(paging.total || pageSales.length);
 
-        document.getElementById('kpi-revenue').textContent = money(revenue);
-        document.getElementById('kpi-profit').textContent = money(profit);
-        document.getElementById('kpi-margin').textContent = `${margin.toFixed(1)}%`;
+        document.getElementById('kpi-revenue').textContent = moneyKnown(revenue);
+        const profitEl = document.getElementById('kpi-profit');
+        const marginEl = document.getElementById('kpi-margin');
+        const complete = summary.has_real_cogs === true && unlinked === 0;
+        if (complete && isNumeric(summary.total_profit)) {
+            profitEl.textContent = money(profit);
+            profitEl.classList.remove('text-muted');
+            profitEl.classList.toggle('text-success', Number(profit) >= 0);
+            profitEl.classList.toggle('text-danger', Number(profit) < 0);
+            marginEl.textContent = `${Number(margin).toFixed(1)}%`;
+            marginEl.classList.remove('text-muted');
+        } else {
+            profitEl.textContent = 'n/d';
+            profitEl.classList.add('text-muted');
+            profitEl.classList.remove('text-success', 'text-danger');
+            marginEl.textContent = 'n/d';
+            marginEl.classList.add('text-muted');
+        }
         document.getElementById('kpi-total').textContent = String(total);
-        document.getElementById('kpi-net').textContent = money(net);
+        document.getElementById('kpi-net').textContent = moneyKnown(net);
         document.getElementById('kpi-unlinked').textContent = String(unlinkedUnique !== null ? unlinkedUnique : unlinked);
 
         const alert = document.getElementById('unlinked-alert');
@@ -270,7 +294,7 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
             taxAlert.style.display = showTax ? '' : 'none';
             if (showTax) {
                 const impactEl = document.getElementById('tax-impact-estimate');
-                if (impactEl) impactEl.textContent = money(revenue > 0 ? revenue * 0.09 : 0);
+                if (impactEl) impactEl.textContent = moneyKnown(revenue > 0 ? revenue * 0.09 : 0);
             }
         }
     }
@@ -317,10 +341,10 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
                 <td class="text-end">${money(item.unit_price)}</td>
                 <td class="text-end">${money(item.marketplace_net)}</td>
                 <td class="text-end">${money(item.tax)}</td>
-                <td class="text-end">${money(item.product_cost)}</td>
-                <td class="text-end">${money(item.extra_cost)}</td>
-                <td class="text-end fw-semibold ${Number(item.profit || 0) >= 0 ? 'text-success' : 'text-danger'}">${money(item.profit)}</td>
-                <td class="text-end"><span class="margin-pill ${marginClass(item.margin_pct)}">${Number(item.margin_pct || 0).toFixed(2).replace('.', ',')}%</span></td>
+                <td class="text-end">${item.linked_product || item.has_cogs ? money(item.product_cost) : 'n/d'}</td>
+                <td class="text-end">${moneyKnown(item.extra_cost)}</td>
+                <td class="text-end fw-semibold ${profitClass(item.profit)}">${item.linked_product || item.has_cogs ? money(item.profit) : 'n/d'}</td>
+                <td class="text-end"><span class="margin-pill ${marginClass(item.margin_pct)}">${marginText(item.margin_pct)}</span></td>
             </tr>`;
         }).join('');
 
@@ -369,10 +393,10 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
                     <div class="col-md-3"><div class="text-muted">Líquido marketplace</div><div class="fw-semibold">${money(sale.marketplace_net)}</div></div>
                     <div class="col-md-3"><div class="text-muted">Liberado (caixa)</div><div class="fw-semibold text-success">${money((sale.ledger_summary && sale.ledger_summary.released_amount) || 0)}</div></div>
                     <div class="col-md-3"><div class="text-muted">Pendente liberação</div><div class="fw-semibold text-warning">${money((sale.ledger_summary && sale.ledger_summary.pending_release_amount) || 0)}</div></div>
-                    <div class="col-md-3"><div class="text-muted">Custo produto (CMV)</div><div class="fw-semibold">${money(sale.product_cost)}</div></div>
-                    <div class="col-md-3"><div class="text-muted">Custo operacional</div><div class="fw-semibold">${money(sale.extra_cost)}</div></div>
-                    <div class="col-md-3"><div class="text-muted">Lucro operacional</div><div class="fw-semibold ${Number(sale.profit||0)>=0?'text-success':'text-danger'}">${money(sale.profit)}</div></div>
-                    <div class="col-md-3"><div class="text-muted">Margem</div><div class="fw-semibold">${Number(sale.margin_pct||0).toFixed(2)}%</div></div>
+                    <div class="col-md-3"><div class="text-muted">Custo produto (CMV)</div><div class="fw-semibold">${sale.has_cogs ? money(sale.product_cost) : 'n/d'}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Custo operacional</div><div class="fw-semibold">${moneyKnown(sale.extra_cost)}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Lucro operacional</div><div class="fw-semibold ${profitClass(sale.profit)}">${sale.has_cogs ? money(sale.profit) : 'n/d'}</div></div>
+                    <div class="col-md-3"><div class="text-muted">Margem</div><div class="fw-semibold">${sale.has_cogs ? marginText(sale.margin_pct) : 'n/d'}</div></div>
                     <div class="col-md-3"><div class="text-muted">Fonte</div><div class="fw-semibold">${escapeHtml(sale.ledger_source === 'ledger' ? 'Livro financeiro' : 'Pedido (fallback)')}${sale.ledger_entries_count ? ` · ${sale.ledger_entries_count} lanç.` : ''}</div></div>
                     <div class="col-md-3"><div class="text-muted">Pagamento</div><div class="fw-semibold">${escapeHtml(sale.payment_method_id || sale.payment_method || '—')}${sale.installments > 1 ? ` · ${sale.installments}x` : ''}</div></div>
                     <div class="col-md-3"><div class="text-muted">Comprador</div><div class="fw-semibold">${escapeHtml(sale.buyer_nickname || '—')}</div></div>

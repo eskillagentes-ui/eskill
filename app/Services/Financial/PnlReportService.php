@@ -216,14 +216,14 @@ class PnlReportService
         $source = 'ml_orders';
         $cogsSource = $cogs > 0 ? 'ml_orders' : 'none';
 
-        // Quando ml_orders.product_cost está zerado, estima CMV via sku_custos (mlb_id × qty).
-        if ($cogs <= 0.0) {
-            $estimatedCogs = $this->estimateCogsFromSkuCustos($startBound, $endBound);
-            if ($estimatedCogs > 0.0) {
-                $cogs = $estimatedCogs;
-                $cogsSource = 'sku_custos';
-            }
+        // Canonical CMV is sku_custos. Assess coverage even when ml_orders.product_cost > 0
+        // so a partial sum is never badged "CMV real". Missing SKUs are unknown, not 0.
+        $coverage = $this->assessCogsCoverage($startBound, $endBound);
+        if ($cogs <= 0.0 && $coverage['cogs'] > 0.0) {
+            $cogs = $coverage['cogs'];
+            $cogsSource = 'sku_custos';
         }
+        $coverage['cogs'] = $cogs > 0 ? $cogs : $coverage['cogs'];
 
         if ($cogsSource === 'sku_custos' || ($netProfit === 0.0 && $grossRevenue > 0)) {
             $totalCosts = $commissions + $paymentFees + $fixedFees + $shippingCost + $cogs;
@@ -254,7 +254,7 @@ class PnlReportService
             $avgMargin = ($netProfit / $grossRevenue) * 100;
         }
 
-        return [
+        $pnl = [
             'total_orders' => (int)($data['total_orders'] ?? 0),
             'gross_revenue' => round($grossRevenue, 2),
             'taxes' => round($taxes, 2),
@@ -277,6 +277,8 @@ class PnlReportService
                 'end' => $endDate,
             ],
         ];
+
+        return MissingCogsPolicy::presentPnL($pnl, $coverage);
     }
 
     /**
@@ -288,8 +290,22 @@ class PnlReportService
      */
     private function estimateCogsFromSkuCustos(string $startBound, string $endBound): float
     {
+        return $this->assessCogsCoverage($startBound, $endBound)['cogs'];
+    }
+
+    /**
+     * @return array{cogs: float, items_com_custo: int, items_sem_custo: int, lines_total: int}
+     */
+    private function assessCogsCoverage(string $startBound, string $endBound): array
+    {
+        $empty = [
+            'cogs' => 0.0,
+            'items_com_custo' => 0,
+            'items_sem_custo' => 0,
+            'lines_total' => 0,
+        ];
         if (!$this->accountId) {
-            return 0.0;
+            return $empty;
         }
 
         $where = [
@@ -324,7 +340,7 @@ class PnlReportService
             /** @var list<array{item_id: ?string, qty: int|string|null}> $lines */
             $lines = $stmt->fetchAll(PDO::FETCH_ASSOC);
             if ($lines === []) {
-                return 0.0;
+                return $empty;
             }
 
             $itemIds = [];
@@ -336,25 +352,35 @@ class PnlReportService
             }
             $itemIds = array_keys($itemIds);
             if ($itemIds === []) {
-                return 0.0;
+                return $empty;
             }
 
             $costByMlb = $this->loadSkuCustoProdutoMap($itemIds);
-            if ($costByMlb === []) {
-                return 0.0;
-            }
 
             $cogs = 0.0;
+            $with = 0;
+            $without = 0;
             foreach ($lines as $line) {
                 $itemId = trim((string)($line['item_id'] ?? ''));
                 $qty = (int)($line['qty'] ?? 0);
-                if ($itemId === '' || $qty <= 0 || !isset($costByMlb[$itemId])) {
+                if ($itemId === '' || $qty <= 0) {
                     continue;
                 }
-                $cogs += $qty * $costByMlb[$itemId];
+                $unit = $costByMlb[$itemId] ?? 0.0;
+                if ($unit > 0) {
+                    $with += $qty;
+                    $cogs += $qty * $unit;
+                } else {
+                    $without += $qty;
+                }
             }
 
-            return round($cogs, 2);
+            return [
+                'cogs' => round($cogs, 2),
+                'items_com_custo' => $with,
+                'items_sem_custo' => $without,
+                'lines_total' => $with + $without,
+            ];
         } catch (\Throwable $e) {
             log_error('PnlReportService: falha ao estimar CMV via sku_custos', [
                 'account_id' => $this->accountId,
@@ -363,7 +389,7 @@ class PnlReportService
                 'error' => $e->getMessage(),
             ]);
 
-            return 0.0;
+            return $empty;
         }
     }
 
@@ -394,6 +420,26 @@ class PnlReportService
                     continue;
                 }
                 $map[$mlbId] = (float)$row['custo_produto'];
+            }
+        }
+
+        $missing = array_values(array_filter($itemIds, static fn(string $id): bool => ($map[$id] ?? 0) <= 0));
+        foreach (array_chunk($missing, 500) as $chunk) {
+            $placeholders = implode(',', array_fill(0, count($chunk), '?'));
+            $stmt = $this->db->prepare(
+                "SELECT ml_item_id, cost_price
+                 FROM items
+                 WHERE account_id = ?
+                   AND cost_price > 0
+                   AND ml_item_id IN ({$placeholders})"
+            );
+            $stmt->execute([$this->accountId, ...$chunk]);
+            foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $mlbId = trim((string)($row['ml_item_id'] ?? ''));
+                if ($mlbId === '' || ($map[$mlbId] ?? 0) > 0) {
+                    continue;
+                }
+                $map[$mlbId] = (float)$row['cost_price'];
             }
         }
 
@@ -859,9 +905,9 @@ class PnlReportService
 
         // ROI
         $totalCosts = $pnl['cogs'] + $pnl['commissions'] + $pnl['payment_fees'] + $pnl['fixed_fees'] + $pnl['shipping_cost'] + $ads;
-        $roi = $totalCosts > 0
-            ? (($pnl['net_profit'] / $totalCosts) * 100)
-            : 0;
+        $roi = ($totalCosts > 0 && $pnl['net_profit'] !== null)
+            ? (((float)$pnl['net_profit'] / $totalCosts) * 100)
+            : null;
 
         return [
             'total_orders' => $pnl['total_orders'],
@@ -871,7 +917,9 @@ class PnlReportService
             'avg_ticket' => round($avgTicket, 2),
             'avg_margin' => $pnl['avg_margin'],
             'cost_rate' => round($costRate, 2),
-            'roi' => round($roi, 2),
+            'roi' => $roi === null ? null : round($roi, 2),
+            'has_real_cogs' => (bool)($pnl['has_real_cogs'] ?? false),
+            'items_sem_custo' => (int)($pnl['items_sem_custo'] ?? 0),
             'cash' => $pnl['cash'] ?? null,
         ];
     }
@@ -894,7 +942,10 @@ class PnlReportService
         $current = $this->getPnL($currentStart, $currentEnd);
         $previous = $this->getPnL($previousStart, $previousEnd);
 
-        $calculateVariation = function ($current, $previous): float {
+        $calculateVariation = function ($current, $previous): ?float {
+            if ($current === null || $previous === null) {
+                return null;
+            }
             if ($previous == 0) {
                 return $current > 0 ? 100 : 0;
             }

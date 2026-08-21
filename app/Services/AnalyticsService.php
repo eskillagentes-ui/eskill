@@ -182,9 +182,9 @@ class AnalyticsService
         // grava esses campos, mesmo com o dado disponível no payload da API) — por
         // isso a query original sempre agrupava em um único bucket "N/A" com margem
         // 0 (Onda 2 / T3). Extraímos o tipo de anúncio direto do order_data (mesmo
-        // padrão de JSON_EXTRACT já usado em getInventoryTurnover) e calculamos a
-        // margem líquida real a partir de net_profit/total_amount (campo que É
-        // preenchido corretamente pelo OrderService).
+        // padrão de JSON_EXTRACT já usado em getInventoryTurnover).
+        // ml_orders.net_profit NÃO subtrai CMV (product_cost fica 0 no ETL). Não
+        // rotular isso como "margem líquida real": missing CMV → n/d / sem CMV.
         $sql = "
             SELECT
                 COALESCE(JSON_UNQUOTE(JSON_EXTRACT(o.order_data, '\$.order_items[0].listing_type_id')), 'unknown') as listing_type,
@@ -210,7 +210,89 @@ class AnalyticsService
 
         $stmt = $this->db->prepare($sql);
         $stmt->execute($params);
-        return $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $rows = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+
+        // net_profit does not subtract CMV. Numeric margins only when every sold
+        // unit in the 30d window has sku_custos.custo_produto > 0.
+        $cogsComplete = $this->profitMarginsCogsComplete($accountId);
+
+        return \App\Services\Financial\MissingCogsPolicy::presentProfitMargins($rows, $cogsComplete);
+    }
+
+    /**
+     * True only if every paid unit in the last 30d has a known unit cost.
+     */
+    private function profitMarginsCogsComplete(?int $accountId): bool
+    {
+        if ($accountId === null || $accountId <= 0) {
+            return false;
+        }
+
+        try {
+            $sql = "SELECT jt.item_id AS item_id, jt.qty AS qty
+                    FROM ml_orders o
+                    INNER JOIN JSON_TABLE(
+                        o.order_data,
+                        '$.order_items[*]' COLUMNS (
+                            item_id VARCHAR(32) PATH '$.item.id',
+                            qty INT PATH '$.quantity'
+                        )
+                    ) AS jt
+                    WHERE " . RevenueHelper::paidStatusesSql('o.status') . "
+                      AND o.date_created >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                      AND o.ml_account_id = :account_id";
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(['account_id' => $accountId]);
+            $lines = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+            if ($lines === []) {
+                return false;
+            }
+
+            $itemIds = [];
+            foreach ($lines as $line) {
+                $id = trim((string)($line['item_id'] ?? ''));
+                if ($id !== '') {
+                    $itemIds[$id] = true;
+                }
+            }
+            $ids = array_keys($itemIds);
+            if ($ids === []) {
+                return false;
+            }
+
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $costStmt = $this->db->prepare(
+                "SELECT mlb_id, custo_produto FROM sku_custos
+                 WHERE account_id = ? AND custo_produto > 0 AND mlb_id IN ({$placeholders})"
+            );
+            $costStmt->execute([$accountId, ...$ids]);
+            $costByMlb = [];
+            foreach ($costStmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+                $mlb = trim((string)($row['mlb_id'] ?? ''));
+                if ($mlb !== '') {
+                    $costByMlb[$mlb] = (float)$row['custo_produto'];
+                }
+            }
+
+            $with = 0;
+            $without = 0;
+            foreach ($lines as $line) {
+                $id = trim((string)($line['item_id'] ?? ''));
+                $qty = (int)($line['qty'] ?? 0);
+                if ($id === '' || $qty <= 0) {
+                    continue;
+                }
+                if (($costByMlb[$id] ?? 0) > 0) {
+                    $with += $qty;
+                } else {
+                    $without += $qty;
+                }
+            }
+
+            return \App\Services\Financial\MissingCogsPolicy::hasRealCogs($with, $without);
+        } catch (\Throwable $e) {
+            return false;
+        }
     }
 
     /**
