@@ -9,6 +9,7 @@ use App\Services\Agents\AgentRuntimeExecutor;
 use App\Services\Agents\AgentRuntimeWorker;
 use App\Services\Agents\PregaoAgentRuntimeReporter;
 use App\Services\Pregao\PregaoEmitService;
+use App\Services\Pregao\PregaoHojeQueueService;
 
 const AGENT_WORKER_USAGE = 'usage: php bin/agent-runtime-worker.php --once|--loop --environment=local|staging|production [--interval=SECONDS] [--max-attempts=1|2|3]';
 
@@ -85,6 +86,14 @@ function agentWorkerHeartbeat(string $path, string $cycleId, array $records, str
 {
     $success = count(array_filter($records, static fn (array $record): bool => $record['status'] === 'success'));
     $blocked = count(array_filter($records, static fn (array $record): bool => $record['status'] === 'blocked'));
+    $openQueues = [];
+    foreach ($records as $record) {
+        $queues = $record['queues'] ?? null;
+        if (!is_array($queues) || ($queues['refreshed'] ?? false) !== true) {
+            continue;
+        }
+        $openQueues[(string) $record['accountId']] = $queues['open'] ?? [];
+    }
     $payload = [
         'updatedAt' => gmdate('c'),
         'cycleId' => $cycleId,
@@ -93,6 +102,8 @@ function agentWorkerHeartbeat(string $path, string $cycleId, array $records, str
         'success' => $success,
         'blocked' => $blocked,
         'failed' => count($records) - $success - $blocked,
+        'observe_queues' => $openQueues,
+        'ml_write' => false,
     ];
     $json = json_encode($payload, JSON_UNESCAPED_SLASHES);
     if ($json === false) {
@@ -143,7 +154,8 @@ try {
     $worker = new AgentRuntimeWorker(
         new AgentRuntimeAccountSource($db),
         new AgentRuntimeExecutor(),
-        new PregaoAgentRuntimeReporter(new PregaoEmitService($db))
+        new PregaoAgentRuntimeReporter(new PregaoEmitService($db)),
+        new PregaoHojeQueueService($db)
     );
 
     do {
