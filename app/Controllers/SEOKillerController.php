@@ -79,14 +79,10 @@ class SEOKillerController extends BaseController
             $engine = new SEOKillerEngine($this->accountId);
             $diagnosis = $engine->diagnoseAccount();
 
-            $total = (int)($diagnosis['total_items'] ?? 0);
+            $ficha = is_array($diagnosis['ficha_gaps'] ?? null) ? $diagnosis['ficha_gaps'] : [];
+            $total = (int) ($ficha['universe_active'] ?? $diagnosis['total_items'] ?? 0);
             $avgScore = (float)($diagnosis['health_score'] ?? 0);
-
-            $maxAffected = 0;
-            foreach (($diagnosis['problems'] ?? []) as $p) {
-                $maxAffected = max($maxAffected, (int)($p['affected_items'] ?? 0));
-            }
-            $pending = min($total, $maxAffected);
+            $pending = (int) ($ficha['pending_unique'] ?? 0);
             $optimized = max(0, $total - $pending);
 
             return [
@@ -98,6 +94,7 @@ class SEOKillerController extends BaseController
                     'avgScore' => $avgScore,
                     'potential' => max(0, (int)round(100 - $avgScore)),
                 ],
+                'ficha_gaps' => $ficha,
                 'diagnosis' => $diagnosis,
             ];
         });
@@ -377,37 +374,8 @@ class SEOKillerController extends BaseController
                 return ['error' => 'Nenhuma conta conectada'];
             }
 
-            $itemService = new \App\Services\ItemService($this->accountId);
-            $items = $itemService->listItems(['limit' => 50]);
-
-            // listItems() pode retornar:
-            // - results: array de IDs (strings) vindo da API do ML
-            // - items: array de itens formatados (com id/ml_id) no payload final
-            $itemIds = [];
-
-            if (!empty($items['results']) && is_array($items['results'])) {
-                foreach ($items['results'] as $id) {
-                    if (is_string($id) && $id !== '') {
-                        $itemIds[] = $id;
-                    }
-                }
-            }
-
-            if (empty($itemIds) && !empty($items['items']) && is_array($items['items'])) {
-                foreach ($items['items'] as $item) {
-                    $id = $item['id'] ?? ($item['ml_id'] ?? null);
-                    if (is_string($id) && $id !== '') {
-                        $itemIds[] = $id;
-                    }
-                }
-            }
-
-            if (empty($itemIds)) {
-                return ['error' => 'Nenhum anúncio encontrado'];
-            }
-
-            $killer = new AttributeKiller($this->accountId);
-            return $killer->generateCompletenessReport($itemIds);
+            $engine = new SEOKillerEngine($this->accountId);
+            return $engine->officialListingCompletenessReport();
         });
     }
 
