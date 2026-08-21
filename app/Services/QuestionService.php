@@ -907,7 +907,11 @@ class QuestionService
                 NOW(), :seller_id
             )
             ON DUPLICATE KEY UPDATE
+                account_id = VALUES(account_id),
+                seller_id = VALUES(seller_id),
+                item_id = VALUES(item_id),
                 status = VALUES(status),
+                question_text = VALUES(question_text),
                 answer_text = VALUES(answer_text),
                 answer_date = VALUES(answer_date),
                 updated_at = NOW()
