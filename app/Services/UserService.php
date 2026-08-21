@@ -741,6 +741,7 @@ class UserService
 
         if ($accountId === null) {
             unset($_SESSION['active_ml_account_id']);
+            unset($_SESSION['current_account_id']);
             return true;
         }
 
@@ -767,6 +768,7 @@ class UserService
 
         if ($stmt->fetch()) {
             $_SESSION['active_ml_account_id'] = $accountId;
+            $_SESSION['current_account_id'] = $accountId;
 
             // Persistir a preferência no banco de dados
             try {

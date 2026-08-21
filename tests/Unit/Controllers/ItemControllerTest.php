@@ -284,8 +284,10 @@ class ItemControllerTest extends TestCase
     public function test_sync_requires_account_id(): void
     {
         $source = file_get_contents(__DIR__ . '/../../../app/Controllers/ItemController.php');
-        $this->assertStringContainsString('account_id', $source,
-            'sync deve aceitar/exigir account_id');
+        $this->assertStringContainsString('SessionHelper::getActiveAccountId', $source,
+            'items devem usar a conta ML ativa da sessao, nao um account_id solto no request');
+        $this->assertStringContainsString('missing_account', $source,
+            'sync deve recusar quando nao ha conta ativa');
     }
 
     // ===========================

@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Helpers\AccountScopeHelper;
+
 use App\Database;
 use App\Helpers\RevenueHelper;
 use App\Services\CategoryService;
@@ -304,10 +306,9 @@ class AnalyticsService
 
         $orderSqlSuffix = " AND " . RevenueHelper::paidStatusesSql();
         $orderParams = [];
-        if ($accountId !== null && $accountId > 0) {
-            $orderSqlSuffix .= " AND ml_account_id = :account_id";
-            $orderParams['account_id'] = $accountId;
-        }
+        $scope = AccountScopeHelper::constrain('ml_account_id', $accountId);
+        $orderSqlSuffix .= $scope['sql'];
+        $orderParams = array_merge($orderParams, $scope['params']);
 
         $currentStmt = $this->db->prepare(
             "SELECT COALESCE(SUM(total_amount), 0) AS revenue, COUNT(*) AS orders FROM ml_orders

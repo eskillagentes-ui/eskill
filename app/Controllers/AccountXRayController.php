@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Controllers;
 
+use App\Helpers\SessionHelper;
 use App\Services\AccountXRayService;
 use App\Services\AccountRecoveryApplierService;
 use App\Services\UserService;
@@ -335,8 +336,8 @@ class AccountXRayController
 
     private function activeAccountId(): ?int
     {
-        $id = isset($_SESSION['active_ml_account_id']) ? (int) $_SESSION['active_ml_account_id'] : null;
-        return $id > 0 ? $id : null;
+        $id = SessionHelper::getActiveAccountId();
+        return ($id !== null && $id > 0) ? $id : null;
     }
 
     private function userOwnsAccount(int $accountId): bool

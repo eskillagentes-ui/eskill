@@ -57,4 +57,16 @@ final class BaseControllerActiveAccountIdTest extends TestCase
 
         $this->assertSame(99, $controller->exposeGetActiveAccountId());
     }
+
+    public function testGetActiveAccountIdIgnoresLegacyCurrentAccountId(): void
+    {
+        $_GET = [];
+        $_POST = [];
+        $_SERVER = [];
+        $_SESSION = ['current_account_id' => 1336, 'account_id' => 1336];
+
+        $controller = $this->makeController();
+
+        $this->assertNull($controller->exposeGetActiveAccountId());
+    }
 }

@@ -163,6 +163,7 @@
             <file>tests/Unit/Controllers/UserManagementControllerTest.php</file>
             <file>tests/Unit/Controllers/SeoControllerTest.php</file>
             <file>tests/Unit/Controllers/BaseControllerActiveAccountIdTest.php</file>
+            <file>tests/Unit/Services/OAuthActiveAccountIsolationTest.php</file>
             <file>tests/Unit/Services/AI/AIProviderManagerTest.php</file>
             <file>tests/Unit/Services/AI/DescriptionOptimizerTest.php</file>
             <file>tests/Unit/Services/AI/TechSheetOptimizerTest.php</file>

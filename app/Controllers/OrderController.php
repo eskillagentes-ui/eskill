@@ -15,7 +15,7 @@ class OrderController extends BaseController
     {
         parent::__construct();
         // Permite override via GET, senão usa a conta ativa da sessão
-        $accountId = $this->request->get('account_id') ?? SessionHelper::getActiveAccountId();
+        $accountId = SessionHelper::getActiveAccountId();
         $this->orderService = new OrderService($accountId ? (int)$accountId : null);
     }
 

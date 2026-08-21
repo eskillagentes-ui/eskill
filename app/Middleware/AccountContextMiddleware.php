@@ -15,16 +15,9 @@ class AccountContextMiddleware
      */
     public function handle(): void
     {
-        // Get current account from session
-        $accountId = $_SESSION['current_account_id'] ?? null;
-        
-        // If no account in session but user is logged in, get default account
-        if (!$accountId && isset($_SESSION['user_id'])) {
-            $accountId = $this->getDefaultAccountForUser($_SESSION['user_id']);
-            
-            if ($accountId) {
-                $_SESSION['current_account_id'] = $accountId;
-            }
+        $accountId = \App\Helpers\SessionHelper::getActiveAccountId();
+        if ($accountId) {
+            $_SESSION['current_account_id'] = $accountId;
         }
         
         // Store in global context for easy access
@@ -87,7 +80,7 @@ class AccountContextMiddleware
             ]);
             
             if ($stmt->fetch()) {
-                $_SESSION['current_account_id'] = $accountId;
+                \App\Helpers\SessionHelper::setActiveAccountId($accountId);
                 return true;
             }
             
@@ -119,7 +112,7 @@ class AccountContextMiddleware
             ");
             $stmt->execute([
                 'user_id' => $userId,
-                'current_id' => $_SESSION['current_account_id'] ?? 0
+                'current_id' => \App\Helpers\SessionHelper::getActiveAccountId() ?? 0
             ]);
             
             return $stmt->fetchAll(\PDO::FETCH_ASSOC);

@@ -21,7 +21,7 @@ class CompetitorMonitorController
     {
         $this->db = Database::getInstance();
         $this->request = new Request();
-        $this->accountId = $_SESSION['current_account_id'] ?? null;
+        $this->accountId = \App\Helpers\SessionHelper::getActiveAccountId();
     }
 
     /**
