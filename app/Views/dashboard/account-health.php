@@ -3476,7 +3476,7 @@ require __DIR__ . '/account-health-advanced.php';
             <i class="bi bi-check-circle me-1"></i>${goodItems} competitivos (${goodPct}%)
         </div>
         <div class="badge bg-info bg-opacity-10 text-info p-2">
-            <i class="bi bi-box-seam me-1"></i>${analyzed} analisados
+            <i class="bi bi-box-seam me-1"></i>${analyzed} analisados / ${details.universe_total || details.total_items || analyzed} universo
         </div>
     </div>`;
 
@@ -3503,7 +3503,7 @@ require __DIR__ . '/account-health-advanced.php';
                 color: 'info'
             },
             {
-                label: 'Saúde ML',
+                label: 'Performance',
                 score: details.avg_health_score || 0,
                 max: 15,
                 icon: 'bi-heart-pulse',
@@ -4602,8 +4602,8 @@ require __DIR__ . '/account-health-advanced.php';
         <div class="d-flex align-items-center gap-2 small p-2 border rounded border-warning mb-2"><i class="bi bi-exclamation-triangle text-warning"></i><span>Ficha técnica incompleta: <strong>${details.incomplete_specs}</strong> anúncios (sinal ML)</span></div>` : '';
             detailsHtml = `
         <div class="row g-2 mb-3">
-            <div class="col-4"><div class="rep-metric-card"><div class="rep-metric-value">${details.total_active || 0}</div><div class="rep-metric-label">Anúncios Ativos</div></div></div>
-            <div class="col-4"><div class="rep-metric-card"><div class="rep-metric-value">${details.analyzed || 0}</div><div class="rep-metric-label">Analisados</div></div></div>
+            <div class="col-4"><div class="rep-metric-card"><div class="rep-metric-value">${details.total_active || 0}</div><div class="rep-metric-label">Universo ativos</div></div></div>
+            <div class="col-4"><div class="rep-metric-card"><div class="rep-metric-value">${details.analyzed || 0}/${details.universe_total || details.total_active || 0}</div><div class="rep-metric-label">Analisados / universo</div></div></div>
             <div class="col-4"><div class="rep-metric-card"><div class="rep-metric-value text-danger">${details.items_below_70 || 0}</div><div class="rep-metric-label">Score &lt; 70</div></div></div>
         </div>
         ${mlQualityHtml}
