@@ -22,6 +22,7 @@ final class PregaoHojeQueueService
         'perguntas_sla',
         'ads_sem_cogs',
         'ads_cogs_acos',
+        'investigacao',
     ];
 
     /** Filas dos três agentes 24/7 observe+queue (Ficha / Perguntas / Ads). */
@@ -30,6 +31,7 @@ final class PregaoHojeQueueService
         'perguntas_sla',
         'ads_sem_cogs',
         'ads_cogs_acos',
+        'investigacao',
     ];
 
     /** ACOS alto: gasto / receita_atribuída > 30%. Não inventa receita. */
@@ -67,6 +69,7 @@ final class PregaoHojeQueueService
         }
 
         $items = $this->loadActiveItems($accountId);
+        $investigacao = $this->loadInvestigacao($accountId);
         $queue = [
             $this->bucketVisitsNoSales($accountId, $items),
             $this->bucketFicha($accountId, $items),
@@ -74,6 +77,7 @@ final class PregaoHojeQueueService
             $this->bucketPerguntasSla($accountId),
             $this->bucketAdsSemCogs($accountId, $items),
             $this->bucketAdsCogsAcos($accountId, $items),
+            $this->bucketInvestigacao($investigacao),
         ];
 
         $open = 0;
@@ -83,15 +87,19 @@ final class PregaoHojeQueueService
             }
         }
 
-        return $this->envelope($now, $queue, $open);
+        return $this->envelope($now, $queue, $open, $investigacao);
     }
 
     /**
      * @param list<array<string, mixed>> $items
      * @return array<string, mixed>
      */
-    private function envelope(string $generatedAt, array $items, int $open = 0): array
+    private function envelope(string $generatedAt, array $items, int $open = 0, ?array $investigacao = null): array
     {
+        if ($investigacao === null) {
+            $investigacao = $this->emptyInvestigacao('conta ausente');
+        }
+
         return [
             'v' => PregaoEmitService::VERSION,
             'read_only' => true,
@@ -101,6 +109,7 @@ final class PregaoHojeQueueService
             'generated_at' => $generatedAt,
             'open_count' => $open,
             'items' => $items,
+            'investigacao' => $investigacao,
         ];
     }
 
@@ -116,6 +125,7 @@ final class PregaoHojeQueueService
             'perguntas_sla' => 'Perguntas sem resposta ≥1h',
             'ads_sem_cogs' => 'Ads sem CMV',
             'ads_cogs_acos' => 'Ads com CMV e ACOS ruim',
+            'investigacao' => 'Investigação (rascunho, não publicado)',
         ];
         $hrefs = [
             'visits_no_sales' => '/dashboard/items',
@@ -124,6 +134,7 @@ final class PregaoHojeQueueService
             'perguntas_sla' => '/dashboard/questions',
             'ads_sem_cogs' => '/dashboard/cogs',
             'ads_cogs_acos' => '/dashboard/ads',
+            'investigacao' => '/dashboard/pregao',
         ];
         $out = [];
         foreach (self::BUCKETS as $i => $id) {
@@ -857,6 +868,123 @@ final class PregaoHojeQueueService
         }
 
         return $known;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function emptyInvestigacao(string $reason): array
+    {
+        return [
+            'count' => 0,
+            'available' => false,
+            'apply_blocked' => true,
+            'ml_write' => false,
+            'published' => false,
+            'items' => [],
+            'reason' => $reason,
+        ];
+    }
+
+    /**
+     * Open investigations for the active account. Fail-soft if table missing.
+     *
+     * @return array<string, mixed>
+     */
+    private function loadInvestigacao(int $accountId): array
+    {
+        if ($accountId <= 0) {
+            return $this->emptyInvestigacao('conta ausente');
+        }
+        try {
+            $countStmt = $this->db->prepare(
+                "SELECT COUNT(*) FROM listing_investigations WHERE account_id = ? AND status = 'open'"
+            );
+            $countStmt->execute([$accountId]);
+            $count = (int) $countStmt->fetchColumn();
+            $listStmt = $this->db->prepare(
+                "SELECT mlb_id, blockers, draft_title, model_used
+                 FROM listing_investigations
+                 WHERE account_id = ? AND status = 'open'
+                 ORDER BY id DESC
+                 LIMIT 5"
+            );
+            $listStmt->execute([$accountId]);
+            $items = [];
+            while (($row = $listStmt->fetch(PDO::FETCH_ASSOC)) !== false) {
+                $blockers = $row['blockers'] ?? [];
+                if (is_string($blockers) && $blockers !== '') {
+                    $decoded = json_decode($blockers, true);
+                    $blockers = is_array($decoded) ? $decoded : [];
+                } elseif (!is_array($blockers)) {
+                    $blockers = [];
+                }
+                $codes = [];
+                foreach ($blockers as $b) {
+                    if (is_string($b)) {
+                        $codes[] = $b;
+                    } elseif (is_array($b) && isset($b['code'])) {
+                        $codes[] = (string) $b['code'];
+                    }
+                }
+                $items[] = [
+                    'mlb' => (string) ($row['mlb_id'] ?? ''),
+                    'blockers' => $blockers,
+                    'blocker' => $codes[0] ?? '',
+                    'draft_title' => (string) ($row['draft_title'] ?? ''),
+                    'model_used' => (string) ($row['model_used'] ?? ''),
+                    'published' => false,
+                    'nao_publicado' => true,
+                ];
+            }
+
+            return [
+                'count' => $count,
+                'available' => true,
+                'apply_blocked' => true,
+                'ml_write' => false,
+                'published' => false,
+                'items' => $items,
+            ];
+        } catch (Throwable) {
+            return $this->emptyInvestigacao('listing_investigations indisponível');
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $investigacao
+     * @return array<string, mixed>
+     */
+    private function bucketInvestigacao(array $investigacao): array
+    {
+        $available = (bool) ($investigacao['available'] ?? false);
+        $count = (int) ($investigacao['count'] ?? 0);
+        $severity = !$available ? 'nd' : ($count > 0 ? 'alto' : 'ok');
+        $bits = [];
+        foreach ($investigacao['items'] ?? [] as $row) {
+            if (!is_array($row)) {
+                continue;
+            }
+            $mlb = (string) ($row['mlb'] ?? '');
+            $blocker = (string) ($row['blocker'] ?? '');
+            if ($mlb !== '') {
+                $bits[] = $mlb . ($blocker !== '' ? ('=' . $blocker) : '');
+            }
+        }
+        $hint = !$available
+            ? (string) ($investigacao['reason'] ?? 'listing_investigations indisponível') . ' · sem apply'
+            : ($count . ' abertas · ' . ($bits !== [] ? implode(' · ', $bits) : 'nenhuma') . ' · não publicado · sem apply');
+
+        return $this->row(
+            'investigacao',
+            7,
+            'Investigação (rascunho, não publicado)',
+            $count,
+            $severity,
+            $available,
+            '/dashboard/pregao',
+            $hint
+        );
     }
 
     /**

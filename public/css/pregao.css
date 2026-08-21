@@ -1004,6 +1004,24 @@ a.card.sn-card:hover {
     white-space: nowrap;
 }
 
+.hoje-inv-notes {
+    list-style: none;
+    margin: 4px 0 4px 30px;
+    padding: 0;
+    color: var(--mut);
+    font-size: 10px;
+}
+.hoje-inv-notes li {
+    margin: 2px 0;
+    white-space: normal;
+}
+.hoje-inv-notes .nao-pub {
+    margin-left: 8px;
+    color: #f0a202;
+    font: 700 9px var(--mono);
+    text-transform: uppercase;
+}
+
 .hoje-readonly {
     padding: 0 12px 12px;
     color: var(--mut);

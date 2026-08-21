@@ -962,6 +962,30 @@
                 hint.textContent = String(item.hint);
                 li.appendChild(hint);
             }
+            if (item && item.id === 'investigacao') {
+                const notes = (hoje && hoje.investigacao && Array.isArray(hoje.investigacao.items))
+                    ? hoje.investigacao.items
+                    : [];
+                if (notes.length > 0) {
+                    const ul = document.createElement('ul');
+                    ul.className = 'hoje-inv-notes';
+                    notes.forEach((row) => {
+                        const li2 = document.createElement('li');
+                        const codes = Array.isArray(row && row.blockers)
+                            ? row.blockers.map((b) => (b && b.code) ? b.code : String(b || '')).filter(Boolean).join(', ')
+                            : String((row && (row.blocker || '')) || '');
+                        li2.appendChild(document.createTextNode(
+                            String((row && row.mlb) || '') + ' · ' + codes + ' · ' + String((row && row.draft_title) || '')
+                        ));
+                        const tag = document.createElement('span');
+                        tag.className = 'nao-pub';
+                        tag.textContent = 'não publicado';
+                        li2.appendChild(tag);
+                        ul.appendChild(li2);
+                    });
+                    li.appendChild(ul);
+                }
+            }
             list.appendChild(li);
         });
     }

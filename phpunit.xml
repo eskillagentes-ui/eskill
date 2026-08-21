@@ -63,6 +63,8 @@
             <file>tests/Unit/Services/Pregao/PregaoAgentStatusServiceTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoDataSourceStatusServiceTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoEmitServiceTest.php</file>
+            <file>tests/Unit/Services/Pregao/PregaoHojeQueueServiceTest.php</file>
+            <file>tests/Unit/Services/ListingInvestigation/ListingInvestigationServiceTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoEventExplorerServiceTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoMetricsCollectorAgentActionsContractTest.php</file>
             <file>tests/Unit/Services/Pregao/PregaoMetricsCollectorFreshnessContractTest.php</file>

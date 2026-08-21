@@ -28,6 +28,9 @@ final class PregaoHojeQueueServiceTest extends TestCase
         self::assertSame('local', $queue['source']);
         self::assertSame(0, $queue['open_count']);
         self::assertSame(PregaoHojeQueueService::BUCKETS, array_column($queue['items'], 'id'));
+        self::assertTrue($queue['investigacao']['apply_blocked']);
+        self::assertFalse($queue['investigacao']['ml_write']);
+        self::assertFalse($queue['investigacao']['published']);
         foreach ($queue['items'] as $item) {
             self::assertFalse($item['available']);
             self::assertSame('nd', $item['severity']);
@@ -350,7 +353,7 @@ final class PregaoHojeQueueServiceTest extends TestCase
         self::assertTrue($snapshot['hoje']['apply_blocked']);
         self::assertTrue($snapshot['hoje']['read_only']);
         self::assertSame('local', $snapshot['hoje']['source']);
-        self::assertCount(6, $snapshot['hoje']['items']);
+        self::assertCount(7, $snapshot['hoje']['items']);
         self::assertSame(PregaoHojeQueueService::BUCKETS, array_column($snapshot['hoje']['items'], 'id'));
         self::assertTrue($snapshot['read_only']);
         $json = json_encode($snapshot['hoje'], JSON_THROW_ON_ERROR);
@@ -486,14 +489,62 @@ final class PregaoHojeQueueServiceTest extends TestCase
     public function testAdsTabelaAusenteEFailSoftNd(): void
     {
         $db = $this->sqliteCatalog();
-        $byId = $this->byId((new PregaoHojeQueueService($db))->build(1335));
+        $queue = (new PregaoHojeQueueService($db))->build(1335);
+        $byId = $this->byId($queue);
         self::assertFalse($byId['ads_sem_cogs']['available']);
         self::assertSame('nd', $byId['ads_sem_cogs']['severity']);
         self::assertFalse($byId['ads_cogs_acos']['available']);
         self::assertSame('nd', $byId['ads_cogs_acos']['severity']);
         self::assertFalse($byId['perguntas_sla']['available']);
         self::assertSame('nd', $byId['perguntas_sla']['severity']);
+        self::assertFalse($byId['investigacao']['available']);
+        self::assertSame('nd', $byId['investigacao']['severity']);
         self::assertTrue($byId['ads_sem_cogs']['apply_blocked']);
+        self::assertTrue($byId['investigacao']['apply_blocked']);
+        self::assertFalse($queue['investigacao']['published']);
+        self::assertTrue($queue['investigacao']['apply_blocked']);
+        self::assertFalse($queue['investigacao']['ml_write']);
+    }
+
+    public function testInvestigacaoBucketLastFiveIgnores1336AndNotPublished(): void
+    {
+        $db = $this->sqliteCatalog();
+        $db->exec(
+            'CREATE TABLE listing_investigations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                account_id INTEGER,
+                mlb_id TEXT,
+                status TEXT,
+                blockers TEXT,
+                draft_title TEXT,
+                draft_notes TEXT,
+                model_used TEXT,
+                created_at TEXT DEFAULT CURRENT_TIMESTAMP
+            )'
+        );
+        $this->insertItem($db, 1335, 'MLB-LOCAL', 'active', 0, [
+            'pictures' => [1, 2, 3],
+            'shipping' => ['free_shipping' => true],
+        ]);
+        $db->exec('INSERT INTO listing_investigations (account_id, mlb_id, status, blockers, draft_title, model_used)
+                   VALUES (1335, \'MLB-INV\', \'open\', \'[{"code":"photos_lt3","label":"fotos"}]\', \'Farol Honda CG 160\', \'rules\')');
+        $db->exec('INSERT INTO listing_investigations (account_id, mlb_id, status, blockers, draft_title, model_used)
+                   VALUES (1336, \'MLB-FALCAO\', \'open\', \'[{"code":"stock_0"}]\', \'nope\', \'rules\')');
+
+        $queue = (new PregaoHojeQueueService($db))->build(1335);
+        $byId = $this->byId($queue);
+        self::assertSame(1, $byId['investigacao']['count']);
+        self::assertSame('alto', $byId['investigacao']['severity']);
+        self::assertTrue($byId['investigacao']['apply_blocked']);
+        self::assertTrue($queue['investigacao']['apply_blocked']);
+        self::assertFalse($queue['investigacao']['ml_write']);
+        self::assertFalse($queue['investigacao']['published']);
+        self::assertSame('MLB-INV', $queue['investigacao']['items'][0]['mlb']);
+        self::assertTrue($queue['investigacao']['items'][0]['nao_publicado']);
+        self::assertStringContainsString('MLB-INV', $byId['investigacao']['hint']);
+        self::assertStringContainsString('não publicado', $byId['investigacao']['hint']);
+        self::assertStringNotContainsString('MLB-FALCAO', $byId['investigacao']['hint']);
+        self::assertStringNotContainsString('apply', json_encode($queue['investigacao']['items']));
     }
 
     private function createAdsSkuTable(PDO $db): void
