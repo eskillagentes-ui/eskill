@@ -338,11 +338,17 @@ if ($isApi) {
     $hasBearerToken = $authHeader && preg_match('/Bearer\s+.+/i', $authHeader);
 }
 // CSRF exempt se: (a) webhook, (b) API com Bearer token stateless,
-// ou (c) API que lida com própria autenticação internamente (render harness / rank collector).
-// API routes com autenticação via session cookie continuam sujeitas a CSRF.
+// (c) API que lida com própria autenticação internamente (render harness / rank collector),
+// (d) callback OAuth do provedor (não pode enviar o token CSRF da sessão; a proteção é o `state`).
+$isOAuthCallback = $path === '/auth/callback'
+    || ($path === '/auth/login' && (
+        isset($_GET['code']) || isset($_POST['code'])
+        || isset($_GET['error']) || isset($_POST['error'])
+    ));
 $isCsrfExempt = $isWebhookRoute || ($isApi && $hasBearerToken)
     || strpos($path, '/api/render') === 0
-    || strpos($path, '/api/rank/') === 0;
+    || strpos($path, '/api/rank/') === 0
+    || $isOAuthCallback;
 
 if (!$isCsrfExempt && in_array($_SERVER['REQUEST_METHOD'], ['POST', 'PUT', 'DELETE', 'PATCH'])) {
     $csrf = new App\Middleware\CsrfMiddleware();

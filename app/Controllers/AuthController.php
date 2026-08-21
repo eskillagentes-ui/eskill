@@ -46,6 +46,13 @@ class AuthController extends BaseController
      */
     public function login(): void
     {
+        $code = $this->oauthCallbackParam('code');
+        $error = $this->oauthCallbackParam('error');
+        if ($code !== null || $error !== null) {
+            $this->callback();
+            return;
+        }
+
         // Forçar status 200 para esta rota
         http_response_code(200);
 
@@ -449,26 +456,22 @@ class AuthController extends BaseController
      */
     public function callback(): void
     {
-        $code = $this->request->get('code');
-        $state = $this->request->get('state');
-        $error = $this->request->get('error');
+        $code = $this->oauthCallbackParam('code');
+        $state = $this->oauthCallbackParam('state');
+        $error = $this->oauthCallbackParam('error');
 
         if ($error) {
-            $errorDescription = $this->request->get('error_description', 'Erro desconhecido');
+            $errorDescription = $this->oauthCallbackParam('error_description') ?? 'Erro desconhecido';
             $this->logOAuthCallbackEvent('warning', 'OAuth callback provider error', [
                 'error_type' => $this->classifyOAuthErrorType($errorDescription),
                 'error' => $error,
                 'description' => $errorDescription,
             ]);
-            $_SESSION['error'] = "Erro na autorização: {$errorDescription}";
-            header('Location: /dashboard/accounts');
-            exit;
+            $this->finishOAuthCallback('Erro na autorização: ' . $errorDescription, 400);
         }
 
         if (!$code || !$state) {
-            $_SESSION['error'] = "Código de autorização não recebido";
-            header('Location: /dashboard/accounts');
-            exit;
+            $this->finishOAuthCallback('Código de autorização não recebido', 400);
         }
 
         try {
@@ -1291,6 +1294,41 @@ class AuthController extends BaseController
                 'error' => 'Erro ao excluir conta: ' . $e->getMessage()
             ]);
         }
+        exit;
+    }
+
+
+    private function oauthCallbackParam(string $key): ?string
+    {
+        $value = $this->request->input($key);
+        if (!is_string($value)) {
+            return null;
+        }
+        $value = trim($value);
+        return $value === '' ? null : $value;
+    }
+
+    private function oauthCallbackWantsJson(): bool
+    {
+        $accept = (string) ($_SERVER['HTTP_ACCEPT'] ?? '');
+        $contentType = (string) ($_SERVER['CONTENT_TYPE'] ?? '');
+        return str_contains($accept, 'application/json') || str_contains($contentType, 'application/json');
+    }
+
+    private function finishOAuthCallback(string $message, int $status): never
+    {
+        if ($this->oauthCallbackWantsJson()) {
+            http_response_code($status);
+            header('Content-Type: application/json; charset=UTF-8');
+            echo json_encode([
+                'error' => $message,
+                'code' => 'OAUTH_CALLBACK_INVALID',
+            ], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+            exit;
+        }
+
+        $_SESSION['error'] = $message;
+        header('Location: /dashboard/accounts');
         exit;
     }
 
