@@ -53,12 +53,14 @@ PROMPT;
     private PDO $db;
     private ?DashScopeClient $llm;
     private bool $forceRules;
+    private ListingTitleDraftBuilder $titles;
 
     public function __construct(PDO $db, ?DashScopeClient $llm = null, bool $forceRules = true)
     {
         $this->db = $db;
         $this->llm = $llm;
         $this->forceRules = $forceRules;
+        $this->titles = new ListingTitleDraftBuilder();
     }
 
     /**
@@ -68,6 +70,8 @@ PROMPT;
      *   account_id: int,
      *   model_key: string,
      *   investigated: list<array<string, mixed>>,
+     *   refreshed: list<array<string, mixed>>,
+     *   refreshed_count: int,
      *   closed_sold: int
      * }
      */
@@ -76,6 +80,7 @@ PROMPT;
         $limit = max(1, min(self::MAX_LIMIT, $limit));
         $this->ensureTable();
         $closed = $this->closeSold($accountId);
+        $refreshed = $this->refreshOpenDrafts($accountId);
         $candidates = $this->pickCandidates($accountId, $limit);
         $rows = [];
         foreach ($candidates as $item) {
@@ -88,6 +93,8 @@ PROMPT;
             'account_id' => $accountId,
             'model_key' => $this->llmEnabled() ? 'dashscope' : 'rules',
             'investigated' => $rows,
+            'refreshed' => $refreshed,
+            'refreshed_count' => count($refreshed),
             'closed_sold' => $closed,
         ];
     }
@@ -414,13 +421,81 @@ PROMPT;
 
     public function looksLikeLongTail(string $text): bool
     {
-        $t = mb_strtolower($text);
-        if (preg_match('/\b(kit|jogo|compativel|compatível|titan|fan|start|today|busca|seo|long-?tail|promo|desconto)\b/u', $t) === 1) {
-            return true;
-        }
-        $words = preg_split('/\s+/', trim($text)) ?: [];
+        return $this->titles->looksLikeLongTail($text);
+    }
 
-        return count($words) > 4;
+    /**
+     * Rewrite local draft_title for open investigations from current items.data.
+     * Never PUT Mercado Livre.
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function refreshOpenDrafts(int $accountId): array
+    {
+        $loaded = $this->loadActiveItems($accountId);
+        if ($loaded === null) {
+            return [];
+        }
+        $byMlb = [];
+        foreach ($loaded as $item) {
+            $mlb = strtoupper(trim((string) ($item['ml_item_id'] ?? $item['id'] ?? '')));
+            if ($mlb !== '') {
+                $byMlb[$mlb] = $item;
+            }
+        }
+
+        try {
+            $stmt = $this->db->prepare(
+                "SELECT mlb_id FROM listing_investigations WHERE account_id = ? AND status = ?"
+            );
+            $stmt->execute([$accountId, self::STATUS_OPEN]);
+        } catch (Throwable) {
+            return [];
+        }
+
+        $upd = $this->db->prepare(
+            'UPDATE listing_investigations
+             SET blockers = ?, draft_title = ?, draft_notes = ?, model_used = ?
+             WHERE account_id = ? AND mlb_id = ? AND status = ?'
+        );
+        $rows = [];
+        while (($mlbRaw = $stmt->fetchColumn()) !== false) {
+            $mlb = strtoupper(trim((string) $mlbRaw));
+            if ($mlb === '' || !isset($byMlb[$mlb])) {
+                continue;
+            }
+            $item = $byMlb[$mlb];
+            $blockers = $this->officialBlockers($item);
+            $realModel = $this->realModel($item);
+            $draft = $this->rulesDraft($item, $blockers, $realModel);
+            $notes = $this->appendModelContractNote($draft['draft_notes'], $realModel, $item);
+            $notes .= ' · não publicado · apply_blocked=true';
+            $upd->execute([
+                json_encode($blockers, JSON_UNESCAPED_UNICODE),
+                $draft['draft_title'],
+                $notes,
+                'rules',
+                $accountId,
+                $mlb,
+                self::STATUS_OPEN,
+            ]);
+            $rows[] = [
+                'account_id' => $accountId,
+                'mlb_id' => $mlb,
+                'status' => self::STATUS_OPEN,
+                'blockers' => $blockers,
+                'draft_title' => $draft['draft_title'],
+                'draft_notes' => $notes,
+                'model_used' => 'rules',
+                'title' => (string) ($item['title'] ?? ''),
+                'published' => false,
+                'apply_blocked' => true,
+                'ml_write' => false,
+                'refreshed' => true,
+            ];
+        }
+
+        return $rows;
     }
 
     /**
@@ -430,32 +505,7 @@ PROMPT;
      */
     public function rulesDraft(array $item, array $blockers, ?string $realModel): array
     {
-        $brand = $this->attributeValue($item, 'BRAND');
-        $part = $this->attributeValue($item, 'PART_NUMBER');
-        $product = $this->productNoun($item);
-        $specParts = [];
-        if ($part) {
-            $specParts[] = $part;
-        }
-        foreach (['COLOR', 'VOLTAGE', 'UNITS_PER_PACKAGE'] as $id) {
-            $v = $this->attributeValue($item, $id);
-            if ($v) {
-                $specParts[] = $v;
-            }
-        }
-        $bits = array_filter([$product, $brand, $realModel, implode(' ', $specParts)], static fn ($v) => $v !== null && $v !== '');
-        $title = $this->clipTitle(trim(preg_replace('/\s+/', ' ', implode(' ', $bits)) ?: (string) ($item['title'] ?? '')));
-        if ($this->isAutoParts($item)) {
-            $title = $this->stripBikeList($title, $realModel);
-        }
-        $codes = array_column($blockers, 'code');
-        $notes = 'rules: blockers=' . implode(',', $codes);
-        if ($this->isAutoParts($item)) {
-            $notes .= ' · compatibilidade no widget, não lista de motos no título';
-        }
-        $notes .= ' · MODEL=' . ($realModel ?: 'n/d (não inventar)');
-
-        return ['draft_title' => $title, 'draft_notes' => $notes];
+        return $this->titles->build($item, $blockers, $realModel);
     }
 
     /**
