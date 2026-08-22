@@ -586,7 +586,7 @@ class PregaoController extends BaseController
         $mlb = is_array($body) ? (string) ($body['mlb'] ?? $body['mlb_id'] ?? '') : '';
         try {
             $svc = new \App\Services\ListingApply\ListingApplyJobService(\App\Database::getInstance());
-            $row = $svc->run($accountId, $mlb, false);
+            $row = $svc->runFromWeb($accountId, $mlb, false);
             echo json_encode([
                 'success' => $row['status'] === \App\Services\ListingApply\ListingApplyJobService::STATUS_DRY_RUN,
                 'data' => $row,
@@ -595,6 +595,44 @@ class PregaoController extends BaseController
         } catch (Throwable) {
             http_response_code(500);
             echo json_encode(['success' => false, 'error' => 'Falha ao simular', 'ml_write' => false]);
+        }
+    }
+
+    /**
+     * POST /api/pregao/listing-apply/apply
+     * Never PUTs. Server-side flag is CLI --apply + ML_WRITE_AUTOMATION, not this button.
+     */
+    public function listingApplyApply(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: private, no-store');
+        if (!$this->requireAuthJson()) {
+            return;
+        }
+        $accountId = $this->getActiveAccountId();
+        if ($accountId === null || $accountId <= 0) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'Conta indisponivel', 'ml_write' => false]);
+            return;
+        }
+        $body = json_decode((string) file_get_contents('php://input'), true);
+        $mlb = is_array($body) ? (string) ($body['mlb'] ?? $body['mlb_id'] ?? '') : '';
+        try {
+            $svc = new \App\Services\ListingApply\ListingApplyJobService(\App\Database::getInstance());
+            $row = $svc->runFromWeb($accountId, $mlb, true);
+            echo json_encode([
+                'success' => false,
+                'data' => $row,
+                'meta' => [
+                    'ml_write' => false,
+                    'api_called' => false,
+                    'dry_run' => true,
+                    'blocked_by' => $row['blocked_by'] ?? 'web_apply_requires_cli_flag',
+                ],
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (Throwable) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => 'Apply recusado', 'ml_write' => false]);
         }
     }
 

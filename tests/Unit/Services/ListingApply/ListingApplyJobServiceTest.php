@@ -114,11 +114,65 @@ final class ListingApplyJobServiceTest extends TestCase
     {
         $js = (string) file_get_contents(dirname(__DIR__, 4) . '/public/js/pregao.js');
         $routes = (string) file_get_contents(dirname(__DIR__, 4) . '/app/Routes/api/pregao.php');
+        $ctrl = (string) file_get_contents(dirname(__DIR__, 4) . '/app/Controllers/PregaoController.php');
         self::assertStringContainsString('listing-apply/simulate', $js);
         self::assertStringContainsString('listing-apply/simulate', $routes);
-        self::assertStringNotContainsString('listing-apply/apply', $routes);
+        self::assertStringContainsString('listing-apply/apply', $routes);
+        self::assertStringContainsString('runFromWeb', $ctrl);
+        self::assertStringContainsString('web_apply_requires_cli_flag', $ctrl);
         self::assertStringNotContainsString('PUT /items', $js);
         self::assertStringContainsString('Dry-run (sem PUT)', $js);
+        self::assertStringContainsString('Sem PUT (flag so no CLI --apply)', $js);
+    }
+
+    public function testStuffedModelNeverInPayload(): void
+    {
+        $db = $this->sqlite();
+        $this->insertMirror($db, 1335, 'MLB1234567890');
+        $svc = new ListingApplyJobService($db, new SafetyGuard(true, [1335]));
+        $row = $svc->run(1335, 'MLB1234567890', false);
+        $title = (string) ($row['payload']['title'] ?? '');
+        self::assertNotSame('', $title);
+        self::assertStringNotContainsString('espelho quarto', strtolower($title));
+        self::assertStringNotContainsString('espelho sala', strtolower($title));
+        self::assertStringNotContainsString('nao tem', strtolower($title));
+        $json = json_encode($row['payload'], JSON_UNESCAPED_UNICODE);
+        self::assertIsString($json);
+        self::assertStringNotContainsString('espelho quarto, espelho sala', $json);
+        self::assertArrayNotHasKey('attributes', $row['payload']);
+        self::assertArrayNotHasKey('original_price', $row['payload']);
+    }
+
+    public function testApplyWithoutMlbAllowlistFails(): void
+    {
+        $db = $this->sqlite();
+        $called = 0;
+        $svc = new ListingApplyJobService($db, new SafetyGuard(true, [1335]), static function () use (&$called) {
+            $called++;
+            return ['success' => true, 'api_called' => true];
+        });
+        $row = $svc->run(1335, '', true);
+        self::assertSame(0, $called);
+        self::assertSame(ListingApplyJobService::STATUS_BLOCKED, $row['status']);
+        self::assertSame('apply_requires_mlb_allowlist', $row['blocked_by']);
+        self::assertFalse($row['ml_write']);
+    }
+
+    public function testWebApplyNeverPutsEvenIfRequested(): void
+    {
+        $db = $this->sqlite();
+        $this->insertMirror($db, 1335, 'MLB1234567890');
+        $called = 0;
+        $svc = new ListingApplyJobService($db, new SafetyGuard(true, [1335]), static function () use (&$called) {
+            $called++;
+            return ['success' => true, 'api_called' => true];
+        });
+        $row = $svc->runFromWeb(1335, 'MLB1234567890', true);
+        self::assertSame(0, $called);
+        self::assertSame(ListingApplyJobService::STATUS_BLOCKED, $row['status']);
+        self::assertSame('web_apply_requires_cli_flag', $row['blocked_by']);
+        self::assertFalse($row['ml_write']);
+        self::assertFalse($row['api_called']);
     }
 
     public function testDoesNotMixAccount1336Item(): void

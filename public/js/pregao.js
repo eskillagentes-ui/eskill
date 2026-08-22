@@ -1004,6 +1004,29 @@
                             });
                         });
                         li2.appendChild(sim);
+                        const ap = document.createElement('button');
+                        ap.type = 'button';
+                        ap.className = 'hoje-aplicar';
+                        ap.textContent = 'aplicar no ML';
+                        ap.setAttribute('data-mlb', String((row && row.mlb) || ''));
+                        ap.addEventListener('click', function (ev) {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            const mlb = String(ap.getAttribute('data-mlb') || '');
+                            if (!mlb) return;
+                            fetch('/api/pregao/listing-apply/apply', {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                                body: JSON.stringify({ mlb: mlb, apply: true })
+                            }).then(function (res) { return res.json(); }).then(function (json) {
+                                const why = (json && json.meta && json.meta.blocked_by) ? json.meta.blocked_by : 'web_apply_requires_cli_flag';
+                                window.alert('Sem PUT (flag so no CLI --apply): ' + mlb + ' / ' + why);
+                            }).catch(function () {
+                                window.alert('Apply recusado ' + mlb);
+                            });
+                        });
+                        li2.appendChild(ap);
                         ul.appendChild(li2);
                     });
                     li.appendChild(ul);

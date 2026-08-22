@@ -23,6 +23,7 @@ $router->post('api/pregao/watchlist/seed', PregaoController::class, 'watchlistSe
 $router->delete('api/pregao/watchlist/{mlbId}', PregaoController::class, 'watchlistRemove');
 $router->post('api/pregao/watchlist/collect', PregaoController::class, 'watchlistCollect');
 $router->post('api/pregao/listing-apply/simulate', PregaoController::class, 'listingApplySimulate');
+$router->post('api/pregao/listing-apply/apply', PregaoController::class, 'listingApplyApply');
 
 use App\Controllers\SentinelaController;
 $router->get('api/sentinela/snapshot', SentinelaController::class, 'snapshot');
