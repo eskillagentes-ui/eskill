@@ -22,6 +22,9 @@ const accountsState = {
 async function loadMetrics() {
     try {
         const metrics = await requestJson('/api/dashboard/metrics');
+        const profitNd = metrics.net_profit === null
+            || metrics.net_profit === undefined
+            || metrics.cogs_status === 'sem_cmv';
 
         const statsGrid = document.getElementById('stats-grid');
         statsGrid.innerHTML = `
@@ -75,14 +78,14 @@ async function loadMetrics() {
                     <div class="metric-icon warning">
                         <i class="bi bi-cash-coin"></i>
                     </div>
-                    ${metrics.profit_growth ? `
+                    ${!profitNd && metrics.profit_growth ? `
                     <span class="metric-change ${metrics.profit_growth >= 0 ? 'up' : 'down'}">
                         <i class="bi bi-arrow-${metrics.profit_growth >= 0 ? 'up' : 'down'}"></i>
                         ${Math.abs(metrics.profit_growth)}%
                     </span>` : ''}
                 </div>
-                <div class="metric-value">R$ ${formatNumber(metrics.net_profit || 0)}</div>
-                <div class="metric-label">Lucro Líquido</div>
+                <div class="metric-value">${profitNd ? 'n/d' : 'R$ ' + formatNumber(metrics.net_profit)}</div>
+                <div class="metric-label">Lucro Líquido${profitNd ? ' (sem CMV)' : ''}</div>
             </div>
         `;
 

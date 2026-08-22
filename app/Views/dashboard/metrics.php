@@ -105,7 +105,12 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
             return date.toLocaleDateString('pt-BR', { day: '2-digit', month: '2-digit' });
         });
         const revenueData = data.sales_over_time.map(item => item.total);
-        const profitData = data.sales_over_time.map(item => item.profit);
+        const profitData = data.sales_over_time.map(item => (
+            item.profit === null || item.profit === undefined || item.cogs_status === 'sem_cmv'
+                ? null
+                : item.profit
+        ));
+        const profitNd = profitData.every((v) => v === null);
 
         const ctxSales = document.getElementById('sales-chart').getContext('2d');
         new Chart(ctxSales, {
@@ -122,12 +127,13 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
                         tension: 0.4
                     },
                     {
-                        label: 'Lucro (R$)',
+                        label: profitNd ? 'Lucro n/d (sem CMV)' : 'Lucro (R$)',
                         data: profitData,
                         borderColor: '#198754',
                         backgroundColor: 'rgba(25, 135, 84, 0.1)',
                         fill: true,
-                        tension: 0.4
+                        tension: 0.4,
+                        spanGaps: false
                     }
                 ]
             },
@@ -139,6 +145,9 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
                     tooltip: {
                         callbacks: {
                             label: function(context) {
+                                if (context.parsed.y === null || context.parsed.y === undefined) {
+                                    return context.dataset.label + ': n/d';
+                                }
                                 return context.dataset.label + ': ' + context.parsed.y.toLocaleString('pt-BR', { style: 'currency', currency: 'BRL' });
                             }
                         }

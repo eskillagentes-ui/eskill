@@ -1203,6 +1203,18 @@ class AccountXRayService
         }
 
         // Calcular score competitivo geral
+        if ($competitiveInsights === []) {
+            return [
+                'score' => null,
+                'categories_analyzed' => 0,
+                'insights' => [],
+                'hidden_gaps' => [],
+                'opportunity_keywords' => [],
+                'available' => false,
+                'empty_reason' => 'search_public_unavailable',
+            ];
+        }
+
         $compScore = $this->calculateCompetitiveScore($competitiveInsights, $seoAudit);
 
         return [
@@ -1211,6 +1223,7 @@ class AccountXRayService
             'insights'           => $competitiveInsights,
             'hidden_gaps'        => $this->extractHiddenGaps($competitiveInsights),
             'opportunity_keywords' => $this->extractOpportunityKeywords($competitiveInsights, $seoAudit),
+            'available'          => true,
         ];
     }
 
@@ -1314,15 +1327,28 @@ class AccountXRayService
         // Score financeiro
         $finScore = $financialHealth['financial_health']['score'] ?? 50;
 
-        // Score competitivo
-        $compScore = $competitiveAnalysis['score'] ?? 50;
+        // Score competitivo: search 403 → não inventa 50 nem TRAVADA
+        $compAvailable = ($competitiveAnalysis['available'] ?? true) !== false
+            && isset($competitiveAnalysis['score'])
+            && $competitiveAnalysis['score'] !== null;
 
-        $overall = (int) round(
-            $accountHealth  * self::W_ACCOUNT_HEALTH
-                + $seoScore     * self::W_SEO_QUALITY
-                + $finScore     * self::W_FINANCIAL
-                + $compScore    * self::W_COMPETITIVE
-        );
+        if ($compAvailable) {
+            $compScore = (int) $competitiveAnalysis['score'];
+            $overall = (int) round(
+                $accountHealth  * self::W_ACCOUNT_HEALTH
+                    + $seoScore     * self::W_SEO_QUALITY
+                    + $finScore     * self::W_FINANCIAL
+                    + $compScore    * self::W_COMPETITIVE
+            );
+        } else {
+            $wAcc = self::W_ACCOUNT_HEALTH;
+            $wSeo = self::W_SEO_QUALITY;
+            $wFin = self::W_FINANCIAL;
+            $sum = $wAcc + $wSeo + $wFin;
+            $overall = (int) round(
+                ($accountHealth * $wAcc + $seoScore * $wSeo + $finScore * $wFin) / $sum
+            );
+        }
 
         return max(0, min(100, $overall));
     }

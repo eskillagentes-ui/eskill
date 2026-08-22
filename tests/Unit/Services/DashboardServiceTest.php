@@ -110,6 +110,7 @@ class DashboardServiceTest extends TestCase
 
         $expectedKeys = [
             'recent_orders_count', 'total_revenue', 'net_profit',
+            'has_real_cogs', 'cogs_status',
             'orders_by_status', 'sales_over_time',
             'total_items', 'active_items',
             'pending_questions', 'expiring_tokens',
@@ -132,7 +133,9 @@ class DashboardServiceTest extends TestCase
 
         $this->assertEquals(0, $result['recent_orders_count']);
         $this->assertEquals(0.0, $result['total_revenue']);
-        $this->assertEquals(0.0, $result['net_profit']);
+        $this->assertNull($result['net_profit']);
+        $this->assertFalse($result['has_real_cogs']);
+        $this->assertSame('sem_cmv', $result['cogs_status']);
         $this->assertEmpty($result['orders_by_status']);
         $this->assertEmpty($result['sales_over_time']);
     }
@@ -278,13 +281,15 @@ class DashboardServiceTest extends TestCase
         $this->assertStringContainsString('modo degradado', $source);
     }
 
-    public function test_resolvePendingQuestions_has_api_first_pattern(): void
+    public function test_resolvePendingQuestions_reads_local_ml_questions(): void
     {
         $source = file_get_contents(__DIR__ . '/../../../app/Services/DashboardService.php');
-        $this->assertStringContainsString('QuestionService', $source,
-            'Deve tentar API via QuestionService primeiro');
         $this->assertStringContainsString('ml_questions', $source,
-            'Deve ter fallback para tabela ml_questions');
+            'Deve contar perguntas na tabela ml_questions');
+        $this->assertStringNotContainsString('QuestionService', $source,
+            'Card de perguntas do dashboard não é mais API-first');
+        $this->assertStringContainsString('MissingCogsPolicy', $source);
+        $this->assertStringContainsString('presentSalesOverTimeProfit', $source);
     }
 
     // ===========================

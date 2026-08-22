@@ -971,7 +971,8 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
 
             set('kpi-gross-revenue', formatMoney(pnl.gross_revenue));
             set('kpi-net-revenue', formatMoney(pnl.net_revenue));
-            set('kpi-net-profit', formatMoney(metrics.net_profit), metrics.net_profit >= 0 ? 'text-success' : 'text-danger');
+            const profitNd = pnl.has_real_cogs !== true || metrics.net_profit === null || metrics.net_profit === undefined;
+            set('kpi-net-profit', profitNd ? 'n/d' : formatMoney(metrics.net_profit), profitNd ? 'text-muted' : (metrics.net_profit >= 0 ? 'text-success' : 'text-danger'));
             set('kpi-margin', formatPercent(pnl.avg_margin));
             set('kpi-orders', metrics.total_orders ?? 0);
             set('kpi-units-sold', pnl.units_sold ?? 0);

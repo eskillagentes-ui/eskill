@@ -243,4 +243,37 @@ final class AccountXRayLocalUniverseTest extends TestCase
         $this->assertSame('FACILYTY', $seller['nickname']);
         $this->assertSame('local_ml_accounts', $seller['_source']);
     }
+
+    public function testCompetitiveEmptyInsightsAreHonestNotTravada(): void
+    {
+        $svc = $this->createServiceStub(1335);
+        $result = $this->invokePrivate($svc, 'runCompetitiveAnalysis', [[], ['avg_seo_score' => 50]]);
+
+        $this->assertFalse($result['available']);
+        $this->assertNull($result['score']);
+        $this->assertSame([], $result['insights']);
+        $this->assertSame('search_public_unavailable', $result['empty_reason']);
+        $this->assertSame([], $result['hidden_gaps']);
+    }
+
+    public function testAnalyzeCategoryCompetitionOn403ReturnsEmptyArray(): void
+    {
+        $svc = $this->createServiceStub(1335);
+        $mock = $this->getMockBuilder(\App\Services\MercadoLivreClient::class)
+            ->disableOriginalConstructor()
+            ->onlyMethods(['searchItems'])
+            ->getMock();
+        $mock->method('searchItems')->willReturn([
+            'error' => 'forbidden',
+            'status' => 403,
+            'message' => 'At least one policy returned UNAUTHORIZED.',
+        ]);
+        $ref = new \ReflectionClass($svc);
+        $mlProp = $ref->getProperty('mlClient');
+        $mlProp->setAccessible(true);
+        $mlProp->setValue($svc, $mock);
+
+        $result = $this->invokePrivate($svc, 'analyzeCategoryCompetition', ['MLB1234', [], []]);
+        $this->assertSame([], $result);
+    }
 }
