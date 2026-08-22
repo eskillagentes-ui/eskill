@@ -972,10 +972,10 @@
                     notes.forEach((row) => {
                         const li2 = document.createElement('li');
                         const codes = Array.isArray(row && row.blockers)
-                            ? row.blockers.map((b) => (b && b.code) ? b.code : String(b || '')).filter(Boolean).join(', ')
+                            ? row.blockers.map((b) => (b && b.label) ? b.label : ((b && b.code) ? b.code : String(b || ''))).filter(Boolean).join(', ')
                             : String((row && (row.blocker || '')) || '');
                         li2.appendChild(document.createTextNode(
-                            String((row && row.mlb) || '') + ' · ' + codes + ' · ' + String((row && row.draft_title) || '')
+                            String((row && row.mlb) || '') + ' · ' + codes + ' · ' + String((row && row.draft_title) || '') + ' · rascunho local'
                         ));
                         const tag = document.createElement('span');
                         tag.className = 'nao-pub';

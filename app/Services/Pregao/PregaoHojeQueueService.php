@@ -871,6 +871,51 @@ final class PregaoHojeQueueService
     }
 
     /**
+     * Official ficha blockers in Portuguese the operator understands.
+     *
+     * @param mixed $raw
+     * @return list<array{code:string,label:string}>
+     */
+    private function normalizeBlockersPt($raw): array
+    {
+        $map = [
+            'photos_lt3' => 'menos de 3 fotos',
+            'stock_0' => 'estoque 0',
+            'catalog_not_listing' => 'catálogo no clássico',
+            'no_free_shipping' => 'sem frete grátis',
+            'not_premium' => 'sem Premium',
+            'unanswered_questions' => 'perguntas sem resposta',
+            'visits_no_sales' => 'visitas sem venda',
+        ];
+        if (!is_array($raw)) {
+            return [];
+        }
+        $out = [];
+        $seen = [];
+        foreach ($raw as $b) {
+            $code = '';
+            $label = '';
+            if (is_string($b)) {
+                $code = $b;
+            } elseif (is_array($b)) {
+                $code = (string) ($b['code'] ?? '');
+                $label = (string) ($b['label'] ?? '');
+            }
+            $code = trim($code);
+            if ($code === '' || isset($seen[$code])) {
+                continue;
+            }
+            $seen[$code] = true;
+            $out[] = [
+                'code' => $code,
+                'label' => $map[$code] ?? ($label !== '' ? $label : $code),
+            ];
+        }
+
+        return $out;
+    }
+
+    /**
      * @return array<string, mixed>
      */
     private function emptyInvestigacao(string $reason): array
@@ -907,7 +952,7 @@ final class PregaoHojeQueueService
                  FROM listing_investigations
                  WHERE account_id = ? AND status = 'open'
                  ORDER BY id DESC
-                 LIMIT 5"
+                 LIMIT 80"
             );
             $listStmt->execute([$accountId]);
             $items = [];
@@ -919,20 +964,15 @@ final class PregaoHojeQueueService
                 } elseif (!is_array($blockers)) {
                     $blockers = [];
                 }
-                $codes = [];
-                foreach ($blockers as $b) {
-                    if (is_string($b)) {
-                        $codes[] = $b;
-                    } elseif (is_array($b) && isset($b['code'])) {
-                        $codes[] = (string) $b['code'];
-                    }
-                }
+                $normalized = $this->normalizeBlockersPt($blockers);
+                $labels = array_column($normalized, 'label');
                 $items[] = [
                     'mlb' => (string) ($row['mlb_id'] ?? ''),
-                    'blockers' => $blockers,
-                    'blocker' => $codes[0] ?? '',
+                    'blockers' => $normalized,
+                    'blocker' => $labels[0] ?? '',
+                    'blocker_labels' => $labels,
                     'draft_title' => (string) ($row['draft_title'] ?? ''),
-                    'model_used' => (string) ($row['model_used'] ?? ''),
+                    'model_used' => (string) ($row['model_used'] ?? 'rules'),
                     'published' => false,
                     'nao_publicado' => true,
                 ];
@@ -966,9 +1006,19 @@ final class PregaoHojeQueueService
                 continue;
             }
             $mlb = (string) ($row['mlb'] ?? '');
-            $blocker = (string) ($row['blocker'] ?? '');
+            $labels = [];
+            if (isset($row['blocker_labels']) && is_array($row['blocker_labels'])) {
+                $labels = array_values(array_filter(array_map('strval', $row['blocker_labels'])));
+            } elseif (isset($row['blockers']) && is_array($row['blockers'])) {
+                foreach ($row['blockers'] as $b) {
+                    if (is_array($b) && isset($b['label'])) {
+                        $labels[] = (string) $b['label'];
+                    }
+                }
+            }
+            $blocker = $labels !== [] ? implode(', ', $labels) : (string) ($row['blocker'] ?? '');
             if ($mlb !== '') {
-                $bits[] = $mlb . ($blocker !== '' ? ('=' . $blocker) : '');
+                $bits[] = $mlb . ($blocker !== '' ? (' · ' . $blocker) : '');
             }
         }
         $hint = !$available

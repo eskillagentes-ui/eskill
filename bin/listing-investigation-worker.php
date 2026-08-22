@@ -9,8 +9,9 @@ declare(strict_types=1);
  * Diagnoses official blockers for FACILYTY items and stores local drafts.
  * Never PUT/POST Mercado Livre items, answers, ads, or pauses.
  *
- *   php bin/listing-investigation-worker.php --once --account=1335 --limit=5
+ *   php bin/listing-investigation-worker.php --once --account=1335 --limit=50
  *   php bin/listing-investigation-worker.php --once --no-llm
+ *   php bin/listing-investigation-worker.php --once --llm   # only if DASHSCOPE_MODEL_OK=1
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -31,20 +32,21 @@ use App\Database;
 use App\Services\ListingInvestigation\DashScopeClient;
 use App\Services\ListingInvestigation\ListingInvestigationService;
 
-$options = getopt('', ['account:', 'limit:', 'once', 'no-llm', 'help']);
+$options = getopt('', ['account:', 'limit:', 'once', 'no-llm', 'llm', 'help']);
 
 if (isset($options['help'])) {
     echo "Listing Investigation Worker (apply_blocked, no ML write)\n";
     echo "  --once            one shot (default behaviour)\n";
     echo "  --account=ID      default 1335 (FACILYTY). Staging refuses 1335.\n";
-    echo "  --limit=N         max listings per run (default 5)\n";
-    echo "  --no-llm          force rules-only even if DASHSCOPE_API_KEY is set\n";
+    echo "  --limit=N         max listings per run (default 50, covers ficha universe)\n";
+    echo "  --no-llm          rules-only (default)\n";
+    echo "  --llm             opt-in Qwen only if DASHSCOPE_MODEL_OK=1 (a model already returned 200)\n";
     exit(0);
 }
 
 $accountId = isset($options['account']) ? (int) $options['account'] : ListingInvestigationService::FACILYTY_ACCOUNT;
 $limit = isset($options['limit']) ? (int) $options['limit'] : ListingInvestigationService::DEFAULT_LIMIT;
-$forceRules = isset($options['no-llm']);
+$wantLlm = isset($options['llm']) && !isset($options['no-llm']);
 
 if (str_contains($root, 'staging.eskill.com.br') && $accountId === ListingInvestigationService::FACILYTY_ACCOUNT) {
     fwrite(STDERR, "staging workers must not point at FACILYTY 1335\n");
@@ -57,9 +59,19 @@ echo 'account=' . $accountId . " apply_blocked=true ml_write=false\n";
 
 try {
     $db = Database::getInstance();
-    $llm = $forceRules ? null : new DashScopeClient();
-    $keyPresent = $llm !== null && $llm->isConfigured();
-    echo 'dashscope_key=' . ($keyPresent ? 'yes' : 'no') . ($forceRules ? ' (forced rules)' : '') . "\n";
+    $llm = null;
+    $llmNote = 'rules (Alibaba not required)';
+    if ($wantLlm) {
+        $candidate = new DashScopeClient();
+        if ($candidate->isConfigured() && $candidate->hasKnownWorkingModel()) {
+            $llm = $candidate;
+            $llmNote = 'opt-in DashScope (known 200)';
+        } else {
+            $llmNote = 'rules (llm requested but no known-working model; skipped DashScope)';
+        }
+    }
+    $forceRules = $llm === null;
+    echo 'model_used_default=rules dashscope=' . $llmNote . "\n";
 
     $service = new ListingInvestigationService($db, $llm, $forceRules);
     $result = $service->run($accountId, $limit);

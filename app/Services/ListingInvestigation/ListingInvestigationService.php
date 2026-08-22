@@ -18,7 +18,8 @@ final class ListingInvestigationService
     public const STATUS_SOLD = 'sold';
     public const STATUS_BLOCKED = 'blocked';
     public const TITLE_MAX = 60;
-    public const DEFAULT_LIMIT = 5;
+    public const DEFAULT_LIMIT = 50;
+    public const MAX_LIMIT = 80;
     public const FACILYTY_ACCOUNT = 1335;
     public const FALCAO_ACCOUNT = 1336;
 
@@ -53,7 +54,7 @@ PROMPT;
     private ?DashScopeClient $llm;
     private bool $forceRules;
 
-    public function __construct(PDO $db, ?DashScopeClient $llm = null, bool $forceRules = false)
+    public function __construct(PDO $db, ?DashScopeClient $llm = null, bool $forceRules = true)
     {
         $this->db = $db;
         $this->llm = $llm;
@@ -72,7 +73,7 @@ PROMPT;
      */
     public function run(int $accountId, int $limit = self::DEFAULT_LIMIT): array
     {
-        $limit = max(1, min(20, $limit));
+        $limit = max(1, min(self::MAX_LIMIT, $limit));
         $this->ensureTable();
         $closed = $this->closeSold($accountId);
         $candidates = $this->pickCandidates($accountId, $limit);
@@ -121,7 +122,7 @@ PROMPT;
                  FROM listing_investigations
                  WHERE account_id = ? AND status = ?
                  ORDER BY id DESC
-                 LIMIT 5"
+                 LIMIT " . self::MAX_LIMIT
             );
             $listStmt->execute([$accountId, self::STATUS_OPEN]);
             $items = [];
@@ -196,7 +197,16 @@ PROMPT;
 
     private function llmEnabled(): bool
     {
-        return !$this->forceRules && $this->llm !== null && $this->llm->isConfigured();
+        // Default path is official-ficha rules. DashScope/Qwen is opt-in only
+        // after a model already returned HTTP 200 (DASHSCOPE_MODEL_OK=1).
+        if ($this->forceRules) {
+            return false;
+        }
+        if ($this->llm === null || !$this->llm->isConfigured()) {
+            return false;
+        }
+
+        return $this->llm->hasKnownWorkingModel();
     }
 
     /**
@@ -471,13 +481,13 @@ PROMPT;
             $out[] = ['code' => 'stock_0', 'label' => 'estoque 0'];
         }
         if ($catalogId !== '' && !$isCatalogListing) {
-            $out[] = ['code' => 'catalog_not_listing', 'label' => 'tem catalog_product_id mas anúncio clássico'];
+            $out[] = ['code' => 'catalog_not_listing', 'label' => 'catálogo no clássico'];
         }
         if (!$freeShipping) {
             $out[] = ['code' => 'no_free_shipping', 'label' => 'sem frete grátis'];
         }
         if ($listingType !== 'gold_pro') {
-            $out[] = ['code' => 'not_premium', 'label' => 'não é Premium (gold_pro)'];
+            $out[] = ['code' => 'not_premium', 'label' => 'sem Premium'];
         }
         if ($this->hasUnansweredQuestions($item)) {
             $out[] = ['code' => 'unanswered_questions', 'label' => 'perguntas sem resposta'];

@@ -91,20 +91,20 @@ Diagnóstico — blockers oficiais (únicos que valem):
 
 Título: rascunho Product+Brand+Model+spec. **Não aplicar.** MODEL = só o modelo real já presente em `attributes` (id `MODEL`). Palavra de busca vai no TÍTULO, nunca no atributo MODEL. Peças: compatibilidade no widget, não lista de motos no título. Nunca reescreva MODEL exceto para a string real já no atributo.
 
-Modelo: Qwen3.7-Plus (`qwen3.7-plus`, visão+texto) no caso normal. Qwen3.8-Max (`qwen3.8-max`) só em caso difícil (visits_30d>0 e sales_30d=0). Sem chave DashScope: ainda grava investigação rules-only (`model_used=rules`) para a Jess ver resultado no mesmo dia.
+Modelo: **rules-first** (`model_used=rules`). Alibaba / DashScope / Qwen **não é obrigatório** e não é o caminho padrão. Não gastar tempo em intl 403 → CN 401. Qwen fica opcional depois, só se um modelo já tiver devolvido HTTP 200 (`DASHSCOPE_MODEL_OK=1` + `--llm`). Sem isso o worker não chama DashScope.
 
-Saída: tabela `listing_investigations` + bucket Pregão `investigacao` (contagem de abertas + últimos 5 mlb+blocker) + campo `hoje.investigacao` com mlb, blockers, draft_title, “não publicado”. `apply_blocked=true`, `ml_write=false`. Sem botão aplicar que bata no ML.
+Saída: tabela `listing_investigations` + bucket Pregão `investigacao` (todas as abertas, blockers oficiais em português: sem Premium, sem frete grátis, menos de 3 fotos, catálogo no clássico) + `hoje.investigacao` com mlb, blockers, draft_title, “não publicado”. `apply_blocked=true`, `ml_write=false`. Sem botão aplicar que bata no ML. `draft_title` fica rascunho local.
 
 Hermes, se existir, só como caller de **rascunho** atrás de `apply_blocked=true`. Nunca writer irrestrito. Não iniciar clone cron.
 
 Siga o MLB até a primeira venda local ou blocker documentado.
 
-Sucesso: 3–5 investigações locais visíveis no Pregão Hoje, FACILYTY sem misturar 1336, zero escrita ML.
+Sucesso: fila completa da ficha FACILYTY (1335) investigada (rules, sem Alibaba), visível no Pregão Hoje, sem misturar 1336, zero escrita ML.
 
 ---
 ## Como sobe
 
 1. Jess respondeu **aprovado** nos três textos observe+queue em 2026-08-21 e ordered implement-all do Agente Investigação no mesmo dia.
-2. Cada agente é um ciclo de leitura (cron GET de perguntas já existente + monitor 5 min read-only + investigação ≥15 min) + escrita só no Pregão/perguntas/`listing_investigations` **local**.
+2. Cada agente é um ciclo de leitura (cron GET de perguntas já existente + monitor 5 min read-only + investigação a cada 15 min, **rules-fast**, sem timeout de LLM) + escrita só no Pregão/perguntas/`listing_investigations` **local**.
 3. Envelope do Pregão Hoje: `source=local`, `apply_blocked=true`, `ml_write=false`.
 4. Fase F (aplicar no ML: foto, frete, catálogo, Premium, resposta) só com GO item a item, conta por conta. FACILYTY nunca em lote.

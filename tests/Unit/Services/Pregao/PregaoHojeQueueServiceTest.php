@@ -543,6 +543,9 @@ final class PregaoHojeQueueServiceTest extends TestCase
         self::assertTrue($queue['investigacao']['items'][0]['nao_publicado']);
         self::assertStringContainsString('MLB-INV', $byId['investigacao']['hint']);
         self::assertStringContainsString('não publicado', $byId['investigacao']['hint']);
+        self::assertStringContainsString('menos de 3 fotos', $byId['investigacao']['hint']);
+        self::assertSame('menos de 3 fotos', $queue['investigacao']['items'][0]['blocker']);
+        self::assertSame('rules', $queue['investigacao']['items'][0]['model_used']);
         self::assertStringNotContainsString('MLB-FALCAO', $byId['investigacao']['hint']);
         self::assertStringNotContainsString('apply', json_encode($queue['investigacao']['items']));
     }

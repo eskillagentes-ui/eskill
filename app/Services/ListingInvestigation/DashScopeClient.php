@@ -41,6 +41,17 @@ final class DashScopeClient
         return $this->apiKey !== '';
     }
 
+    /**
+     * True only when ops already saw HTTP 200 from a DashScope model.
+     * Default false: Alibaba is abandoned; do not probe intl 403 then CN 401.
+     */
+    public function hasKnownWorkingModel(): bool
+    {
+        $flag = strtolower((string) ($this->env('DASHSCOPE_MODEL_OK') ?? $this->env('LISTING_INVESTIGATION_LLM') ?? ''));
+
+        return in_array($flag, ['1', 'true', 'yes'], true);
+    }
+
     public function lastError(): ?string
     {
         return $this->lastError;
@@ -97,14 +108,8 @@ final class DashScopeClient
      */
     private function baseCandidates(): array
     {
-        $bases = [$this->baseUrl];
-        foreach ([self::INTL_BASE, self::CN_BASE] as $extra) {
-            if (!in_array($extra, $bases, true)) {
-                $bases[] = $extra;
-            }
-        }
-
-        return $bases;
+        // Single configured base. Never hunt intl → CN (403 then 401 lastError).
+        return [$this->baseUrl];
     }
 
     /**

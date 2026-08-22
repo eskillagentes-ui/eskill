@@ -15,7 +15,7 @@ use PHPUnit\Framework\TestCase;
  */
 final class ListingInvestigationServiceTest extends TestCase
 {
-    public function testMissingKeyRulesPathStillProducesRow(): void
+    public function testRulesPathDoesNotCallDashScopeEvenWithKey(): void
     {
         $db = $this->sqliteCatalog();
         $this->insertItem($db, 1335, 'MLB-PHOTO', 'Farol CG 160 Honda', [
@@ -32,23 +32,34 @@ final class ListingInvestigationServiceTest extends TestCase
             'domain_id' => 'MLB-MOTORCYCLE_HEADLIGHTS',
         ], 4);
 
-        $llm = new DashScopeClient('', DashScopeClient::DEFAULT_BASE, static function (): ?array {
-            self::fail('DashScope must not be called without a key');
+        $called = 0;
+        $llm = new DashScopeClient('sk-test-not-real-key-for-unit', DashScopeClient::DEFAULT_BASE, static function () use (&$called): ?array {
+            $called++;
+            self::fail('DashScope must not be called on the default rules path');
         });
-        $service = new ListingInvestigationService($db, $llm, false);
-        $result = $service->run(1335, 5);
+        self::assertTrue($llm->isConfigured());
+        self::assertFalse($llm->hasKnownWorkingModel());
 
+        $service = new ListingInvestigationService($db, $llm);
+        $result = $service->run(1335, 50);
+
+        self::assertSame(0, $called);
         self::assertTrue($result['apply_blocked']);
         self::assertFalse($result['ml_write']);
+        self::assertSame('rules', $result['model_key']);
         self::assertCount(1, $result['investigated']);
         $row = $result['investigated'][0];
         self::assertSame('rules', $row['model_used']);
         self::assertSame('MLB-PHOTO', $row['mlb_id']);
         self::assertFalse($row['published']);
         $codes = array_column($row['blockers'], 'code');
+        $labels = array_column($row['blockers'], 'label');
         self::assertContains('photos_lt3', $codes);
         self::assertContains('no_free_shipping', $codes);
         self::assertContains('not_premium', $codes);
+        self::assertContains('menos de 3 fotos', $labels);
+        self::assertContains('sem frete grátis', $labels);
+        self::assertContains('sem Premium', $labels);
         self::assertSame(1, (int) $db->query('SELECT COUNT(*) FROM listing_investigations')->fetchColumn());
     }
 
@@ -72,15 +83,21 @@ final class ListingInvestigationServiceTest extends TestCase
             'attributes' => [['id' => 'MODEL', 'value_name' => 'STUFFED TITAN FAN START TODAY']],
         ], 0);
 
-        $service = new ListingInvestigationService($db, null, true);
-        $result = $service->run(1335, 5);
+        $called = 0;
+        $llm = new DashScopeClient('sk-test-not-real-key-for-unit', DashScopeClient::DEFAULT_BASE, static function () use (&$called): ?array {
+            $called++;
+            return null;
+        });
+        $service = new ListingInvestigationService($db, $llm);
+        $result = $service->run(1335, 50);
+        self::assertSame(0, $called);
         $mlbs = array_column($result['investigated'], 'mlb_id');
         self::assertSame(['MLB-FAC'], $mlbs);
         $all = $db->query('SELECT mlb_id FROM listing_investigations')->fetchAll(PDO::FETCH_COLUMN);
         self::assertSame(['MLB-FAC'], $all);
     }
 
-    public function testModelStuffingForbiddenInPromptAndOutputContract(): void
+    public function testModelStuffingForbiddenWithoutCallingDashScope(): void
     {
         self::assertStringContainsString('Nunca reescreva MODEL', ListingInvestigationService::SYSTEM_PROMPT);
         self::assertStringContainsString('Nunca coloque long-tail', ListingInvestigationService::SYSTEM_PROMPT);
@@ -103,33 +120,17 @@ final class ListingInvestigationServiceTest extends TestCase
             'domain_id' => 'MLB-MOTORCYCLE_HEADLIGHTS',
         ], 3);
 
-        $transport = static function (string $url, array $headers, array $payload): array {
-            self::assertStringContainsString('chat/completions', $url);
-            $joined = json_encode($payload, JSON_UNESCAPED_UNICODE);
-            self::assertStringContainsString('Nunca reescreva MODEL', $joined);
-            self::assertStringContainsString('CG 160', $joined);
-            self::assertSame('qwen3.8-max', $payload['model']);
-            return [
-                'model' => 'qwen3.8-max',
-                'choices' => [[
-                    'message' => [
-                        'content' => json_encode([
-                            'blockers' => [['code' => 'visits_no_sales', 'label' => 'visitas']],
-                            'draft_title' => 'Farol Honda CG 160',
-                            'draft_notes' => 'ok',
-                            'model_attribute' => 'CG 160 Titan Fan Start Today Kit Farol',
-                            'published' => true,
-                        ]),
-                    ],
-                ]],
-            ];
-        };
-        $llm = new DashScopeClient('sk-test-not-real-key-for-unit', DashScopeClient::DEFAULT_BASE, $transport);
-        $service = new ListingInvestigationService($db, $llm, false);
+        $called = 0;
+        $llm = new DashScopeClient('sk-test-not-real-key-for-unit', DashScopeClient::DEFAULT_BASE, static function () use (&$called): ?array {
+            $called++;
+            self::fail('rules path must not call DashScope to enforce MODEL contract');
+        });
+        $service = new ListingInvestigationService($db, $llm);
         $result = $service->run(1335, 1);
+        self::assertSame(0, $called);
         $row = $result['investigated'][0];
-        self::assertStringContainsString('MODEL não reescrito', $row['draft_notes']);
-        self::assertStringNotContainsString('Titan Fan Start Today Kit Farol', $row['draft_title']);
+        self::assertSame('rules', $row['model_used']);
+        self::assertStringNotContainsString('Titan Fan Start', $row['draft_title']);
         self::assertFalse($row['published']);
         self::assertTrue($service->looksLikeLongTail('CG 160 Titan Fan Start Today Kit Farol'));
         self::assertNull($service->realModel([
@@ -161,50 +162,120 @@ final class ListingInvestigationServiceTest extends TestCase
             'listing_type_id' => 'gold_pro',
             'available_quantity' => 1,
         ], 1);
-        $result = (new ListingInvestigationService($db, null, true))->run(1335, 5);
+        $result = (new ListingInvestigationService($db))->run(1335, 50);
         self::assertFalse($result['ml_write']);
         self::assertTrue($result['apply_blocked']);
+        self::assertSame('rules', $result['model_key']);
     }
 
-    public function testHardCaseUsesMaxAndNormalUsesPlus(): void
+    public function testDefaultLimitCoversFichaUniverseWithoutDashScope(): void
+    {
+        self::assertSame(50, ListingInvestigationService::DEFAULT_LIMIT);
+        self::assertGreaterThanOrEqual(30, ListingInvestigationService::DEFAULT_LIMIT);
+
+        $db = $this->sqliteCatalog();
+        for ($i = 1; $i <= 35; $i++) {
+            $this->insertItem($db, 1335, sprintf('MLB-%03d', $i), 'Peça ' . $i, [
+                'pictures' => [1],
+                'shipping' => ['free_shipping' => false],
+                'listing_type_id' => 'gold_special',
+                'available_quantity' => 2,
+            ], 2);
+        }
+        $this->insertItem($db, 1336, 'MLB-FALCAO', 'Outra loja', [
+            'pictures' => [],
+            'shipping' => ['free_shipping' => false],
+            'listing_type_id' => 'gold_special',
+            'available_quantity' => 0,
+        ], 0);
+
+        $called = 0;
+        $llm = new DashScopeClient('sk-test-not-real-key-for-unit', DashScopeClient::DEFAULT_BASE, static function () use (&$called): ?array {
+            $called++;
+            return null;
+        });
+        $result = (new ListingInvestigationService($db, $llm))->run(1335);
+        self::assertSame(0, $called);
+        self::assertCount(35, $result['investigated']);
+        self::assertSame('rules', $result['model_key']);
+        $mlbs = array_column($result['investigated'], 'mlb_id');
+        self::assertNotContains('MLB-FALCAO', $mlbs);
+        foreach ($result['investigated'] as $row) {
+            self::assertSame('rules', $row['model_used']);
+            self::assertFalse($row['published']);
+        }
+    }
+
+    public function testDashScopeDoesNotHuntIntlThenCn(): void
+    {
+        $src = file_get_contents(dirname(__DIR__, 4) . '/app/Services/ListingInvestigation/DashScopeClient.php');
+        self::assertIsString($src);
+        self::assertStringContainsString('hasKnownWorkingModel', $src);
+        self::assertStringContainsString('Never hunt intl', $src);
+        self::assertStringNotContainsString('foreach ([self::INTL_BASE, self::CN_BASE]', $src);
+        $client = new DashScopeClient('sk-test-not-real-key-for-unit');
+        self::assertFalse($client->hasKnownWorkingModel());
+    }
+
+    public function testHardCaseDetectionDoesNotEnableLlm(): void
     {
         $itemHard = [
             'visits_30d' => 8,
             'sales_30d' => 0,
             'status' => 'active',
         ];
-        $itemNormal = [
-            'visits_30d' => 0,
-            'sales_30d' => 0,
-            'status' => 'active',
-        ];
-        $svc = new ListingInvestigationService($this->sqliteCatalog(), null, true);
+        $svc = new ListingInvestigationService($this->sqliteCatalog());
         self::assertTrue($svc->isHardCase($itemHard));
-        self::assertFalse($svc->isHardCase($itemNormal));
-        self::assertSame('qwen3.7-plus', DashScopeClient::MODEL_PLUS);
-        self::assertSame('qwen3.8-max', DashScopeClient::MODEL_MAX);
+        self::assertFalse($svc->isHardCase(['visits_30d' => 0, 'sales_30d' => 0, 'status' => 'active']));
     }
 
-    public function testPregaoSnapshotIgnores1336AndMarksNotPublished(): void
+    public function testPregaoSnapshotShowsAllOpenPortugueseLabelsAndIgnores1336(): void
     {
         $db = $this->sqliteCatalog();
-        $svc = new ListingInvestigationService($db, null, true);
+        $svc = new ListingInvestigationService($db);
         $svc->ensureTable();
-        $db->exec("INSERT INTO listing_investigations (account_id, mlb_id, status, blockers, draft_title, draft_notes, model_used)
-                   VALUES (1335, 'MLB-A', 'open', '[{\"code\":\"photos_lt3\"}]', 'Farol Honda CG 160', 'x', 'rules')");
+        for ($i = 1; $i <= 8; $i++) {
+            $db->exec(
+                "INSERT INTO listing_investigations (account_id, mlb_id, status, blockers, draft_title, draft_notes, model_used)
+                 VALUES (1335, 'MLB-A{$i}', 'open', '[{\"code\":\"not_premium\",\"label\":\"sem Premium\"}]', 'Peça {$i}', 'x', 'rules')"
+            );
+        }
         $db->exec("INSERT INTO listing_investigations (account_id, mlb_id, status, blockers, draft_title, draft_notes, model_used)
                    VALUES (1336, 'MLB-FALCAO', 'open', '[{\"code\":\"stock_0\"}]', 'nope', 'x', 'rules')");
         $snap = $svc->pregaoSnapshot(1335);
         self::assertTrue($snap['apply_blocked']);
         self::assertFalse($snap['ml_write']);
         self::assertFalse($snap['published']);
-        self::assertSame(1, $snap['count']);
-        self::assertSame('MLB-A', $snap['items'][0]['mlb']);
+        self::assertSame(8, $snap['count']);
+        self::assertCount(8, $snap['items']);
+        $mlbs = array_column($snap['items'], 'mlb');
+        self::assertNotContains('MLB-FALCAO', $mlbs);
         self::assertTrue($snap['items'][0]['nao_publicado']);
         self::assertFalse($snap['items'][0]['published']);
     }
 
-    public function testWorkerCliRefusesStaging1335AndIsReadOnly(): void
+    public function testCatalogClassicAndPremiumLabels(): void
+    {
+        $svc = new ListingInvestigationService($this->sqliteCatalog());
+        $blockers = $svc->officialBlockers([
+            'pictures' => [1, 2],
+            'available_quantity' => 1,
+            'catalog_product_id' => 'MLB123',
+            'catalog_listing' => false,
+            'shipping' => ['free_shipping' => false],
+            'listing_type_id' => 'gold_special',
+        ]);
+        $byCode = [];
+        foreach ($blockers as $b) {
+            $byCode[$b['code']] = $b['label'];
+        }
+        self::assertSame('menos de 3 fotos', $byCode['photos_lt3']);
+        self::assertSame('catálogo no clássico', $byCode['catalog_not_listing']);
+        self::assertSame('sem frete grátis', $byCode['no_free_shipping']);
+        self::assertSame('sem Premium', $byCode['not_premium']);
+    }
+
+    public function testWorkerCliRulesFirstHighLimitReadOnly(): void
     {
         $worker = file_get_contents(dirname(__DIR__, 4) . '/bin/listing-investigation-worker.php');
         self::assertIsString($worker);
@@ -212,6 +283,9 @@ final class ListingInvestigationServiceTest extends TestCase
         self::assertStringContainsString('must not point at FACILYTY 1335', $worker);
         self::assertStringContainsString('apply_blocked=true', $worker);
         self::assertStringContainsString('--once', $worker);
+        self::assertStringContainsString('default 50', $worker);
+        self::assertStringContainsString('DASHSCOPE_MODEL_OK', $worker);
+        self::assertStringContainsString('Alibaba not required', $worker);
     }
 
     /**
