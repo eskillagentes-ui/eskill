@@ -37,14 +37,43 @@ final class ListingApplyJobService
     }
 
     /**
+     * Pregao / HTTP: never PUT. Apply from UI is refused without CLI --apply.
+     *
+     * @return array<string, mixed>
+     */
+    public function runFromWeb(int $accountId, string $mlb, bool $applyRequested): array
+    {
+        if ($applyRequested) {
+            $this->ensureTable();
+            $mlb = strtoupper(trim($mlb));
+            return $this->persist(
+                $accountId,
+                $mlb,
+                self::STATUS_BLOCKED,
+                true,
+                [],
+                null,
+                'web_apply_requires_cli_flag',
+                false
+            );
+        }
+
+        return $this->run($accountId, $mlb, false);
+    }
+
+    /**
      * @return array<string, mixed>
      */
     public function run(int $accountId, string $mlb, bool $apply): array
     {
         $this->ensureTable();
         $mlb = strtoupper(trim($mlb));
+        if ($apply && $mlb === '') {
+            return $this->persist($accountId, $mlb, self::STATUS_BLOCKED, true, [], null, 'apply_requires_mlb_allowlist', false);
+        }
         if ($accountId <= 0 || !$this->isValidMlb($mlb)) {
-            return $this->persist($accountId, $mlb, self::STATUS_BLOCKED, false, [], null, 'mlb_or_account_invalid', false);
+            $reason = $apply ? 'apply_requires_mlb_allowlist' : 'mlb_or_account_invalid';
+            return $this->persist($accountId, $mlb, self::STATUS_BLOCKED, $apply, [], null, $reason, false);
         }
         if (str_contains($mlb, ',') || str_contains($mlb, ' ')) {
             return $this->persist($accountId, $mlb, self::STATUS_BLOCKED, false, [], null, 'lote_sem_allowlist', false);
