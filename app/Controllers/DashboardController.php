@@ -28,6 +28,27 @@ class DashboardController extends BaseController
     }
 
     /**
+     * Telas de clone: so a conta ativa da sessao. Clone continua desligado.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function cloneScreenAccounts(): array
+    {
+        $accountId = \App\Helpers\AccountScopeHelper::activeAccountId();
+        if ($accountId === null) {
+            return [];
+        }
+
+        $db = Database::getInstance();
+        $stmt = $db->prepare(
+            "SELECT id, nickname, ml_user_id FROM ml_accounts WHERE status = 'active' AND id = :id ORDER BY nickname, ml_user_id"
+        );
+        $stmt->execute(['id' => $accountId]);
+
+        return $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+
+    /**
      * Lazy load: instancia CatalogCloneService apenas quando necessário
      */
     private function getCloneService(): \App\Services\CatalogCloneService
@@ -967,10 +988,8 @@ class DashboardController extends BaseController
 
         $currentUser = $this->userService->getCurrentUser();
 
-        // Buscar contas ativas para o select
-        $db = Database::getInstance();
-        $stmt = $db->query("SELECT id, nickname, ml_user_id FROM ml_accounts WHERE status = 'active' ORDER BY nickname, ml_user_id");
-        $accounts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        // Conta ativa da sessao apenas. Clone permanece desabilitado, sem listar outras contas.
+        $accounts = $this->cloneScreenAccounts();
 
         // Buscar histórico recente
         $history = $this->getCloneService()->getCloneHistory(20);
@@ -1068,12 +1087,8 @@ class DashboardController extends BaseController
             $pageTitle  = 'Wizard de Clonagem por Concorrente';
             $activePage = 'catalog-clone-wizard';
 
-            // Buscar contas ativas para o select de destino
-            $db       = Database::getInstance();
-            $stmt     = $db->query(
-                "SELECT id, nickname, ml_user_id FROM ml_accounts WHERE status = 'active' ORDER BY nickname, ml_user_id"
-            );
-            $accounts = $stmt->fetchAll(PDO::FETCH_ASSOC);
+            // Conta ativa da sessao apenas. Clone permanece desabilitado.
+            $accounts = $this->cloneScreenAccounts();
 
             ob_start();
             require __DIR__ . '/../Views/dashboard/catalog_clone_wizard.php';
@@ -1467,9 +1482,7 @@ class DashboardController extends BaseController
         $pageTitle = 'Clonar Anúncios';
         $activePage = 'clonar-anuncios';
 
-        $db = Database::getInstance();
-        $stmt = $db->query("SELECT id, nickname, ml_user_id FROM ml_accounts WHERE status = 'active' ORDER BY nickname, ml_user_id");
-        $accounts = $stmt->fetchAll(\PDO::FETCH_ASSOC);
+        $accounts = $this->cloneScreenAccounts();
 
         ob_start();
         require __DIR__ . '/../Views/dashboard/clonar-anuncios.php';
