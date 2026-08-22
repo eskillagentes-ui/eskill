@@ -150,4 +150,78 @@ class ItemPerformanceService
             'pending_rules' => $pendingRules,
         ];
     }
+
+    /**
+     * Official 30d visits: GET /items/{id}/visits/time_window.
+     * Fail-soft 403: success=false and visits=null (do not persist 0).
+     *
+     * @return array{success:bool,item_id:string,visits:?int,error?:string,status?:int}
+     */
+    public function getItemVisits30d(string $itemId): array
+    {
+        $itemId = trim($itemId);
+        if ($itemId === '') {
+            return ['success' => false, 'item_id' => '', 'visits' => null, 'error' => 'item_id inválido'];
+        }
+
+        try {
+            $raw = $this->mlClient->get("/items/{$itemId}/visits/time_window", [
+                'last' => 30,
+                'unit' => 'day',
+            ]);
+            if (!is_array($raw) || isset($raw['error'])) {
+                $status = (int) ($raw['status'] ?? $raw['http_status'] ?? 0);
+
+                return [
+                    'success' => false,
+                    'item_id' => $itemId,
+                    'visits' => null,
+                    'error' => (string) ($raw['message'] ?? $raw['error'] ?? 'visits_unavailable'),
+                    'status' => $status,
+                ];
+            }
+            $visits = $this->parseVisitsWindowPayload($raw);
+            if ($visits === null) {
+                return [
+                    'success' => false,
+                    'item_id' => $itemId,
+                    'visits' => null,
+                    'error' => 'visits_unparseable',
+                ];
+            }
+
+            return ['success' => true, 'item_id' => $itemId, 'visits' => $visits];
+        } catch (\Throwable $e) {
+            return [
+                'success' => false,
+                'item_id' => $itemId,
+                'visits' => null,
+                'error' => $e->getMessage(),
+            ];
+        }
+    }
+
+    /**
+     * @param array<string, mixed> $raw
+     */
+    public function parseVisitsWindowPayload(array $raw): ?int
+    {
+        if (array_key_exists('total_visits', $raw) && is_numeric($raw['total_visits'])) {
+            return (int) $raw['total_visits'];
+        }
+        if (array_key_exists('total', $raw) && is_numeric($raw['total'])) {
+            return (int) $raw['total'];
+        }
+        $sum = 0;
+        $saw = false;
+        foreach ($raw['results'] ?? [] as $day) {
+            if (!is_array($day) || !isset($day['total']) || !is_numeric($day['total'])) {
+                continue;
+            }
+            $sum += (int) $day['total'];
+            $saw = true;
+        }
+
+        return $saw ? $sum : null;
+    }
 }

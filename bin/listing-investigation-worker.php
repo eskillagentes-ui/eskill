@@ -79,9 +79,11 @@ try {
 
     echo 'closed_sold=' . (int) $result['closed_sold'] . "\n";
     echo 'investigated=' . count($result['investigated']) . "\n";
+    echo 'refreshed=' . (int) ($result['refreshed_count'] ?? 0) . "\n";
     echo 'pregao.investigacao.count=' . (int) $snap['count'] . " published=no\n";
 
-    foreach ($result['investigated'] as $row) {
+    $printed = array_merge($result['refreshed'] ?? [], $result['investigated']);
+    foreach ($printed as $row) {
         $codes = [];
         foreach ($row['blockers'] as $b) {
             $codes[] = is_array($b) ? (string) ($b['code'] ?? '') : (string) $b;
