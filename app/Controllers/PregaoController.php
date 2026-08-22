@@ -565,4 +565,37 @@ class PregaoController extends BaseController
         ], JSON_UNESCAPED_UNICODE);
     }
 
+    /**
+     * POST /api/pregao/listing-apply/simulate
+     * Dry-run only. Body {mlb}. Ignores account_id da request e apply=true.
+     */
+    public function listingApplySimulate(): void
+    {
+        header('Content-Type: application/json; charset=utf-8');
+        header('Cache-Control: private, no-store');
+        if (!$this->requireAuthJson()) {
+            return;
+        }
+        $accountId = $this->getActiveAccountId();
+        if ($accountId === null || $accountId <= 0) {
+            http_response_code(403);
+            echo json_encode(['success' => false, 'error' => 'Conta indisponível', 'ml_write' => false]);
+            return;
+        }
+        $body = json_decode((string) file_get_contents('php://input'), true);
+        $mlb = is_array($body) ? (string) ($body['mlb'] ?? $body['mlb_id'] ?? '') : '';
+        try {
+            $svc = new \App\Services\ListingApply\ListingApplyJobService(\App\Database::getInstance());
+            $row = $svc->run($accountId, $mlb, false);
+            echo json_encode([
+                'success' => $row['status'] === \App\Services\ListingApply\ListingApplyJobService::STATUS_DRY_RUN,
+                'data' => $row,
+                'meta' => ['ml_write' => false, 'api_called' => false, 'dry_run' => true],
+            ], JSON_UNESCAPED_UNICODE);
+        } catch (Throwable) {
+            http_response_code(500);
+            echo json_encode(['success' => false, 'error' => 'Falha ao simular', 'ml_write' => false]);
+        }
+    }
+
 }
