@@ -43,6 +43,30 @@ final class ListingTitleDraftBuilderTest extends TestCase
         self::assertStringNotContainsString('espelho quarto', mb_strtolower($draft['draft_title']));
     }
 
+    public function testHandlebarSkipsPackageMeasureAndStuffedModel(): void
+    {
+        $builder = new ListingTitleDraftBuilder();
+        $item = [
+            'title' => 'Guidão Honda Cg 160 Titan Fan Start Rosca Preto Texturizado Cromado',
+            'domain_id' => 'MLB-MOTORCYCLE_HANDLEBARS',
+            'attributes' => [
+                ['id' => 'BRAND', 'value_name' => 'AWA'],
+                ['id' => 'MODEL', 'value_name' => 'Awa Preto Texturizado Modelo Original Rosca Interna Sem Peso'],
+                ['id' => 'OEM', 'value_name' => '53100-KVS-F00'],
+                ['id' => 'PART_NUMBER', 'value_name' => '1'],
+                ['id' => 'COLOR', 'value_name' => 'CROMADO PRATA TEXTURIZADO'],
+                ['id' => 'HEIGHT', 'value_name' => '13 cm'],
+                ['id' => 'WIDTH', 'value_name' => '10 cm'],
+            ],
+        ];
+        $svc = new ListingInvestigationService($this->sqliteCatalog());
+        self::assertNull($svc->realModel($item));
+        $draft = $builder->build($item, [], null);
+        self::assertSame('Guidão AWA 53100-KVS-F00 Cromado', $draft['draft_title']);
+        self::assertStringNotContainsString('13x10', $draft['draft_title']);
+        self::assertStringNotContainsString('Titan', $draft['draft_title']);
+    }
+
     public function testDoesNotInventBrandAndUsesRealModelPlusColor(): void
     {
         $builder = new ListingTitleDraftBuilder();
