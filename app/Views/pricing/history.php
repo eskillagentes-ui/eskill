@@ -13,9 +13,7 @@ declare(strict_types=1);
  */
 
 $pageTitle = 'Histórico de Preços - Precificador Inteligente';
-$accountId = $accountId
-    ?? ($_SESSION['active_ml_account_id'] ?? null)
-    ?? ($_SESSION['current_account_id'] ?? 1);
+$accountId = $accountId ?? \App\Helpers\SessionHelper::getActiveAccountId();
 ?>
 <!DOCTYPE html>
 <html lang="pt-BR">

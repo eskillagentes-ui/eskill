@@ -4,6 +4,7 @@ declare(strict_types=1);
 namespace App\Controllers;
 
 use App\Core\Request;
+use App\Helpers\SessionHelper;
 use App\Services\RealTimeNotificationService;
 use App\Services\UserService;
 
@@ -37,7 +38,10 @@ class RealTimeNotificationController
             return;
         }
         
-        $accountId = $user['current_account_id'] ?? $user['id'];
+        $accountId = $this->requireActiveAccountId();
+        if ($accountId === null) {
+            return;
+        }
         
         // Verificar horário silencioso
         $isQuiet = $this->notificationService->isQuietHours($accountId);
@@ -91,7 +95,10 @@ class RealTimeNotificationController
             return;
         }
         
-        $accountId = $user['current_account_id'] ?? $user['id'];
+        $accountId = $this->requireActiveAccountId();
+        if ($accountId === null) {
+            return;
+        }
         $type = $this->request->get('type');
         $limit = min(100, max(1, $this->request->getInt('limit', 50)));
         
@@ -143,7 +150,10 @@ class RealTimeNotificationController
             return;
         }
         
-        $accountId = $user['current_account_id'] ?? $user['id'];
+        $accountId = $this->requireActiveAccountId();
+        if ($accountId === null) {
+            return;
+        }
         $input = json_decode(file_get_contents('php://input'), true);
         $type = $input['type'] ?? null;
         
@@ -169,7 +179,10 @@ class RealTimeNotificationController
             return;
         }
         
-        $accountId = $user['current_account_id'] ?? $user['id'];
+        $accountId = $this->requireActiveAccountId();
+        if ($accountId === null) {
+            return;
+        }
         $settings = $this->notificationService->getSettings($accountId);
         $availableSounds = RealTimeNotificationService::getAvailableSounds();
         
@@ -193,7 +206,10 @@ class RealTimeNotificationController
             return;
         }
         
-        $accountId = $user['current_account_id'] ?? $user['id'];
+        $accountId = $this->requireActiveAccountId();
+        if ($accountId === null) {
+            return;
+        }
         $input = json_decode(file_get_contents('php://input'), true);
         
         $settings = [
@@ -230,7 +246,10 @@ class RealTimeNotificationController
             return;
         }
         
-        $accountId = $user['current_account_id'] ?? $user['id'];
+        $accountId = $this->requireActiveAccountId();
+        if ($accountId === null) {
+            return;
+        }
         $stats = $this->notificationService->getStats($accountId);
         
         $this->jsonResponse([
@@ -263,6 +282,20 @@ class RealTimeNotificationController
         ]);
     }
     
+    /**
+     * Sessão ativa apenas. current_account_id / user.id / request account_id não entram.
+     */
+    private function requireActiveAccountId(): ?int
+    {
+        $accountId = SessionHelper::getActiveAccountId();
+        if ($accountId === null || $accountId <= 0) {
+            $this->jsonResponse(['error' => 'Conta ML ativa obrigatória'], 400);
+            return null;
+        }
+
+        return $accountId;
+    }
+
     /**
      * Resposta JSON
      */

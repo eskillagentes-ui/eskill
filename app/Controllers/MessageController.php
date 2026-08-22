@@ -19,13 +19,22 @@ class MessageController extends BaseController
     }
 
     /**
+     * Conta da sessão apenas. Query/body account_id (ex.: 1336 na sessão 1335) é ignorado.
+     */
+    protected function scopedAccountId(): ?int
+    {
+        $accountId = SessionHelper::getActiveAccountId();
+        return ($accountId !== null && $accountId > 0) ? $accountId : null;
+    }
+
+    /**
      * List Templates
      * GET /api/messages/templates
      */
     public function index(): void
     {
         $this->requireUserId();
-        $accountId = $this->request->get('account_id') ?? SessionHelper::getActiveAccountId();
+        $accountId = $this->scopedAccountId();
 
         if (!$accountId) {
             http_response_code(400);
@@ -48,8 +57,8 @@ class MessageController extends BaseController
     public function store(): void
     {
         $this->requireUserId();
-        $data = json_decode(file_get_contents('php://input'), true);
-        $accountId = $data['account_id'] ?? SessionHelper::getActiveAccountId();
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
+        $accountId = $this->scopedAccountId();
 
         if (empty($accountId) || empty($data['name']) || empty($data['event_trigger']) || empty($data['content'])) {
             http_response_code(400);
@@ -88,7 +97,14 @@ class MessageController extends BaseController
     public function update(string $id): void
     {
         $this->requireUserId();
-        $data = json_decode(file_get_contents('php://input'), true);
+        $accountId = $this->scopedAccountId();
+        if (!$accountId) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Account ID required']);
+            return;
+        }
+
+        $data = json_decode(file_get_contents('php://input'), true) ?: [];
 
         $fields = [];
         $params = [];
@@ -116,9 +132,12 @@ class MessageController extends BaseController
         }
 
         $params[] = $id;
+        $params[] = $accountId;
 
         try {
-            $stmt = $this->db->prepare("UPDATE message_templates SET " . implode(', ', $fields) . " WHERE id = ?");
+            $stmt = $this->db->prepare(
+                "UPDATE message_templates SET " . implode(', ', $fields) . " WHERE id = ? AND account_id = ?"
+            );
             $stmt->execute($params);
 
             header('Content-Type: application/json');
@@ -136,9 +155,16 @@ class MessageController extends BaseController
     public function delete(string $id): void
     {
         $this->requireUserId();
+        $accountId = $this->scopedAccountId();
+        if (!$accountId) {
+            http_response_code(400);
+            echo json_encode(['error' => 'Account ID required']);
+            return;
+        }
+
         try {
-            $stmt = $this->db->prepare("DELETE FROM message_templates WHERE id = ?");
-            $stmt->execute([$id]);
+            $stmt = $this->db->prepare("DELETE FROM message_templates WHERE id = ? AND account_id = ?");
+            $stmt->execute([$id, $accountId]);
 
             header('Content-Type: application/json');
             echo json_encode(['success' => true]);

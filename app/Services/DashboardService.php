@@ -7,10 +7,8 @@ namespace App\Services;
 use App\Database;
 use App\Helpers\Log;
 use App\Helpers\RevenueHelper;
+use App\Services\Financial\MissingCogsPolicy;
 use App\Services\MercadoLivreClient;
-use App\Services\SearchService;
-use App\Services\CategoryService;
-use App\Services\QuestionService;
 use PDO;
 use Throwable;
 
@@ -63,6 +61,8 @@ class DashboardService
         $stmt->execute($params);
         $salesOverTime = $stmt->fetchAll() ?: [];
 
+        $cogsComplete = $this->profitCogsComplete($db, $accountId);
+
         // Itens - usar ItemService para obter stats consistentes
         $itemService = new \App\Services\ItemService($accountId);
         $itemsStats = $itemService->getItemsStats();
@@ -71,7 +71,7 @@ class DashboardService
             'active' => $itemsStats['active'] ?? 0
         ];
 
-        // Perguntas pendentes: API-first por conta; fallback local controlado para robustez.
+        // Perguntas pendentes: ml_questions local (mesmo contrato do tile perguntas_sla).
         $pendingQuestions = $this->resolvePendingQuestions($db, $accountId);
 
         // Tokens Expirando (Next 3 days)
@@ -109,20 +109,25 @@ class DashboardService
         return [
             'recent_orders_count' => (int)($ordersSummary['total'] ?? 0),
             'total_revenue' => (float)($ordersSummary['revenue'] ?? 0),
-            'net_profit' => (float)($ordersSummary['profit'] ?? 0), // Added Profit
+            'net_profit' => MissingCogsPolicy::presentNetProfit(
+                isset($ordersSummary['profit']) ? (float)$ordersSummary['profit'] : 0.0,
+                $cogsComplete
+            ),
+            'has_real_cogs' => $cogsComplete,
+            'cogs_status' => $cogsComplete ? 'real' : 'sem_cmv',
             'orders_by_status' => array_map(function ($row) {
                 return [
                     'status' => $row['status'],
                     'count' => (int) $row['count'],
                 ];
             }, $ordersByStatus),
-            'sales_over_time' => array_map(function ($row) {
+            'sales_over_time' => MissingCogsPolicy::presentSalesOverTimeProfit(array_map(function ($row) {
                 return [
                     'date' => $row['date'],
                     'total' => (float)$row['total'],
                     'profit' => (float)($row['profit'] ?? 0),
                 ];
-            }, $salesOverTime),
+            }, $salesOverTime), $cogsComplete),
             'total_items' => (int)($itemsData['total'] ?? 0),
             'active_items' => (int)($itemsData['active'] ?? 0),
             'pending_questions' => $pendingQuestions,
@@ -191,45 +196,94 @@ class DashboardService
 
     private function resolvePendingQuestions(PDO $db, ?int $accountId): int
     {
-        if ($accountId !== null && $accountId > 0) {
-            try {
-                $questionService = new QuestionService($accountId);
-                $result = $questionService->getQuestions([
-                    'status' => 'UNANSWERED',
-                    'limit' => 1,
-                    'offset' => 0,
-                    'allow_local_cache' => true,
-                ]);
-
-                if (!isset($result['error'])) {
-                    $total = $result['paging']['total'] ?? null;
-                    if (is_numeric($total)) {
-                        return (int)$total;
-                    }
-
-                    $questions = $result['questions'] ?? [];
-                    return is_array($questions) ? count($questions) : 0;
-                }
-            } catch (Throwable $e) {
-                Log::warning('DashboardService: falha ao obter perguntas pendentes via QuestionService', [
-                    'account_id' => $accountId,
-                    'error' => $e->getMessage(),
-                ]);
-            }
+        if ($accountId === null || $accountId <= 0) {
+            return 0;
         }
 
-        $sql = "SELECT COUNT(*) FROM ml_questions WHERE status = :status";
-        $params = ['status' => 'UNANSWERED'];
-
-        if ($accountId !== null && $accountId > 0) {
-            $sql .= " AND account_id = :account_id";
-            $params['account_id'] = $accountId;
-        }
-
+        $sql = "SELECT COUNT(*) FROM ml_questions WHERE status = :status AND account_id = :account_id";
         $stmt = $db->prepare($sql);
-        $stmt->execute($params);
+        $stmt->execute([
+            'status' => 'UNANSWERED',
+            'account_id' => $accountId,
+        ]);
 
         return (int)$stmt->fetchColumn();
+    }
+
+    /**
+     * True only if every paid unit in the last 30d has a known unit cost.
+     * Unscoped (null account) is never "CMV real".
+     */
+    private function profitCogsComplete(PDO $db, ?int $accountId): bool
+    {
+        if ($accountId === null || $accountId <= 0) {
+            return false;
+        }
+
+        try {
+            $sql = "SELECT jt.item_id AS item_id, jt.qty AS qty
+                    FROM ml_orders o
+                    INNER JOIN JSON_TABLE(
+                        o.order_data,
+                        '$.order_items[*]' COLUMNS (
+                            item_id VARCHAR(32) PATH '$.item.id',
+                            qty INT PATH '$.quantity'
+                        )
+                    ) AS jt
+                    WHERE " . RevenueHelper::paidStatusesSql('o.status') . "
+                      AND o.date_created >= DATE_SUB(NOW(), INTERVAL 30 DAY)
+                      AND o.ml_account_id = :account_id";
+            $stmt = $db->prepare($sql);
+            $stmt->execute(['account_id' => $accountId]);
+            $lines = $stmt->fetchAll(\PDO::FETCH_ASSOC) ?: [];
+            if ($lines === []) {
+                return false;
+            }
+
+            $itemIds = [];
+            foreach ($lines as $line) {
+                $id = trim((string)($line['item_id'] ?? ''));
+                if ($id !== '') {
+                    $itemIds[$id] = true;
+                }
+            }
+            $ids = array_keys($itemIds);
+            if ($ids === []) {
+                return false;
+            }
+
+            $placeholders = implode(',', array_fill(0, count($ids), '?'));
+            $costSql = "SELECT mlb_id, custo_produto FROM sku_custos
+                 WHERE account_id = ? AND custo_produto > 0 AND mlb_id IN ({$placeholders})";
+            $costStmt = $db->prepare($costSql);
+            $costStmt->execute([$accountId, ...$ids]);
+            $costByMlb = [];
+            foreach ($costStmt->fetchAll(\PDO::FETCH_ASSOC) as $row) {
+                $mlb = trim((string)($row['mlb_id'] ?? ''));
+                if ($mlb !== '') {
+                    $costByMlb[$mlb] = (float)$row['custo_produto'];
+                }
+            }
+
+            $with = 0;
+            $without = 0;
+            foreach ($lines as $line) {
+                $id = trim((string)($line['item_id'] ?? ''));
+                $qty = (int)($line['qty'] ?? 0);
+                if ($id === '' || $qty <= 0) {
+                    continue;
+                }
+                if (($costByMlb[$id] ?? 0) > 0) {
+                    $with += $qty;
+                } else {
+                    $without += $qty;
+                }
+            }
+
+            return MissingCogsPolicy::hasRealCogs($with, $without);
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 
     private function buildDegradedMetrics(?int $accountId): array
@@ -249,7 +303,9 @@ class DashboardService
         return [
             'recent_orders_count' => 0,
             'total_revenue' => 0.0,
-            'net_profit' => 0.0,
+            'net_profit' => null,
+            'has_real_cogs' => false,
+            'cogs_status' => 'sem_cmv',
             'orders_by_status' => [],
             'sales_over_time' => [],
             'total_items' => $itemsTotal,

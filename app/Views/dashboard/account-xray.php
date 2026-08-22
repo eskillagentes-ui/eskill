@@ -1135,11 +1135,17 @@ declare(strict_types=1);
       const opps = comp.opportunity_keywords || [];
 
       const gList = document.getElementById('hidden-gaps-list');
+      const oList = document.getElementById('opportunity-kws-list');
+      if (comp.available === false) {
+        gList.innerHTML = '<p class="text-muted small">Busca pública indisponível. Sem ranking competitivo — não indica TRAVADA.</p>';
+        oList.innerHTML = '<p class="text-muted small">—</p>';
+        return;
+      }
+
       gList.innerHTML = hidden.length ?
         hidden.map(k => `<span class="kw-badge gap">${escHtml(k)}</span>`).join('') :
         '<p class="text-muted small">Nenhuma lacuna oculta encontrada (ótimo!)</p>';
 
-      const oList = document.getElementById('opportunity-kws-list');
       oList.innerHTML = opps.length ?
         opps.map(k => `<span class="kw-badge opp">${escHtml(k)}</span>`).join('') :
         '<p class="text-muted small">—</p>';

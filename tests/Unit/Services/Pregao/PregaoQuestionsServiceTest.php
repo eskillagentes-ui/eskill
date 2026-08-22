@@ -170,4 +170,20 @@ class PregaoQuestionsServiceTest extends TestCase
             ])
         );
     }
+
+    public function testCollectUsesLocalMlQuestionsNotApiFirst(): void
+    {
+        $source = (string) file_get_contents(
+            dirname(__DIR__, 4) . '/app/Services/Pregao/PregaoQuestionsService.php'
+        );
+        $start = strpos($source, 'public function collect(');
+        $this->assertIsInt($start);
+        $end = strpos($source, 'public static function resolveCardStatusDetailed', $start);
+        $this->assertIsInt($end);
+        $collect = substr($source, $start, $end - $start);
+        $this->assertStringContainsString("result['source'] = 'ml_questions'", $collect);
+        $this->assertStringNotContainsString('fetchFromApi', $collect);
+        $this->assertStringNotContainsString("'ml_api'", $collect);
+        $this->assertStringContainsString('fetchFromLocal', $collect);
+    }
 }

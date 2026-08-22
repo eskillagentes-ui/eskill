@@ -177,4 +177,30 @@ final class MissingCogsPolicy
 
         return $rows;
     }
+
+    /**
+     * Dashboard daily P&amp;L: ml_orders.net_profit does not subtract CMV.
+     *
+     * @param list<array<string, mixed>> $salesOverTime
+     * @return list<array<string, mixed>>
+     */
+    public static function presentSalesOverTimeProfit(array $salesOverTime, bool $cogsComplete): array
+    {
+        foreach ($salesOverTime as &$row) {
+            if ($cogsComplete) {
+                $row['cogs_status'] = 'real';
+                continue;
+            }
+            $row['profit'] = null;
+            $row['cogs_status'] = 'sem_cmv';
+        }
+        unset($row);
+
+        return $salesOverTime;
+    }
+
+    public static function presentNetProfit(?float $profit, bool $cogsComplete): ?float
+    {
+        return $cogsComplete ? $profit : null;
+    }
 }

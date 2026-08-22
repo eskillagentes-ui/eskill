@@ -129,6 +129,22 @@ final class MissingCogsPolicyTest extends TestCase
         $this->assertSame(1000.0, $rows[0]['revenue']);
     }
 
+    public function testPresentSalesOverTimeProfitNullsDailyPnlWithoutCmv(): void
+    {
+        $rows = MissingCogsPolicy::presentSalesOverTimeProfit(
+            [
+                ['date' => '2026-08-21', 'total' => 100.0, 'profit' => 40.0],
+            ],
+            false
+        );
+
+        $this->assertNull($rows[0]['profit']);
+        $this->assertSame('sem_cmv', $rows[0]['cogs_status']);
+        $this->assertSame(100.0, $rows[0]['total']);
+        $this->assertNull(MissingCogsPolicy::presentNetProfit(40.0, false));
+        $this->assertSame(40.0, MissingCogsPolicy::presentNetProfit(40.0, true));
+    }
+
     public function testSaleProfitFromItemsIsNdWhenAnyLineLacksCogs(): void
     {
         $sale = MissingCogsPolicy::saleProfitFromItems(

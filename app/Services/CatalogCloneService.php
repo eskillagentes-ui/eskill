@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Services;
 
 use App\Database;
+use App\Helpers\AccountScopeHelper;
 use App\Services\MercadoLivreClient;
 use App\Services\PricingStrategyService;
 use Exception;
@@ -67,18 +68,32 @@ class CatalogCloneService
     }
 
     /**
+     * Clone continua desligado; queries de conta própria ficam na sessão ativa (nunca 1ª conta do DB).
+     */
+    private function scopedActiveAccountId(): ?int
+    {
+        return AccountScopeHelper::activeAccountId();
+    }
+
+    /**
      * Obtém um cliente ML autenticado para buscas por seller.
      * A API do ML agora requer autenticação para endpoints que antes eram públicos.
-     * Usa a primeira conta ativa disponível.
+     * Usa a conta ML ativa da sessão — fail-closed se não houver.
      *
      * @return MercadoLivreClient Cliente autenticado ou sem autenticação como fallback
      */
     private function getAuthenticatedClientForSearch(): MercadoLivreClient
     {
+        $accountId = $this->scopedActiveAccountId();
+        if ($accountId === null) {
+            return new MercadoLivreClient();
+        }
+
         try {
-            $stmt = $this->db->query(
-                "SELECT id FROM ml_accounts WHERE status = 'active' ORDER BY id ASC LIMIT 1"
+            $stmt = $this->db->prepare(
+                "SELECT id FROM ml_accounts WHERE status = 'active' AND id = :id LIMIT 1"
             );
+            $stmt->execute(['id' => $accountId]);
             $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
             if ($row && !empty($row['id'])) {
@@ -95,19 +110,24 @@ class CatalogCloneService
     }
 
     /**
-     * Obtém o seller_id de uma conta própria vinculada
-     * Retorna o primeiro encontrado ou null se nenhum
+     * Obtém o seller_id da conta própria ativa na sessão.
      *
      * @return string|null
      */
     private function getOwnSellerIdFromAccounts(): ?string
     {
+        $accountId = $this->scopedActiveAccountId();
+        if ($accountId === null) {
+            return null;
+        }
+
         try {
-            $stmt = $this->db->query(
-                "SELECT ml_user_id FROM ml_accounts WHERE status = 'active' ORDER BY id ASC"
+            $stmt = $this->db->prepare(
+                "SELECT ml_user_id FROM ml_accounts WHERE status = 'active' AND id = :id LIMIT 1"
             );
-            $rows = $stmt->fetchAll(\PDO::FETCH_COLUMN);
-            return !empty($rows) ? (string)$rows[0] : null;
+            $stmt->execute(['id' => $accountId]);
+            $row = $stmt->fetch(\PDO::FETCH_COLUMN);
+            return $row !== false && $row !== null && $row !== '' ? (string)$row : null;
         } catch (\Throwable $e) {
             return null;
         }
@@ -374,10 +394,16 @@ class CatalogCloneService
      */
     private function getAllOwnSellerIds(): array
     {
+        $accountId = $this->scopedActiveAccountId();
+        if ($accountId === null) {
+            return [];
+        }
+
         try {
-            $stmt = $this->db->query(
-                "SELECT ml_user_id FROM ml_accounts WHERE status = 'active'"
+            $stmt = $this->db->prepare(
+                "SELECT ml_user_id FROM ml_accounts WHERE status = 'active' AND id = :id"
             );
+            $stmt->execute(['id' => $accountId]);
             return $stmt->fetchAll(\PDO::FETCH_COLUMN) ?: [];
         } catch (\Throwable $e) {
             return [];
@@ -394,10 +420,15 @@ class CatalogCloneService
     private function listOwnAccountItems(string $sellerId, array $filters = []): array
     {
         // Encontrar a conta pelo seller_id
+        $accountId = $this->scopedActiveAccountId();
+        if ($accountId === null) {
+            throw new Exception('Conta ativa obrigatória');
+        }
+
         $stmt = $this->db->prepare(
-            "SELECT id FROM ml_accounts WHERE ml_user_id = :seller_id AND status = 'active' LIMIT 1"
+            "SELECT id FROM ml_accounts WHERE ml_user_id = :seller_id AND status = 'active' AND id = :id LIMIT 1"
         );
-        $stmt->execute(['seller_id' => $sellerId]);
+        $stmt->execute(['seller_id' => $sellerId, 'id' => $accountId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         if (!$row) {
@@ -532,10 +563,15 @@ class CatalogCloneService
     private function getOwnAccountSummary(string $sellerId): array
     {
         // Encontrar a conta pelo seller_id
+        $accountId = $this->scopedActiveAccountId();
+        if ($accountId === null) {
+            throw new Exception('Conta ativa obrigatória');
+        }
+
         $stmt = $this->db->prepare(
-            "SELECT id, nickname FROM ml_accounts WHERE ml_user_id = :seller_id AND status = 'active' LIMIT 1"
+            "SELECT id, nickname FROM ml_accounts WHERE ml_user_id = :seller_id AND status = 'active' AND id = :id LIMIT 1"
         );
-        $stmt->execute(['seller_id' => $sellerId]);
+        $stmt->execute(['seller_id' => $sellerId, 'id' => $accountId]);
         $row = $stmt->fetch(\PDO::FETCH_ASSOC);
 
         if (!$row) {

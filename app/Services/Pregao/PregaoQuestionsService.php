@@ -56,23 +56,16 @@ final class PregaoQuestionsService
         $cacheKey = 'pregao:questions:snap:' . $accountId;
         $prevOpenIds = $this->loadPrevOpenIds($accountId);
 
-        $fromApi = $this->fetchFromApi($accountId, $sellerId);
-        if ($fromApi !== null) {
-            $volume = $this->computeVolumeSignals($accountId, count($fromApi['rows']), $fromApi['last_created_ts'] ?? null);
-            $result = $this->buildResult($fromApi['rows'], $fromApi['open'], $prevOpenIds, $volume);
-            $result['source'] = 'ml_api';
-            $this->cacheSet($cacheKey, [
-                'rows' => $fromApi['rows'],
-                'open' => $fromApi['open'],
-            ], self::CACHE_TTL_SECONDS);
-            $this->storePrevOpenIds($accountId, array_column($result['abertas'], 'question_id'));
-            return $result;
-        }
-
+        // Unificado com o tile perguntas_sla: só ml_questions da conta (API-first 403 no datacenter).
+        unset($sellerId);
         $local = $this->fetchFromLocal($accountId);
         $volume = $this->computeVolumeSignals($accountId, count($local['rows']), $local['last_created_ts'] ?? null);
         $result = $this->buildResult($local['rows'], $local['open'], $prevOpenIds, $volume);
         $result['source'] = 'ml_questions';
+        $this->cacheSet($cacheKey, [
+            'rows' => $local['rows'],
+            'open' => $local['open'],
+        ], self::CACHE_TTL_SECONDS);
         $this->storePrevOpenIds($accountId, array_column($result['abertas'], 'question_id'));
         return $result;
     }
