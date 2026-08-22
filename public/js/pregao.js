@@ -981,6 +981,29 @@
                         tag.className = 'nao-pub';
                         tag.textContent = 'não publicado';
                         li2.appendChild(tag);
+                        const sim = document.createElement('button');
+                        sim.type = 'button';
+                        sim.className = 'hoje-simular';
+                        sim.textContent = 'simular';
+                        sim.setAttribute('data-mlb', String((row && row.mlb) || ''));
+                        sim.addEventListener('click', function (ev) {
+                            ev.preventDefault();
+                            ev.stopPropagation();
+                            const mlb = String(sim.getAttribute('data-mlb') || '');
+                            if (!mlb) return;
+                            fetch('/api/pregao/listing-apply/simulate', {
+                                method: 'POST',
+                                credentials: 'same-origin',
+                                headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                                body: JSON.stringify({ mlb: mlb })
+                            }).then(function (res) { return res.json(); }).then(function (json) {
+                                const payload = json && json.data && json.data.payload ? json.data.payload : {};
+                                window.alert('Dry-run (sem PUT): ' + mlb + '\n' + JSON.stringify(payload));
+                            }).catch(function () {
+                                window.alert('Falha ao simular ' + mlb);
+                            });
+                        });
+                        li2.appendChild(sim);
                         ul.appendChild(li2);
                     });
                     li.appendChild(ul);
