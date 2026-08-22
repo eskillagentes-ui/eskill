@@ -131,6 +131,9 @@ final class ListingTitleDraftBuilder
         if ($model !== null && $product !== '' && mb_strtolower($model) === mb_strtolower($product)) {
             $model = null;
         }
+        if ($model !== null && $product !== '' && str_contains(mb_strtolower($model), mb_strtolower($this->firstWord($product)))) {
+            $model = null;
+        }
         if ($model !== null) {
             return $this->preserveAcronym($model);
         }
@@ -190,12 +193,15 @@ final class ListingTitleDraftBuilder
         if (str_contains($text, ',')) {
             return true;
         }
-        if (preg_match('/\b(kit|jogo|compativel|compatível|titan|fan|start|today|busca|seo|long-?tail|promo|desconto|texturizado)\b/u', $t) === 1) {
+        if (preg_match('/\b(kit|jogo|compativel|compatível|titan|fan|start|today|busca|seo|long-?tail|promo|desconto|texturizado|fazer|factor|biz|pop|bros|xtz)\b/u', $t) === 1) {
+            return true;
+        }
+        if (preg_match('/\d{2,4}\s*\/\s*\d{2,4}/', $text) === 1) {
             return true;
         }
         $words = preg_split('/\s+/', trim($text)) ?: [];
 
-        return count($words) > 4;
+        return count($words) > 3;
     }
 
     public function isPlaceholder(string $text): bool
@@ -291,8 +297,17 @@ final class ListingTitleDraftBuilder
     {
         $h = $this->toCentimeters($this->usableAttribute($item, 'HEIGHT'));
         $w = $this->toCentimeters($this->usableAttribute($item, 'WIDTH'));
+        $domain = strtoupper(trim((string) ($item['domain_id'] ?? '')));
+        $isMirror = $domain === 'MLB-MIRRORS';
         if ($h !== null && $w !== null && $h >= 5 && $w >= 5) {
+            if (!$isMirror && $h < 30 && $w < 30) {
+                return null;
+            }
+
             return $h . 'x' . $w;
+        }
+        if (!$isMirror) {
+            return null;
         }
         if ($w !== null && $w >= 5) {
             return (string) $w . ' cm';
@@ -332,8 +347,8 @@ final class ListingTitleDraftBuilder
     private function firstColorToken(string $color): ?string
     {
         $color = trim($color);
-        if ($this->isPlaceholder($color) || $this->looksLikeLongTail($color)) {
-            $words = preg_split('/\s+/', $color) ?: [];
+        $words = preg_split('/\s+/', $color) ?: [];
+        if (count($words) > 2 || $this->isPlaceholder($color) || $this->looksLikeLongTail($color)) {
             $first = (string) ($words[0] ?? '');
             if ($first === '' || $this->isPlaceholder($first)) {
                 return null;
