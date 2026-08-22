@@ -64,7 +64,53 @@ final class ListingTitleDraftBuilderTest extends TestCase
         $draft = $builder->build($item, [], null);
         self::assertSame('Guidão AWA 53100-KVS-F00 Cromado', $draft['draft_title']);
         self::assertStringNotContainsString('13x10', $draft['draft_title']);
+        self::assertStringNotContainsString('10 cm', $draft['draft_title']);
         self::assertStringNotContainsString('Titan', $draft['draft_title']);
+    }
+
+    public function testHandlebarIgnoresLonePackageWidthAsSpec(): void
+    {
+        $builder = new ListingTitleDraftBuilder();
+        $item = [
+            'title' => 'Guidão AWA 2389 Preto',
+            'domain_id' => 'MLB-MOTORCYCLE_HANDLEBARS',
+            'attributes' => [
+                ['id' => 'BRAND', 'value_name' => 'AWA'],
+                ['id' => 'PART_NUMBER', 'value_name' => '2389'],
+                ['id' => 'COLOR', 'value_name' => 'Preto'],
+                ['id' => 'WIDTH', 'value_name' => '10 cm'],
+            ],
+        ];
+        $draft = $builder->build($item, [], null);
+        self::assertSame('Guidão AWA 2389 Preto', $draft['draft_title']);
+        self::assertStringNotContainsString('10 cm', $draft['draft_title']);
+    }
+
+    public function testLuggageRackIgnoresDummyPartNumberAndGtin(): void
+    {
+        $builder = new ListingTitleDraftBuilder();
+        $dummy = [
+            'title' => 'Bagageiro AWA Preto',
+            'domain_id' => 'MLB-MOTORCYCLE_LUGGAGE_RACKS',
+            'attributes' => [
+                ['id' => 'BRAND', 'value_name' => 'AWA'],
+                ['id' => 'PART_NUMBER', 'value_name' => '-1'],
+                ['id' => 'COLOR', 'value_name' => 'Preto'],
+            ],
+        ];
+        self::assertSame('Bagageiro AWA Preto', $builder->build($dummy, [], null)['draft_title']);
+
+        $gtin = [
+            'title' => 'Guidão AWA Cromado',
+            'domain_id' => 'MLB-MOTORCYCLE_HANDLEBARS',
+            'attributes' => [
+                ['id' => 'BRAND', 'value_name' => 'AWA'],
+                ['id' => 'OEM', 'value_name' => '7898572842820'],
+                ['id' => 'COLOR', 'value_name' => 'Cromado'],
+            ],
+        ];
+        self::assertSame('Guidão AWA Cromado', $builder->build($gtin, [], null)['draft_title']);
+        self::assertStringNotContainsString('7898572842820', $builder->build($gtin, [], null)['draft_title']);
     }
 
     public function testDoesNotInventBrandAndUsesRealModelPlusColor(): void
