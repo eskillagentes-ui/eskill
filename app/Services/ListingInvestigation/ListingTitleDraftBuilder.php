@@ -169,19 +169,12 @@ final class ListingTitleDraftBuilder
                 return $this->titleCaseWords($color);
             }
         }
-        foreach (['WIDTH', 'HEIGHT', 'VOLTAGE'] as $id) {
-            $v = $this->usableAttribute($item, $id);
-            if ($v === null) {
-                continue;
-            }
-            if ($id === 'VOLTAGE' && !$this->looksLikeVoltage($v)) {
-                continue;
-            }
-            if ($this->alreadyPresent($v, $product, $brand, $model)) {
-                continue;
-            }
 
-            return $v;
+        $voltage = $this->usableAttribute($item, 'VOLTAGE');
+        if ($voltage !== null && $this->looksLikeVoltage($voltage)
+            && !$this->alreadyPresent($voltage, $product, $brand, $model)
+        ) {
+            return $voltage;
         }
 
         return null;
@@ -207,7 +200,7 @@ final class ListingTitleDraftBuilder
     public function isPlaceholder(string $text): bool
     {
         $t = trim(mb_strtolower($text));
-        if ($t === '' || $t === '-' || $t === '0') {
+        if ($t === '' || $t === '-' || $t === '0' || $t === '-1') {
             return true;
         }
         if (preg_match('/^n\/?[ad]$/u', $t) === 1) {
@@ -283,7 +276,10 @@ final class ListingTitleDraftBuilder
     private function isDummyCode(string $value): bool
     {
         $v = trim($value);
-        if (preg_match('/^\d{1,2}$/', $v) === 1) {
+        if (preg_match('/^-?\d{1,2}$/', $v) === 1) {
+            return true;
+        }
+        if (preg_match('/^\d{12,14}$/', $v) === 1) {
             return true;
         }
 
