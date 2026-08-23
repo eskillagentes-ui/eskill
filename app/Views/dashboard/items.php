@@ -433,7 +433,6 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
         </div>
     </div>
 </div>
-</div>
 
 <!-- Stats Cards -->
 <div class="row g-2 mb-3">
@@ -530,7 +529,6 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
     <div id="cardView" class="row g-3" style="display: none;">
         <!-- Cards will be dynamically inserted here -->
     </div>
-</div>
 </div>
 
 <!-- Pagination -->
@@ -641,7 +639,7 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
     </div>
 </div>
 
-<script src="/js/items-dashboard.js?v=<?= @filemtime(__DIR__ . '/../../../public/js/items-dashboard.js') ?: time() ?>"></script>
+<script nonce="<?= defined('CSP_NONCE') ? CSP_NONCE : '' ?>" src="/js/items-dashboard.js?v=<?= @filemtime(__DIR__ . '/../../../public/js/items-dashboard.js') ?: time() ?>"></script>
 
 <style>
     /* Custom styles removed - using standardized theme.css classes */
