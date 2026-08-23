@@ -3911,7 +3911,7 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
             try {
                 const data = await requestJson(`/api/seo/technical-sheet/items/${encodeURIComponent(itemId)}`);
                 if (data.success) {
-                    this.state.currentItem = itemId;
+                    this.state.currentItem = data;
                     this.renderDrawer(data);
                 } else {
                     body.innerHTML = `<div class="alert alert-danger">${data.error || 'Erro ao carregar item'}</div>`;
@@ -4168,16 +4168,29 @@ include __DIR__ . '/../../layouts/modern/partials/page-header.php';
             this.state.currentItem = null;
         },
 
+        currentDrawerItemId() {
+            const cur = this.state.currentItem;
+            if (typeof cur === 'string' && cur.indexOf('MLB') === 0) {
+                return cur;
+            }
+            if (cur && cur.item && cur.item.item_id) {
+                return cur.item.item_id;
+            }
+            return null;
+        },
+
         async drawerGenerate() {
-            if (!this.state.currentItem?.item?.item_id) return;
-            await this.quickGenerate(this.state.currentItem.item.item_id);
-            await this.openDrawer(this.state.currentItem.item.item_id);
+            const itemId = this.currentDrawerItemId();
+            if (!itemId) return;
+            await this.quickGenerate(itemId);
+            await this.openDrawer(itemId);
         },
 
         async drawerApply() {
-            if (!this.state.currentItem?.item?.item_id) return;
-            await this.quickApply(this.state.currentItem.item.item_id);
-            await this.openDrawer(this.state.currentItem.item.item_id);
+            const itemId = this.currentDrawerItemId();
+            if (!itemId) return;
+            await this.quickApply(itemId);
+            await this.openDrawer(itemId);
         },
 
         async decideSuggestion(itemId, attributeId, status) {
