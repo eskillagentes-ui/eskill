@@ -884,4 +884,89 @@ class ItemServiceTest extends TestCase
         $this->assertSame('https://produto.mercadolivre.com.br/MLB-403-FALLBACK', $items[0]['permalink']);
         $this->assertArrayNotHasKey('description', $items[0]);
     }
+
+    public function test_getSellerCategories_does_not_use_public_search(): void
+    {
+        $source = (string) file_get_contents(
+            dirname(__DIR__, 3) . '/app/Services/ItemService.php'
+        );
+        $start = strpos($source, 'function getSellerCategories');
+        $end = strpos($source, 'function getLocalCategoriesFallback');
+        $this->assertNotFalse($start);
+        $this->assertNotFalse($end);
+
+        $method = substr($source, $start, $end - $start);
+        $this->assertStringNotContainsString('/sites/', $method);
+        $this->assertStringContainsString('getLocalCategoriesFallback', $method);
+    }
+
+    public function test_getSellerCategories_returns_local_catalog_for_account(): void
+    {
+        $this->seedTestItem();
+        $service = new ItemService(999);
+        $result = $service->getSellerCategories();
+
+        $this->assertTrue($result['success'] ?? false);
+        $this->assertSame('local_catalog', $result['source'] ?? null);
+        $this->assertArrayNotHasKey('error', $result);
+        $this->assertIsArray($result['categories']);
+
+        $ids = array_map(static fn(array $row): string => (string)($row['id'] ?? ''), $result['categories']);
+        $this->assertContains('MLB1234', $ids);
+    }
+
+    public function test_getSellerCategories_isolates_accounts(): void
+    {
+        $this->seedTestItem();
+        $otherId = 'MLB-TEST-' . bin2hex(random_bytes(4));
+        $this->db->exec('SET FOREIGN_KEY_CHECKS=0');
+        $stmt = $this->db->prepare(
+            'INSERT INTO items (
+                ml_item_id, account_id, title, category_id, price, currency_id,
+                available_quantity, sold_quantity, status, permalink, data, created_at, updated_at
+            ) VALUES (
+                :ml_item_id, :acct, :title, :cat, :price, :currency,
+                :qty, :sold_qty, :status, :link, :data, NOW(), NOW()
+            )'
+        );
+        $stmt->execute([
+            'ml_item_id' => $otherId,
+            'acct' => 998,
+            'title' => 'Item outra conta',
+            'cat' => 'MLB9999',
+            'price' => 10.00,
+            'currency' => 'BRL',
+            'qty' => 1,
+            'sold_qty' => 0,
+            'status' => 'active',
+            'link' => 'https://produto.mercadolivre.com.br/test-other',
+            'data' => json_encode(['source' => 'phpunit']),
+        ]);
+        $this->db->exec('SET FOREIGN_KEY_CHECKS=1');
+
+        try {
+            $result = (new ItemService(999))->getSellerCategories();
+            $ids = array_map(static fn(array $row): string => (string)($row['id'] ?? ''), $result['categories'] ?? []);
+            $this->assertContains('MLB1234', $ids);
+            $this->assertNotContains('MLB9999', $ids);
+
+            $other = (new ItemService(998))->getSellerCategories();
+            $otherIds = array_map(static fn(array $row): string => (string)($row['id'] ?? ''), $other['categories'] ?? []);
+            $this->assertContains('MLB9999', $otherIds);
+            $this->assertNotContains('MLB1234', $otherIds);
+        } finally {
+            $this->db->prepare('DELETE FROM items WHERE ml_item_id = :ml_item_id')
+                ->execute(['ml_item_id' => $otherId]);
+        }
+    }
+
+    public function test_getSellerCategories_without_account_does_not_leak_catalog(): void
+    {
+        $this->seedTestItem();
+        $result = (new ItemService(null))->getSellerCategories();
+
+        $this->assertFalse($result['success'] ?? true);
+        $this->assertSame('missing_seller_id', $result['error'] ?? null);
+        $this->assertSame([], $result['categories'] ?? null);
+    }
 }

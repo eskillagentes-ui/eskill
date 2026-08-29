@@ -1601,72 +1601,24 @@ class ItemService
     }
 
     /**
-     * Obtém lista de categorias utilizadas pelo vendedor
+     * Categorias usadas pelos anúncios da conta (filtro de Meus Anúncios).
+     *
+     * Fonte: catálogo local `items` (mesmo agrupamento de AnalyticsService).
+     * Não usa GET /sites/{site}/search — nesse host o endpoint público
+     * responde 403 (PolicyAgent/datacenter) e o dropdown ficava 400.
      */
     public function getSellerCategories(): array
     {
-        $sellerId = $this->getSellerIdFromAccount();
-        if (!$sellerId) {
-            $sellerId = $this->client->getSellerId();
-        }
-
-        if (!$sellerId) {
-            if ($this->shouldAllowLocalFallback([])) {
-                return $this->getLocalCategoriesFallback(['reason' => 'missing_seller_id']);
-            }
-
+        if ($this->accountId === null || $this->accountId <= 0) {
             return [
                 'success' => false,
                 'error' => 'missing_seller_id',
-                'message' => 'Conta Mercado Livre não vinculada (ml_user_id ausente). Conecte a conta para puxar categorias reais.',
+                'message' => 'Conta Mercado Livre não vinculada. Conecte a conta para listar categorias do catálogo.',
                 'categories' => [],
             ];
         }
 
-        $siteId = $this->getAccountSiteId() ?? ($_ENV['ML_SITE_ID'] ?? 'MLB');
-
-        $response = $this->client->get("/sites/{$siteId}/search", [
-            'seller_id' => $sellerId,
-            'limit' => 1,
-            'offset' => 0,
-        ], 60, true);
-
-        if (isset($response['error'])) {
-            if ($this->shouldAllowLocalFallback([])) {
-                return $this->getLocalCategoriesFallback($response);
-            }
-
-            return [
-                'success' => false,
-                'error' => 'ml_api_error',
-                'message' => 'Falha ao buscar categorias (endpoint público) na API do Mercado Livre.',
-                'api_error' => $response,
-                'categories' => [],
-            ];
-        }
-
-        $categories = [];
-        $filters = $response['available_filters'] ?? [];
-
-        foreach ($filters as $filter) {
-            if (($filter['id'] ?? '') !== 'category') {
-                continue;
-            }
-
-            foreach ($filter['values'] ?? [] as $value) {
-                $categories[] = [
-                    'id' => $value['id'],
-                    'name' => $value['name'],
-                    'results' => $value['results'] ?? 0,
-                ];
-            }
-            break;
-        }
-
-        return [
-            'success' => true,
-            'categories' => $categories,
-        ];
+        return $this->getLocalCategoriesFallback(['reason' => 'seller_catalog']);
     }
 
     private function getLocalCategoriesFallback(array $context = []): array
@@ -1680,41 +1632,91 @@ class ItemService
             ];
         }
 
-        $where = [];
-        $params = [];
-
-        if ($this->accountId) {
-            $where[] = 'account_id = :account_id';
-            $params['account_id'] = $this->accountId;
+        if ($this->accountId === null || $this->accountId <= 0) {
+            return [
+                'success' => false,
+                'error' => 'missing_seller_id',
+                'message' => 'Conta Mercado Livre não vinculada. Conecte a conta para listar categorias do catálogo.',
+                'categories' => [],
+            ];
         }
 
-        $whereSql = $where ? 'WHERE ' . implode(' AND ', $where) : '';
+        try {
+            $sql = 'SELECT category_id, '
+                . 'MAX(COALESCE(NULLIF(category_name, \'\'), category_id)) AS category_name, '
+                . 'COUNT(*) AS total '
+                . 'FROM items '
+                . 'WHERE account_id = :account_id '
+                . 'AND category_id IS NOT NULL '
+                . 'AND category_id <> \'\' '
+                . 'GROUP BY category_id '
+                . 'ORDER BY total DESC';
 
-        $sql = "SELECT category_id, COUNT(*) AS total, "
-            . "MAX(JSON_UNQUOTE(JSON_EXTRACT(data, '\$.category_name'))) AS category_name "
-            . "FROM ml_items {$whereSql} "
-            . "GROUP BY category_id "
-            . "HAVING category_id IS NOT NULL "
-            . "ORDER BY total DESC";
-
-        $stmt = $this->db->prepare($sql);
-        $stmt->execute($params);
-        $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
-
-        $categories = array_map(function (array $row) {
+            $stmt = $this->db->prepare($sql);
+            $stmt->execute(['account_id' => $this->accountId]);
+            $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        } catch (\PDOException $e) {
             return [
-                'id' => $row['category_id'],
-                'name' => $row['category_name'] ?: $row['category_id'],
+                'success' => false,
+                'error' => 'db_unavailable',
+                'message' => 'Falha ao ler categorias do catálogo local.',
+                'categories' => [],
+            ];
+        }
+
+        $categories = [];
+        foreach ($rows as $row) {
+            $categoryId = trim((string)($row['category_id'] ?? ''));
+            if ($categoryId === '') {
+                continue;
+            }
+            $name = trim((string)($row['category_name'] ?? ''));
+            $categories[] = [
+                'id' => $categoryId,
+                'name' => $name !== '' ? $name : $categoryId,
                 'results' => (int)($row['total'] ?? 0),
             ];
-        }, array_filter($rows, fn(array $row): bool => !empty($row['category_id'])));
+        }
 
-        return [
+        $appEnv = strtolower((string)($_ENV['APP_ENV'] ?? getenv('APP_ENV') ?? ''));
+        if ($appEnv !== 'testing') {
+            $categories = $this->attachOfficialCategoryNames($categories);
+        }
+
+        $payload = [
             'success' => true,
-            'source' => 'local',
-            'warning' => $this->buildLocalFallbackWarning($context),
+            'source' => 'local_catalog',
             'categories' => $categories,
         ];
+        if (($context['reason'] ?? '') !== 'seller_catalog') {
+            $payload['warning'] = $this->buildLocalFallbackWarning($context);
+        }
+
+        return $payload;
+    }
+
+    /**
+     * @param list<array{id: string, name: string, results: int}> $categories
+     * @return list<array{id: string, name: string, results: int}>
+     */
+    private function attachOfficialCategoryNames(array $categories): array
+    {
+        foreach ($categories as &$category) {
+            $categoryId = (string)($category['id'] ?? '');
+            $name = (string)($category['name'] ?? '');
+            if ($categoryId === '' || ($name !== '' && $name !== $categoryId)) {
+                continue;
+            }
+
+            $info = $this->client->getCategory($categoryId);
+            $officialName = $info['name'] ?? null;
+            if (is_string($officialName) && $officialName !== '') {
+                $category['name'] = $officialName;
+            }
+        }
+        unset($category);
+
+        return $categories;
     }
 
     private function getAccountSiteId(): ?string

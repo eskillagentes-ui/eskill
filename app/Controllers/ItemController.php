@@ -370,6 +370,8 @@ class ItemController extends BaseController
             $error = $categories['error'] ?? null;
             if ($error === 'missing_seller_id') {
                 http_response_code(409);
+            } elseif ($error === 'ml_api_error') {
+                http_response_code(502);
             } else {
                 http_response_code(400);
             }
