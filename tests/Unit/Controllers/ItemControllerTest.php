@@ -217,6 +217,11 @@ class ItemControllerTest extends TestCase
             'Controller deve mapear local_cache_required para 422 Unprocessable');
         $this->assertStringContainsString('502', $source,
             'Controller deve mapear ml_api_error para 502 Bad Gateway');
+        $this->assertMatchesRegularExpression(
+            '/function categories\(\)[\s\S]*?ml_api_error[\s\S]*?502/',
+            $source,
+            'categories() deve mapear ml_api_error para 502'
+        );
     }
 
     public function test_create_returns_201(): void
