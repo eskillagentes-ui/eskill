@@ -969,4 +969,73 @@ class ItemServiceTest extends TestCase
         $this->assertSame('missing_seller_id', $result['error'] ?? null);
         $this->assertSame([], $result['categories'] ?? null);
     }
+
+    public function test_listItems_category_filter_uses_local_catalog(): void
+    {
+        $this->seedTestItem();
+        $otherId = 'MLB-TEST-' . bin2hex(random_bytes(4));
+        $this->db->exec('SET FOREIGN_KEY_CHECKS=0');
+        $stmt = $this->db->prepare(
+            'INSERT INTO items (
+                ml_item_id, account_id, title, category_id, price, currency_id,
+                available_quantity, sold_quantity, status, permalink, data, created_at, updated_at
+            ) VALUES (
+                :ml_item_id, :acct, :title, :cat, :price, :currency,
+                :qty, :sold_qty, :status, :link, :data, NOW(), NOW()
+            )'
+        );
+        $stmt->execute([
+            'ml_item_id' => $otherId,
+            'acct' => 999,
+            'title' => 'Item outra categoria',
+            'cat' => 'MLB9999',
+            'price' => 10.00,
+            'currency' => 'BRL',
+            'qty' => 1,
+            'sold_qty' => 0,
+            'status' => 'active',
+            'link' => 'https://produto.mercadolivre.com.br/test-cat',
+            'data' => json_encode(['source' => 'phpunit']),
+        ]);
+        $this->db->exec('SET FOREIGN_KEY_CHECKS=1');
+
+        try {
+            $result = (new ItemService(999))->listItems([
+                'category' => 'MLB1234',
+                'limit' => 12,
+                'page' => 1,
+                'skip_visits' => true,
+            ]);
+
+            $this->assertTrue($result['success'] ?? false);
+            $this->assertSame('local_catalog', $result['source'] ?? null);
+            $this->assertArrayNotHasKey('warning', $result);
+            $this->assertGreaterThanOrEqual(1, $result['total'] ?? 0);
+
+            $ids = [];
+            foreach ($result['items'] as $item) {
+                $this->assertSame('MLB1234', $item['category_id'] ?? null);
+                $ids[] = (string)($item['id'] ?? $item['ml_item_id'] ?? '');
+            }
+            $this->assertContains($this->testItemId, $ids);
+            $this->assertNotContains($otherId, $ids);
+        } finally {
+            $this->db->prepare('DELETE FROM items WHERE ml_item_id = :ml_item_id')
+                ->execute(['ml_item_id' => $otherId]);
+        }
+    }
+
+    public function test_listItems_category_filter_without_account_does_not_leak(): void
+    {
+        $this->seedTestItem();
+        $result = (new ItemService(null))->listItems([
+            'category' => 'MLB1234',
+            'limit' => 12,
+            'skip_visits' => true,
+        ]);
+
+        $this->assertFalse($result['success'] ?? true);
+        $this->assertSame('missing_seller_id', $result['error'] ?? null);
+        $this->assertSame([], $result['items'] ?? null);
+    }
 }

@@ -60,6 +60,29 @@ class ItemService
             $offset = ($page - 1) * $limit;
         }
 
+        // GET /users/{id}/items/search ignora `category` (total idêntico com/sem filtro).
+        // O dropdown de Meus Anúncios lê category_id do catálogo local; a grade
+        // precisa da mesma fonte, senão o filtro é casca.
+        if (!empty($filters['category'])) {
+            if ($this->accountId === null || $this->accountId <= 0) {
+                return [
+                    'success' => false,
+                    'error' => 'missing_seller_id',
+                    'message' => 'Conta Mercado Livre não vinculada. Conecte a conta para filtrar o catálogo por categoria.',
+                    'items' => [],
+                    'page' => $page,
+                    'pages' => 1,
+                    'limit' => $limit,
+                    'total' => 0,
+                    'has_more' => false,
+                ];
+            }
+
+            return $this->listItemsFromLocalCache($filters, $limit, $page, $offset, [
+                'reason' => 'seller_category_filter',
+            ]);
+        }
+
         // Opt-in explícito: widgets de dashboard (ex.: SEO Killer Top Performers)
         // devem ler o cache local sem 50x GET /items na ML.
         if (!empty($filters['source']) && $filters['source'] === 'local') {
@@ -506,7 +529,9 @@ class ItemService
             'has_more' => ($offset + $limit) < $total,
         ];
 
-        if (!empty($context)) {
+        if (($context['reason'] ?? '') === 'seller_category_filter') {
+            $payload['source'] = 'local_catalog';
+        } elseif ($context !== []) {
             $payload['warning'] = $this->buildLocalFallbackWarning($context);
         }
 
