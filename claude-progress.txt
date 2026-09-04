@@ -10,6 +10,7 @@
 - Baseline do GitHub: restaurados no `master` candidato os guards de escrita de perguntas que já estavam ativos em produção (`AutoAnswerJob`, `AssistantActionExecutorService`, `SmartQAService`); teste de baixa conversão agora inclui tráfego observado. Focados: 75 testes / 223 assertions OK; automação de respostas permaneceu bloqueada para FACILYTY.
 - Isolamento de testes legado: `TimezoneHelperTest` agora restaura o fuso/ambiente entre casos e a validação de EAN não abre conexão com banco sem necessidade. Focados: 12 testes / 34 assertions OK; código de produção inalterado por este ajuste.
 - Gate de agentes: criada a suíte `AgentsSafety` para testar somente o runtime atual e excluir explicitamente `_archive-preexisting-model`; workflows de CI/deploy deixaram de executar contratos históricos incompatíveis.
+- Isolamento de notificações: o teste estrutural agora conta somente as 6 chamadas a `requireActiveAccountId`, sem confundir a declaração do próprio método com uma sétima chamada.
 - Suite financeira ampla no worktree sem `.env`: 3 erros ambientais de CogsService (DB_USERNAME ausente) e 1 falha em FinancialForecastService não tocado por esta feature; testes focados e Feature/FinancialReport permaneceram verdes.
 - Rollback: reverter o commit desta entrada; staging pode ser re-sincronizado pelo `scripts/deploy_staging.sh`. `project-status.json` ficou intacto porque não havia feature correspondente e a regra só permite alterar `passes`.
 
