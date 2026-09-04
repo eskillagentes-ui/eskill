@@ -120,6 +120,8 @@ jobs:
           DB_PASSWORD=testpass
           MOBILE_TOKEN_SECRET=$(openssl rand -hex 32)
           EOF
+          # O servidor web do Playwright procura .env.test quando APP_ENV=testing.
+          cp .env.testing .env.test
 
       - name: Run migrations
         run: php bin/migrate.php || true
