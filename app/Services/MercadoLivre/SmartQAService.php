@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Services\MercadoLivre;
 
+use App\Exception\UnsafeOperationException;
 use App\Services\MercadoLivreClient;
 use App\Services\CacheService;
+use App\Services\HiddenSeo\SafetyGuard;
 use App\Services\LLMService;
 use App\Services\StructuredLogService;
 
@@ -392,6 +394,17 @@ class SmartQAService
      */
     private function sendAutoAnswer(string $questionId, string $answer): bool
     {
+        try {
+            (new SafetyGuard())->assertCanApply($this->accountId, false, true);
+        } catch (UnsafeOperationException $e) {
+            $this->logger->warning('SmartQAService::sendAutoAnswer apply blocked', [
+                'error' => $e->getMessage(),
+                'account_id' => $this->accountId,
+                'question_id' => $questionId,
+            ]);
+            return false;
+        }
+
         try {
             $result = $this->mlClient->post("/questions/{$questionId}/answers", [
                 'text' => $answer,

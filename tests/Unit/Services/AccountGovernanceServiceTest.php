@@ -450,7 +450,11 @@ class AccountGovernanceServiceTest extends TestCase
 
     public function testClassifyAccountTravadaLowConversion(): void
     {
-        $metrics = ['account_conv_30d' => 0.002, 'reputation_level' => 'green'];
+        $metrics = [
+            'account_conv_30d' => 0.002,
+            'total_visits_30d' => 1000,
+            'reputation_level' => 'green',
+        ];
         $items = [['classification' => AccountGovernanceService::CLASS_SAUDAVEL]];
 
         $this->assertSame(
