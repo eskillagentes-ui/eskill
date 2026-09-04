@@ -64,7 +64,7 @@ jobs:
         cp .env .env.testing
         find app/ -name "*.php" -print0 | xargs -0 -n1 php -l
         ./vendor/bin/phpunit --testsuite Unit
-        ./vendor/bin/phpunit tests/Unit/Services/Agents
+        ./vendor/bin/phpunit --testsuite AgentsSafety
         npm ci --ignore-scripts
         npm run test:unit:js
         npx playwright install --with-deps chromium
