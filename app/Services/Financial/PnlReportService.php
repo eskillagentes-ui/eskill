@@ -6,6 +6,8 @@ namespace App\Services\Financial;
 
 use App\Helpers\SessionHelper;
 use App\Services\Financial\HasFinancialDependencies;
+use DateTimeImmutable;
+use DateTimeZone;
 use PDO;
 
 /**
@@ -23,6 +25,7 @@ class PnlReportService
     private ?ClaimDisputeService $claimDisputeServiceInstance = null;
     private ?FinancialForecastService $financialForecastServiceInstance = null;
     private ?PaymentRefundService $paymentRefundServiceInstance = null;
+    private ?FeeCommissionService $feeCommissionServiceInstance = null;
 
     private function subscription(): SubscriptionService
     {
@@ -42,6 +45,11 @@ class PnlReportService
     private function paymentRefund(): PaymentRefundService
     {
         return $this->paymentRefundServiceInstance ??= new PaymentRefundService($this->accountId);
+    }
+
+    private function feeCommission(): FeeCommissionService
+    {
+        return $this->feeCommissionServiceInstance ??= new FeeCommissionService($this->accountId);
     }
 
     private ?FinancialLedgerService $ledgerServiceInstance = null;
@@ -712,70 +720,116 @@ class PnlReportService
     }
 
     /**
-     * Retorna o fluxo de caixa do período
+     * Retorna a linha do tempo do Caixa MP.
      *
-     * @param string $startDate Data inicial
-     * @param string $endDate Data final
-     * @return array Dados de fluxo de caixa
+     * Entradas liberadas e previstas são mutuamente exclusivas. O saldo de hoje
+     * é ancorado na carteira observada; meses futuros carregam apenas obrigações
+     * conhecidas e deixam como N/D tudo o que a origem não consegue prever.
+     *
+     * @return array<string, mixed>
      */
     public function getCashFlow(string $startDate, string $endDate): array
     {
-        [$startBound, $endBound] = $this->boundDateTimeRange($startDate, $endDate);
-        $ledgerCash = $this->getCashSummaryFromLedger($startBound, $endBound);
-
-        // PATCH 8: quando há movimentos de caixa no ledger, o fluxo canônico é liberado/sacado/hold/ads.
-        if ($this->accountId && (int)$ledgerCash['entries_count'] > 0
-            && ((float)$ledgerCash['released_amount'] > 0
-                || (float)$ledgerCash['pending_release_amount'] > 0
-                || (float)$ledgerCash['withdrawn_amount'] > 0
-                || (float)$ledgerCash['hold_amount'] > 0)
-        ) {
-            $ads = $this->getAdvertisingExpenses($startBound, $endBound);
-            $inTotal = (float)$ledgerCash['released_amount'];
-            $outTotal = (float)$ledgerCash['withdrawn_amount']
-                + (float)$ledgerCash['hold_amount']
-                + max(0.0, $ads);
-
-            return [
-                'inflows' => [
-                    'released' => round((float)$ledgerCash['released_amount'], 2),
-                    'pending_release' => round((float)$ledgerCash['pending_release_amount'], 2),
-                    'sales' => round((float)$ledgerCash['released_amount'], 2),
-                    'transactions' => (int)$ledgerCash['entries_count'],
-                    'total' => round($inTotal, 2),
-                ],
-                'outflows' => [
-                    'withdrawals' => round((float)$ledgerCash['withdrawn_amount'], 2),
-                    'holds' => round((float)$ledgerCash['hold_amount'], 2),
-                    'advertising' => round(max(0.0, $ads), 2),
-                    'total' => round($outTotal, 2),
-                ],
-                'balance' => round($inTotal - $outTotal, 2),
-                'released_not_withdrawn' => round((float)$ledgerCash['released_not_withdrawn'], 2),
-                'source' => 'ledger',
-                'ledger_cash' => $ledgerCash,
-                'period' => [
-                    'start' => $startDate,
-                    'end' => $endDate,
-                ],
-            ];
+        if (!$this->accountId) {
+            return ['error' => 'Selecione uma conta do Mercado Livre para consultar o Caixa MP.'];
         }
 
-        $inflows = $this->getInflows($startDate, $endDate);
-        $outflows = $this->getOutflows($startDate, $endDate);
-        $balance = $inflows['total'] - $outflows['total'];
+        $start = substr($startDate, 0, 10);
+        $horizon = substr($endDate, 0, 10);
+        $warnings = [];
+        $entries = [];
+        try {
+            $stmt = $this->db->prepare(
+                'SELECT *
+                 FROM financial_ledger_entries
+                 WHERE account_id = :account_id
+                   AND status NOT IN (\'cancelled\', \'rejected\', \'covered\')
+                   AND (
+                       occurred_at BETWEEN :start_occurred AND :end_occurred
+                       OR released_at BETWEEN :start_released AND :end_released
+                       OR available_at BETWEEN :start_available AND :end_available
+                       OR (entry_type = :settlement_type AND status = \'pending\' AND occurred_at <= :pending_horizon)
+                   )
+                 ORDER BY occurred_at ASC, id ASC'
+            );
+            $stmt->execute([
+                ':account_id' => $this->accountId,
+                ':start_occurred' => $start . ' 00:00:00',
+                ':end_occurred' => $horizon . ' 23:59:59',
+                ':start_released' => $start . ' 00:00:00',
+                ':end_released' => $horizon . ' 23:59:59',
+                ':start_available' => $start . ' 00:00:00',
+                ':end_available' => $horizon . ' 23:59:59',
+                ':settlement_type' => FinancialEntryType::SETTLEMENT_RELEASE,
+                ':pending_horizon' => $horizon . ' 23:59:59',
+            ]);
+            $entries = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        } catch (\Throwable $e) {
+            $warnings[] = 'Livro financeiro temporariamente indisponível.';
+        }
 
-        return [
-            'inflows' => $inflows,
-            'outflows' => $outflows,
-            'balance' => round($balance, 2),
-            'source' => 'ml_orders',
-            'ledger_cash' => $ledgerCash,
-            'period' => [
-                'start' => $startDate,
-                'end' => $endDate,
-            ],
+        $billingPeriods = [];
+        foreach (['ML', 'MP'] as $group) {
+            try {
+                $billing = $this->feeCommission()->getBillingPeriods($group);
+                if (isset($billing['error'])) {
+                    $warnings[] = sprintf('Billing %s indisponível: %s', $group, (string)$billing['error']);
+                    continue;
+                }
+                foreach (($billing['results'] ?? []) as $period) {
+                    if (is_array($period)) {
+                        $billingPeriods[] = $period;
+                    }
+                }
+            } catch (\Throwable $e) {
+                $warnings[] = sprintf('Billing %s temporariamente indisponível.', $group);
+            }
+        }
+
+        try {
+            $balance = $this->getAccountBalance();
+        } catch (\Throwable $e) {
+            $balance = ['error' => $e->getMessage(), 'currency_id' => 'BRL'];
+            $warnings[] = 'Saldo da carteira temporariamente indisponível.';
+        }
+
+        $asOf = new DateTimeImmutable('now', new DateTimeZone('America/Sao_Paulo'));
+        $calculator = new CashFlowProjectionCalculator();
+        $cashflow = $calculator->build(
+            $this->accountId,
+            $start,
+            $horizon,
+            $asOf,
+            $balance,
+            $entries,
+            $billingPeriods,
+            $warnings
+        );
+
+        // Compatibilidade temporária com consumidores da versão anterior da API.
+        $released = 0.0;
+        $scheduled = 0.0;
+        $outflows = 0.0;
+        foreach ($cashflow['buckets'] as $bucket) {
+            $released += (float)($bucket['released'] ?? 0);
+            $scheduled += (float)($bucket['scheduled_release'] ?? 0);
+            foreach (['payouts', 'blocks_net', 'billing_debt', 'ads', 'shipping_claims'] as $field) {
+                if ($bucket[$field] !== null) {
+                    $outflows += (float)$bucket[$field];
+                }
+            }
+        }
+        $lastBucket = $cashflow['buckets'][count($cashflow['buckets']) - 1] ?? null;
+        $cashflow['inflows'] = [
+            'released' => round($released, 2),
+            'pending_release' => round($scheduled, 2),
+            'total' => round($released + $scheduled, 2),
         ];
+        $cashflow['outflows'] = ['total_known' => round($outflows, 2)];
+        $cashflow['balance'] = $lastBucket['closing_balance'] ?? ($cashflow['summary']['available'] ?? 0);
+        $cashflow['period'] = ['start' => $start, 'end' => $horizon];
+
+        return $cashflow;
     }
 
     /**

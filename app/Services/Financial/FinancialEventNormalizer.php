@@ -559,8 +559,8 @@ final class FinancialEventNormalizer
      *
      * Regra: nunca fabricar released_at. Só é marcado como liberado (status=posted,
      * released_at preenchido) quando money_release_status === 'released'. Caso
-     * contrário (pending/desconhecido), fica status=pending e released_at=null —
-     * o valor projetado de money_release_date não é gravado como se já tivesse ocorrido.
+     * contrário (pending/desconhecido), fica status=pending e released_at=null;
+     * money_release_date é preservado em available_at como previsão da origem.
      *
      * @param array{
      *   net_received_amount?: float|int|string|null,
@@ -587,10 +587,11 @@ final class FinancialEventNormalizer
         }
 
         $releaseStatus = strtolower(trim((string)($payload['money_release_status'] ?? '')));
+        $releaseDate = $this->parseDate($payload['money_release_date'] ?? null);
         $releasedAt = null;
         if ($releaseStatus === 'released') {
             $status = 'posted';
-            $releasedAt = $this->parseDate($payload['money_release_date'] ?? null);
+            $releasedAt = $releaseDate;
         } elseif ($releaseStatus === 'pending' || $releaseStatus === '') {
             $status = 'pending';
         } else {
@@ -618,6 +619,7 @@ final class FinancialEventNormalizer
             currency: $currency,
             rawData: $payload,
             releasedAt: $releasedAt,
+            availableAt: $releaseDate,
         );
     }
 
