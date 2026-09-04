@@ -593,6 +593,21 @@ class FinancialReportController extends BaseController
         }
         [$startDate, $endDate] = $dates;
 
+        $timezone = new \DateTimeZone('America/Sao_Paulo');
+        $today = new \DateTimeImmutable('today', $timezone);
+        $start = \DateTimeImmutable::createFromFormat('!Y-m-d', $startDate, $timezone);
+        $horizon = \DateTimeImmutable::createFromFormat('!Y-m-d', $endDate, $timezone);
+        if ($start === false || $horizon === false || $start > $today || $horizon < $today) {
+            http_response_code(422);
+            echo json_encode(['success' => false, 'error' => 'O intervalo do fluxo de caixa deve incluir a data de hoje.']);
+            return;
+        }
+        if ($start->diff($horizon)->days > 731) {
+            http_response_code(422);
+            echo json_encode(['success' => false, 'error' => 'O horizonte máximo do fluxo de caixa é de 24 meses.']);
+            return;
+        }
+
         try {
             $cashflow = $this->financialService->getCashFlow($startDate, $endDate . ' 23:59:59');
             echo json_encode([

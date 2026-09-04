@@ -143,6 +143,8 @@ final class FinancialEventNormalizerTest extends TestCase
         $this->assertSame(120.61, $entry->signedAmount);
         $this->assertNotNull($entry->releasedAt);
         $this->assertSame('2026-09-02', $entry->releasedAt->format('Y-m-d'));
+        $this->assertNotNull($entry->availableAt);
+        $this->assertSame('2026-09-02', $entry->availableAt->format('Y-m-d'));
     }
 
     public function testFromReleaseStaysPendingWithoutReleasedAtWhenNotYetReleased(): void
@@ -165,6 +167,8 @@ final class FinancialEventNormalizerTest extends TestCase
         $this->assertNotNull($entry);
         $this->assertSame('pending', $entry->status);
         $this->assertNull($entry->releasedAt, 'released_at não deve ser inferido a partir de data projetada');
+        $this->assertNotNull($entry->availableAt, 'available_at deve preservar a previsão da origem');
+        $this->assertSame('2026-09-01', $entry->availableAt->format('Y-m-d'));
     }
 
     public function testFromReleaseWithUnknownStatusStaysPendingNotFabricated(): void
@@ -186,6 +190,8 @@ final class FinancialEventNormalizerTest extends TestCase
         $this->assertNotNull($entry);
         $this->assertSame('pending', $entry->status);
         $this->assertNull($entry->releasedAt);
+        $this->assertNotNull($entry->availableAt);
+        $this->assertSame('2026-07-12', $entry->availableAt->format('Y-m-d'));
     }
 
     public function testFromReleaseReturnsNullWithoutFabricatingZeroAmount(): void

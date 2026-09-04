@@ -263,6 +263,11 @@
             <!-- Repricing automático Fase 0: simulação read-only (DB-free, SQLite in-memory) -->
             <file>tests/Unit/Services/Pricing/RepriceSimulationServiceTest.php</file>
         </testsuite>
+        <testsuite name="AgentsSafety">
+            <directory>tests/Unit/Services/Agents</directory>
+            <!-- Contratos históricos substituídos pelo runtime atual. -->
+            <exclude>tests/Unit/Services/Agents/_archive-preexisting-model</exclude>
+        </testsuite>
         <testsuite name="Integration">
             <directory>tests/Integration</directory>
             <!-- Mantém compatibilidade com os testes existentes em tests/Unit que acessam DB -->

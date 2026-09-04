@@ -229,8 +229,7 @@ class TechSheetGtinSuggestionServiceTest extends TestCase
 
     public function testValidateEanRejectsInventedGarbage(): void
     {
-        $ean = new EanService();
-        $ref = new \ReflectionClass($ean);
+        $ref = new \ReflectionClass(EanService::class);
         $svc = $ref->newInstanceWithoutConstructor();
 
         $this->assertFalse($svc->validateEan('0000000000001'));

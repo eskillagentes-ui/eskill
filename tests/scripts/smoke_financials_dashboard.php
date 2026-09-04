@@ -90,7 +90,9 @@ $requiredIds = [
     'projection-days', 'btn-reload-projection', 'projection-cards',
     'claims-summary-cards', 'claims-tbody',
     'settlements-summary-cards', 'settlements-tbody',
-    'cashflow-summary-cards', 'cashflow-inflows-tbody', 'cashflow-outflows-tbody', 'cashflowChart',
+    'cashflow-start', 'cashflow-horizon', 'btn-reload-cashflow',
+    'cashflow-mode-planilha', 'cashflow-mode-grafico', 'cashflow-summary-cards',
+    'cashflow-table-body', 'cashflowChart', 'cashflow-detail-modal',
     'profitability-limit', 'btn-reload-profitability', 'profitability-content',
 ];
 
@@ -112,7 +114,7 @@ $requiredJsMethods = [
     'loadProjection', 'renderProjection',
     'loadClaims', 'renderClaims',
     'loadSettlements', 'renderSettlements',
-    'loadCashflow', 'renderCashflow',
+    'loadCashflow', 'renderCashflow', 'setCashflowMode', 'showCashflowDetail',
     'loadProfitability', 'renderProfitability',
     'exportPdf', 'escapeHtml',
 ];
@@ -143,7 +145,11 @@ if (str_contains($view, 'DEBUG-4e3ccb') || str_contains($view, '__debugKpiLayout
 echo "\n2) Backend services (read-only)\n";
 
 if ($accountId <= 0) {
-    fail('Nenhuma conta ML ativa para testar serviços');
+    if (($_ENV['APP_ENV'] ?? '') === 'staging') {
+        warn('Backend não executado: staging isolado sem conta ML ativa segura');
+    } else {
+        fail('Nenhuma conta ML ativa para testar serviços');
+    }
 } else {
     $financial = new App\Services\FinancialService($accountId);
     $ads = new App\Services\Ads\AdsObservationService();
@@ -246,8 +252,10 @@ if ($accountId <= 0) {
     // Cashflow
     try {
         $cf = $financial->getCashFlow($start, $end . ' 23:59:59');
-        if (isset($cf['inflows']['total'], $cf['outflows']['total'], $cf['balance'])) {
-            ok('Cashflow in=' . $cf['inflows']['total'] . ' out=' . $cf['outflows']['total'] . ' bal=' . $cf['balance']);
+        if (isset($cf['summary']['available'], $cf['buckets'], $cf['balance']) && is_array($cf['buckets'])) {
+            ok('Cashflow available=' . $cf['summary']['available']
+                . ' buckets=' . count($cf['buckets'])
+                . ' known_balance=' . $cf['balance']);
         } else {
             fail('Cashflow shape inválido');
         }

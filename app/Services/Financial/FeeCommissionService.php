@@ -53,6 +53,72 @@ class FeeCommissionService
     }
 
     /**
+     * Lista períodos de faturamento ainda relevantes para o caixa.
+     *
+     * A consulta é sempre feita com o token da conta ativa. O chamador combina
+     * ML e MP, mas mantém o grupo na resposta para deduplicação e auditoria.
+     *
+     * @return array{results: list<array<string, mixed>>, total: int, group: string, fetched_at: string, error?: string}
+     */
+    public function getBillingPeriods(string $group = 'ML', int $limit = 12): array
+    {
+        $group = strtoupper(trim($group));
+        if (!in_array($group, ['ML', 'MP'], true)) {
+            throw new \InvalidArgumentException('Grupo de billing deve ser ML ou MP.');
+        }
+
+        $fetchedAt = date(DATE_ATOM);
+        $client = $this->getClient();
+        $response = $client->get(
+            '/billing/integration/monthly/periods',
+            [
+                'group' => $group,
+                'document_type' => 'BILL',
+                'offset' => 0,
+                'limit' => min(12, max(1, $limit)),
+            ],
+            self::CACHE_TTL_LONG
+        );
+
+        if (isset($response['error'])) {
+            return [
+                'error' => (string)($response['message'] ?? $response['error'] ?? 'Billing indisponível'),
+                'results' => [],
+                'total' => 0,
+                'group' => $group,
+                'fetched_at' => $fetchedAt,
+            ];
+        }
+
+        $results = [];
+        foreach (($response['results'] ?? []) as $period) {
+            if (!is_array($period)) {
+                continue;
+            }
+            $results[] = [
+                'group' => $group,
+                'key' => (string)($period['key'] ?? $period['period'] ?? ''),
+                'document_id' => $period['document_id'] ?? null,
+                'amount' => round((float)($period['amount'] ?? 0), 2),
+                'unpaid_amount' => round((float)($period['unpaid_amount'] ?? 0), 2),
+                'period' => $period['period'] ?? null,
+                'expiration_date' => $period['expiration_date'] ?? null,
+                'debt_expiration_date' => $period['debt_expiration_date'] ?? null,
+                'period_status' => $period['period_status'] ?? $period['status'] ?? null,
+                'currency_id' => (string)($period['currency_id'] ?? 'BRL'),
+                'fetched_at' => $fetchedAt,
+            ];
+        }
+
+        return [
+            'results' => $results,
+            'total' => (int)($response['total'] ?? count($results)),
+            'group' => $group,
+            'fetched_at' => $fetchedAt,
+        ];
+    }
+
+    /**
      * Obtém breakdown detalhado de taxas e comissões
      *
      * @param string $startDate Data inicial

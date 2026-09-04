@@ -120,6 +120,8 @@ jobs:
           DB_PASSWORD=testpass
           MOBILE_TOKEN_SECRET=$(openssl rand -hex 32)
           EOF
+          # O servidor web do Playwright procura .env.test quando APP_ENV=testing.
+          cp .env.testing .env.test
 
       - name: Run migrations
         run: php bin/migrate.php || true
@@ -136,7 +138,7 @@ jobs:
           APP_ENV: testing
 
       - name: Run Agent Safety Gate
-        run: php vendor/bin/phpunit tests/Unit/Services/Agents --colors=always
+        run: php vendor/bin/phpunit --testsuite AgentsSafety --colors=always
         env:
           APP_ENV: testing
 

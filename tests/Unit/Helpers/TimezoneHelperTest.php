@@ -9,6 +9,47 @@ use PHPUnit\Framework\TestCase;
 
 final class TimezoneHelperTest extends TestCase
 {
+    private string $originalTimezone;
+    private bool $hadAppTimezone;
+    private mixed $originalAppTimezone;
+
+    protected function setUp(): void
+    {
+        parent::setUp();
+
+        $this->originalTimezone = date_default_timezone_get();
+        $this->hadAppTimezone = array_key_exists('APP_TIMEZONE', $_ENV);
+        $this->originalAppTimezone = $_ENV['APP_TIMEZONE'] ?? null;
+        $this->resetTimezoneHelper();
+    }
+
+    protected function tearDown(): void
+    {
+        if ($this->hadAppTimezone) {
+            $_ENV['APP_TIMEZONE'] = $this->originalAppTimezone;
+        } else {
+            unset($_ENV['APP_TIMEZONE']);
+        }
+
+        date_default_timezone_set($this->originalTimezone);
+        $this->resetTimezoneHelper();
+
+        parent::tearDown();
+    }
+
+    private function resetTimezoneHelper(): void
+    {
+        $reflection = new \ReflectionClass(TimezoneHelper::class);
+
+        $applied = $reflection->getProperty('applied');
+        $applied->setAccessible(true);
+        $applied->setValue(null, false);
+
+        $timezone = $reflection->getProperty('appliedTimezone');
+        $timezone->setAccessible(true);
+        $timezone->setValue(null, '');
+    }
+
     public function test_mysql_offset_literal_for_sao_paulo(): void
     {
         $literal = TimezoneHelper::mysqlOffsetLiteral('America/Sao_Paulo');

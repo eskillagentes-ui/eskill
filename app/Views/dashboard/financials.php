@@ -80,6 +80,63 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
     </div>
 </div>
 
+<style nonce="<?= CSP_NONCE ?>">
+.financial-help {
+    line-height: 1;
+    text-decoration: none !important;
+    color: #6c757d !important;
+}
+.financial-help-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1rem;
+    height: 1rem;
+    border-radius: 50%;
+    border: 1px solid #adb5bd;
+    font-size: 0.65rem;
+    font-weight: 700;
+}
+.financial-help:hover .financial-help-icon,
+.financial-help:focus .financial-help-icon {
+    border-color: #495057;
+    color: #212529;
+}
+.cashflow-table {
+    min-width: 1320px;
+}
+.cashflow-table th,
+.cashflow-table td {
+    white-space: nowrap;
+    vertical-align: middle;
+}
+.cashflow-value-btn {
+    border: 0;
+    border-bottom: 1px dotted currentColor;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-weight: inherit;
+    padding: 0;
+}
+.cashflow-value-btn:hover,
+.cashflow-value-btn:focus-visible {
+    color: #0d6efd;
+    border-bottom-style: solid;
+}
+.cashflow-closing-positive {
+    color: #0d6efd !important;
+    font-weight: 700;
+}
+.cashflow-closing-negative {
+    color: #dc3545 !important;
+    font-weight: 700;
+}
+.cashflow-unknown {
+    cursor: help;
+    font-weight: 600;
+}
+</style>
 <!-- KPI Cards -->
 <div class="row mb-4" id="kpi-cards">
     <?php
@@ -559,48 +616,94 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
     </div>
 
     <div class="tab-pane fade" id="tab-cashflow" role="tabpanel" aria-labelledby="tab-cashflow-btn">
-        <div class="row mb-3" id="cashflow-summary-cards">
-            <div class="col-12 text-center py-5" id="cashflow-loading">
-                <div class="spinner-border text-primary"></div>
+        <div class="card border-0 shadow-sm mb-3">
+            <div class="card-body">
+                <div class="row g-3 align-items-end">
+                    <div class="col-sm-6 col-lg-3">
+                        <label class="form-label" for="cashflow-start">Início da leitura</label>
+                        <input type="date" class="form-control" id="cashflow-start" value="<?= date('Y-m-01') ?>" max="<?= date('Y-m-d') ?>">
+                    </div>
+                    <div class="col-sm-6 col-lg-3">
+                        <label class="form-label" for="cashflow-horizon">Horizonte do caixa</label>
+                        <input type="date" class="form-control" id="cashflow-horizon" value="<?= date('Y-m-t', strtotime('+2 months')) ?>" min="<?= date('Y-m-d') ?>" max="<?= date('Y-m-d', strtotime('+24 months')) ?>">
+                    </div>
+                    <div class="col-sm-6 col-lg-3">
+                        <button type="button" class="btn btn-primary w-100" id="btn-reload-cashflow">
+                            <i class="bi bi-arrow-clockwise"></i> Atualizar fluxo
+                        </button>
+                    </div>
+                    <div class="col-sm-6 col-lg-3">
+                        <div class="btn-group w-100" role="group" aria-label="Visualização do fluxo de caixa">
+                            <button type="button" class="btn btn-outline-primary active" id="cashflow-mode-planilha" aria-pressed="true">Planilha</button>
+                            <button type="button" class="btn btn-outline-primary" id="cashflow-mode-grafico" aria-pressed="false">Gráfico</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
-        <div class="row" id="cashflow-detail-row" style="display:none;">
-            <div class="col-lg-6 mb-4">
-                <div class="card border-0 shadow-sm h-100">
-                    <div class="card-header bg-white py-3">
-                        <h5 class="mb-0">Entradas</h5>
+
+        <div class="row mb-1" id="cashflow-summary-cards">
+            <div class="col-12 text-center py-5" id="cashflow-loading">
+                <div class="spinner-border text-primary" role="status"><span class="visually-hidden">Carregando</span></div>
+            </div>
+        </div>
+        <div id="cashflow-warning-area"></div>
+
+        <div id="cashflow-detail-row" class="d-none">
+            <div class="alert alert-light border small py-2" role="note">
+                <strong>Fórmula:</strong> saldo atual = saldo anterior + liberações + a liberar − saques − bloqueios − dívida ML/MP − Ads − frete/reclamações.
+                Valores <strong>N/D</strong> não são tratados como zero confirmado.
+            </div>
+
+            <div id="cashflow-planilha-pane">
+                <div class="card border-0 shadow-sm mb-4">
+                    <div class="card-header bg-white py-3 d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <h5 class="mb-0">Linha do tempo do Caixa MP</h5>
+                        <span class="text-muted small" id="cashflow-freshness"></span>
                     </div>
-                    <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover">
-                                <tbody id="cashflow-inflows-tbody"></tbody>
-                            </table>
-                        </div>
+                    <div class="table-responsive">
+                        <table class="table table-hover mb-0 cashflow-table">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Faixa</th>
+                                    <th class="text-end">Saldo anterior</th>
+                                    <th class="text-end">Liberações</th>
+                                    <th class="text-end">A liberar</th>
+                                    <th class="text-end">Saques / Pagar</th>
+                                    <th class="text-end">Bloqueios</th>
+                                    <th class="text-end">Dívida ML/MP</th>
+                                    <th class="text-end">Ads</th>
+                                    <th class="text-end">Frete / reclamações</th>
+                                    <th class="text-end">Saldo atual</th>
+                                </tr>
+                            </thead>
+                            <tbody id="cashflow-table-body"></tbody>
+                        </table>
                     </div>
                 </div>
             </div>
-            <div class="col-lg-6 mb-4">
-                <div class="card border-0 shadow-sm h-100">
+
+            <div id="cashflow-grafico-pane" class="d-none">
+                <div class="card border-0 shadow-sm mb-4">
                     <div class="card-header bg-white py-3">
-                        <h5 class="mb-0">Saídas</h5>
+                        <h5 class="mb-0">Evolução do saldo conhecido</h5>
                     </div>
                     <div class="card-body">
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover">
-                                <tbody id="cashflow-outflows-tbody"></tbody>
-                            </table>
-                        </div>
+                        <canvas id="cashflowChart" height="110"></canvas>
+                        <p class="text-muted small mb-0 mt-3">A linha fica vermelha abaixo de zero. Meses com N/D mostram somente compromissos conhecidos, não uma promessa de saldo final.</p>
                     </div>
                 </div>
             </div>
-            <div class="col-12 mb-4">
-                <div class="card border-0 shadow-sm">
-                    <div class="card-header bg-white py-3">
-                        <h5 class="mb-0">Composição do fluxo</h5>
+        </div>
+
+        <div class="modal fade" id="cashflow-detail-modal" tabindex="-1" aria-labelledby="cashflow-detail-title" aria-hidden="true">
+            <div class="modal-dialog modal-lg modal-dialog-scrollable">
+                <div class="modal-content">
+                    <div class="modal-header">
+                        <h5 class="modal-title" id="cashflow-detail-title">Detalhes do valor</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
                     </div>
-                    <div class="card-body">
-                        <canvas id="cashflowChart" height="120"></canvas>
-                    </div>
+                    <div class="modal-body" id="cashflow-detail-body"></div>
                 </div>
             </div>
         </div>
@@ -643,6 +746,8 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
         claimsLoadedFor: null,
         settlementsLoadedFor: null,
         cashflowLoadedFor: null,
+        cashflowData: null,
+        cashflowMode: 'planilha',
         profitabilityLoadedFor: null,
         cashflowChart: null,
 
@@ -662,6 +767,26 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
             document.getElementById('tab-claims-btn')?.addEventListener('shown.bs.tab', () => this.loadClaimsOnce());
             document.getElementById('tab-settlements-btn')?.addEventListener('shown.bs.tab', () => this.loadSettlementsOnce());
             document.getElementById('tab-cashflow-btn')?.addEventListener('shown.bs.tab', () => this.loadCashflowOnce());
+            document.getElementById('btn-reload-cashflow')?.addEventListener('click', () => {
+                this.cashflowLoadedFor = null;
+                this.loadCashflow();
+            });
+            document.getElementById('cashflow-start')?.addEventListener('change', () => {
+                this.cashflowLoadedFor = null;
+            });
+            document.getElementById('cashflow-horizon')?.addEventListener('change', () => {
+                this.cashflowLoadedFor = null;
+            });
+            document.getElementById('cashflow-mode-planilha')?.addEventListener('click', () => this.setCashflowMode('planilha'));
+            document.getElementById('cashflow-mode-grafico')?.addEventListener('click', () => this.setCashflowMode('grafico'));
+            document.getElementById('cashflow-table-body')?.addEventListener('click', (event) => {
+                const button = event.target.closest('[data-cashflow-bucket][data-cashflow-field]');
+                if (!button) return;
+                this.showCashflowDetail(Number(button.dataset.cashflowBucket), button.dataset.cashflowField);
+            });
+            document.getElementById('saques-kind-filter')?.addEventListener('change', () => {
+                if (this.saquesCache) this.renderSaques(this.saquesCache);
+            });
             document.getElementById('tab-profitability-btn')?.addEventListener('shown.bs.tab', () => this.loadProfitabilityOnce());
             document.getElementById('btn-reload-projection')?.addEventListener('click', () => {
                 this.projectionLoadedFor = null;
@@ -695,7 +820,7 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
             const startEl = document.getElementById('date-start');
             const endEl = document.getElementById('date-end');
             if (!startEl || !endEl) return;
-            const today = new Date().toISOString().slice(0, 10);
+            const today = document.getElementById('cashflow-start')?.max || new Date().toISOString().slice(0, 10);
             if (endEl.max !== today) endEl.max = today;
             if (endEl.value && endEl.value > today) endEl.value = today;
             if (startEl.value && endEl.value && startEl.value > endEl.value) {
@@ -709,6 +834,12 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
             return `${start}|${end}`;
         },
 
+        cashflowPeriodKey: function() {
+            const start = document.getElementById('cashflow-start')?.value || '';
+            const horizon = document.getElementById('cashflow-horizon')?.value || '';
+            return `${start}|${horizon}`;
+        },
+
         invalidateSecondaryTabs: function() {
             this.abcData = null;
             this.abcLoadedFor = null;
@@ -718,6 +849,7 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
             this.claimsLoadedFor = null;
             this.settlementsLoadedFor = null;
             this.cashflowLoadedFor = null;
+            this.cashflowData = null;
             this.profitabilityLoadedFor = null;
         },
 
@@ -1697,29 +1829,39 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
         },
 
         loadCashflowOnce: function() {
-            if (this.cashflowLoadedFor === this.periodKey()) return;
+            if (this.cashflowLoadedFor === this.cashflowPeriodKey()) return;
             this.loadCashflow();
         },
 
         loadCashflow: async function() {
-            const start = document.getElementById('date-start').value;
-            const end = document.getElementById('date-end').value;
+            const start = document.getElementById('cashflow-start')?.value || '';
+            const horizon = document.getElementById('cashflow-horizon')?.value || '';
             const summaryEl = document.getElementById('cashflow-summary-cards');
             const detailRow = document.getElementById('cashflow-detail-row');
+            const today = new Date().toISOString().slice(0, 10);
 
-            summaryEl.innerHTML = '<div class="col-12 text-center py-5" id="cashflow-loading"><div class="spinner-border text-primary"></div></div>';
-            detailRow.style.display = 'none';
+            if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(horizon)
+                || start > horizon || start > today || horizon < today) {
+                summaryEl.innerHTML = '<div class="col-12"><div class="alert alert-warning mb-0">O intervalo do fluxo de caixa deve incluir a data de hoje.</div></div>';
+                return;
+            }
+
+            summaryEl.innerHTML = '<div class="col-12 text-center py-5" id="cashflow-loading"><div class="spinner-border text-primary" role="status"><span class="visually-hidden">Carregando</span></div></div>';
+            detailRow.classList.add('d-none');
+            document.getElementById('cashflow-warning-area').innerHTML = '';
 
             try {
-                const result = await requestJson(`/api/financials/cashflow?start=${start}&end=${end}`);
+                const result = await requestJson(`/api/financials/cashflow?start=${encodeURIComponent(start)}&end=${encodeURIComponent(horizon)}`);
                 const data = result.data || result;
-                if (!result.success || data.error) {
+                if (result.success === false || data.error) {
                     summaryEl.innerHTML = `<div class="col-12"><div class="alert alert-warning mb-0">${this.escapeHtml(data.error || result.error || 'Não foi possível carregar o fluxo de caixa.')}</div></div>`;
                     return;
                 }
-                this.cashflowLoadedFor = this.periodKey();
+                this.cashflowLoadedFor = this.cashflowPeriodKey();
+                this.cashflowData = data;
                 this.renderCashflow(data);
-                detailRow.style.display = '';
+                detailRow.classList.remove('d-none');
+                this.setCashflowMode(this.cashflowMode);
             } catch (e) {
                 console.error(e);
                 summaryEl.innerHTML = '<div class="col-12"><div class="alert alert-danger mb-0">Erro ao carregar fluxo de caixa.</div></div>';
@@ -1727,77 +1869,192 @@ include __DIR__ . '/../layouts/modern/partials/page-header.php';
         },
 
         renderCashflow: function(data) {
-            const formatMoney = (val) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(val || 0);
-            const inflows = data.inflows || {};
-            const outflows = data.outflows || {};
-            const balance = Number(data.balance || 0);
+            const buckets = Array.isArray(data.buckets) ? data.buckets : [];
+            const currency = data.currency || 'BRL';
+            const summary = data.summary || {};
+            const last = buckets.length ? buckets[buckets.length - 1] : null;
+            const lowest = buckets.reduce((minimum, bucket) => {
+                const value = Number(bucket.closing_balance);
+                return Number.isFinite(value) ? Math.min(minimum, value) : minimum;
+            }, Number.POSITIVE_INFINITY);
+            const lowestValue = Number.isFinite(lowest) ? lowest : null;
 
             document.getElementById('cashflow-summary-cards').innerHTML = `
-                <div class="col-6 col-md-4 mb-3"><div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
-                    <div class="text-muted small mb-1">Entradas</div>
-                    <div class="fs-5 fw-bold text-success">${formatMoney(inflows.total)}</div>
-                    <div class="text-muted small">${inflows.transactions ?? 0} transações</div>
+                <div class="col-6 col-lg-3 mb-3"><div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
+                    <div class="text-muted small mb-1">Disponível observado</div>
+                    <div class="fs-5 fw-bold text-success">${this.formatCashflowMoney(summary.available, currency)}</div>
+                    <div class="text-muted small">${this.escapeHtml(summary.source || 'fonte indisponível')}</div>
                 </div></div></div>
-                <div class="col-6 col-md-4 mb-3"><div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
-                    <div class="text-muted small mb-1">Saídas</div>
-                    <div class="fs-5 fw-bold text-danger">${formatMoney(outflows.total)}</div>
+                <div class="col-6 col-lg-3 mb-3"><div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
+                    <div class="text-muted small mb-1">A liberar / retido</div>
+                    <div class="fs-5 fw-bold text-warning">${this.formatCashflowMoney(summary.pending_release, currency)}</div>
                 </div></div></div>
-                <div class="col-12 col-md-4 mb-3"><div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
-                    <div class="text-muted small mb-1">Saldo do período</div>
-                    <div class="fs-5 fw-bold ${balance >= 0 ? 'text-success' : 'text-danger'}">${formatMoney(balance)}</div>
+                <div class="col-6 col-lg-3 mb-3"><div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
+                    <div class="text-muted small mb-1">Saldo conhecido no horizonte</div>
+                    <div class="fs-5 fw-bold ${(last?.closing_balance ?? 0) < 0 ? 'text-danger' : 'text-primary'}">${this.formatCashflowMoney(last?.closing_balance, currency)}</div>
+                    <div class="text-muted small">${this.escapeHtml(last?.label || 'sem faixa')}</div>
+                </div></div></div>
+                <div class="col-6 col-lg-3 mb-3"><div class="card border-0 shadow-sm h-100"><div class="card-body py-3">
+                    <div class="text-muted small mb-1">Menor saldo conhecido</div>
+                    <div class="fs-5 fw-bold ${(lowestValue ?? 0) < 0 ? 'text-danger' : 'text-primary'}">${this.formatCashflowMoney(lowestValue, currency)}</div>
+                    <div class="text-muted small">não inclui valores N/D</div>
                 </div></div></div>`;
 
-            document.getElementById('cashflow-inflows-tbody').innerHTML = `
-                <tr><td>Vendas (receita bruta)</td><td class="text-end fw-semibold text-success">${formatMoney(inflows.sales)}</td></tr>
-                <tr class="fw-bold"><td>Total entradas</td><td class="text-end text-success">${formatMoney(inflows.total)}</td></tr>`;
+            const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+            document.getElementById('cashflow-warning-area').innerHTML = warnings.length
+                ? `<div class="alert alert-warning small"><div class="fw-semibold mb-1">Leitura com ressalvas</div><ul class="mb-0">${warnings.map(item => `<li>${this.escapeHtml(item)}</li>`).join('')}</ul></div>`
+                : '<div class="alert alert-success small py-2">Fontes carregadas sem ressalvas conhecidas.</div>';
 
-            document.getElementById('cashflow-outflows-tbody').innerHTML = `
-                <tr><td>Comissões ML</td><td class="text-end">${formatMoney(outflows.commissions)}</td></tr>
-                <tr><td>Taxas de pagamento</td><td class="text-end">${formatMoney(outflows.payment_fees)}</td></tr>
-                <tr><td>Taxas fixas</td><td class="text-end">${formatMoney(outflows.fixed_fees)}</td></tr>
-                <tr><td>Fretes</td><td class="text-end">${formatMoney(outflows.shipping)}</td></tr>
-                <tr><td>CMV (custo produtos)</td><td class="text-end">${formatMoney(outflows.cogs)}</td></tr>
-                <tr><td>Impostos</td><td class="text-end">${formatMoney(outflows.taxes)}</td></tr>
-                <tr class="fw-bold"><td>Total saídas</td><td class="text-end text-danger">${formatMoney(outflows.total)}</td></tr>`;
+            const ledgerFreshness = data.freshness?.ledger ? this.formatDateTime(data.freshness.ledger) : 'N/D';
+            document.getElementById('cashflow-freshness').textContent = `Atualização do ledger: ${ledgerFreshness}`;
+
+            document.getElementById('cashflow-table-body').innerHTML = buckets.length
+                ? buckets.map((bucket, index) => {
+                    const closingClass = Number(bucket.closing_balance) < 0 ? 'cashflow-closing-negative' : 'cashflow-closing-positive';
+                    const estimate = bucket.is_estimate ? '<span class="badge bg-light text-secondary border ms-1">projeção</span>' : '<span class="badge bg-success-subtle text-success border ms-1">realizado</span>';
+                    return `<tr>
+                        <td><div class="fw-semibold">${this.escapeHtml(bucket.label || '')}${estimate}</div><div class="text-muted small">${this.escapeHtml(bucket.date_from || '')} a ${this.escapeHtml(bucket.date_to || '')}</div></td>
+                        <td class="text-end">${this.cashflowCell(bucket, index, 'opening_balance', currency)}</td>
+                        <td class="text-end text-success">${this.cashflowCell(bucket, index, 'released', currency)}</td>
+                        <td class="text-end text-success">${this.cashflowCell(bucket, index, 'scheduled_release', currency)}</td>
+                        <td class="text-end">${this.cashflowCell(bucket, index, 'payouts', currency)}</td>
+                        <td class="text-end">${this.cashflowCell(bucket, index, 'blocks_net', currency)}</td>
+                        <td class="text-end">${this.cashflowCell(bucket, index, 'billing_debt', currency)}</td>
+                        <td class="text-end">${this.cashflowCell(bucket, index, 'ads', currency)}</td>
+                        <td class="text-end">${this.cashflowCell(bucket, index, 'shipping_claims', currency)}</td>
+                        <td class="text-end ${closingClass}">${this.cashflowCell(bucket, index, 'closing_balance', currency)}</td>
+                    </tr>`;
+                }).join('')
+                : '<tr><td colspan="10" class="text-center text-muted py-4">Nenhuma faixa disponível para o intervalo.</td></tr>';
 
             const canvas = document.getElementById('cashflowChart');
             if (!canvas) return;
             if (this.cashflowChart) this.cashflowChart.destroy();
 
-            const outflowLabels = ['Comissões', 'Pagamento', 'Fixas', 'Fretes', 'CMV', 'Impostos'];
-            const outflowValues = [
-                outflows.commissions || 0,
-                outflows.payment_fees || 0,
-                outflows.fixed_fees || 0,
-                outflows.shipping || 0,
-                outflows.cogs || 0,
-                outflows.taxes || 0,
-            ];
-
             this.cashflowChart = new Chart(canvas.getContext('2d'), {
-                type: 'bar',
+                type: 'line',
                 data: {
-                    labels: ['Entradas', ...outflowLabels],
-                    datasets: [{
-                        label: 'Valor (R$)',
-                        data: [inflows.total || 0, ...outflowValues],
-                        backgroundColor: [
-                            'rgba(25, 135, 84, 0.7)',
-                            'rgba(13, 110, 253, 0.55)',
-                            'rgba(111, 66, 193, 0.55)',
-                            'rgba(253, 126, 20, 0.55)',
-                            'rgba(220, 53, 69, 0.45)',
-                            'rgba(108, 117, 125, 0.55)',
-                            'rgba(214, 51, 132, 0.45)',
-                        ],
-                    }],
+                    labels: buckets.map(bucket => bucket.label),
+                    datasets: [
+                        {
+                            label: 'Saldo conhecido',
+                            data: buckets.map(bucket => Number(bucket.closing_balance || 0)),
+                            borderColor: '#0d6efd',
+                            backgroundColor: 'rgba(13, 110, 253, 0.10)',
+                            fill: true,
+                            tension: 0.25,
+                            pointRadius: 5,
+                            pointBackgroundColor: buckets.map(bucket => Number(bucket.closing_balance) < 0 ? '#dc3545' : '#0d6efd'),
+                            segment: {
+                                borderColor: context => context.p1.parsed.y < 0 ? '#dc3545' : '#0d6efd',
+                                backgroundColor: context => context.p1.parsed.y < 0 ? 'rgba(220, 53, 69, 0.10)' : 'rgba(13, 110, 253, 0.10)',
+                            },
+                        },
+                        {
+                            label: 'Zero',
+                            data: buckets.map(() => 0),
+                            borderColor: '#dc3545',
+                            borderDash: [6, 6],
+                            borderWidth: 1,
+                            pointRadius: 0,
+                            fill: false,
+                        },
+                    ],
                 },
                 options: {
                     responsive: true,
-                    plugins: { legend: { display: false } },
-                    scales: { y: { beginAtZero: true } },
+                    interaction: { intersect: false, mode: 'index' },
+                    plugins: {
+                        legend: { display: false },
+                        tooltip: {
+                            callbacks: {
+                                label: context => `${context.dataset.label}: ${this.formatCashflowMoney(context.parsed.y, currency)}`,
+                            },
+                        },
+                    },
+                    scales: {
+                        y: {
+                            ticks: { callback: value => this.formatCashflowMoney(value, currency) },
+                        },
+                    },
                 },
             });
+        },
+
+        formatCashflowMoney: function(value, currency = 'BRL') {
+            if (value === null || value === undefined || !Number.isFinite(Number(value))) return 'N/D';
+            return new Intl.NumberFormat('pt-BR', { style: 'currency', currency }).format(Number(value));
+        },
+
+        cashflowCell: function(bucket, bucketIndex, field, currency) {
+            const value = bucket[field];
+            if (value === null || value === undefined) {
+                return '<span class="cashflow-unknown text-muted" title="A origem não fornece previsão confiável para esta faixa">N/D</span>';
+            }
+            return `<button type="button" class="cashflow-value-btn" data-cashflow-bucket="${bucketIndex}" data-cashflow-field="${field}" title="Ver composição e origem">${this.formatCashflowMoney(value, currency)}</button>`;
+        },
+
+        setCashflowMode: function(mode) {
+            this.cashflowMode = mode === 'grafico' ? 'grafico' : 'planilha';
+            const isGraph = this.cashflowMode === 'grafico';
+            document.getElementById('cashflow-planilha-pane')?.classList.toggle('d-none', isGraph);
+            document.getElementById('cashflow-grafico-pane')?.classList.toggle('d-none', !isGraph);
+            const planButton = document.getElementById('cashflow-mode-planilha');
+            const graphButton = document.getElementById('cashflow-mode-grafico');
+            planButton?.classList.toggle('active', !isGraph);
+            graphButton?.classList.toggle('active', isGraph);
+            planButton?.setAttribute('aria-pressed', String(!isGraph));
+            graphButton?.setAttribute('aria-pressed', String(isGraph));
+            if (isGraph && this.cashflowChart) {
+                window.requestAnimationFrame(() => this.cashflowChart?.resize());
+            }
+        },
+
+        showCashflowDetail: function(bucketIndex, field) {
+            const bucket = this.cashflowData?.buckets?.[bucketIndex];
+            if (!bucket) return;
+            const labels = {
+                opening_balance: 'Saldo anterior',
+                released: 'Liberações',
+                scheduled_release: 'A liberar',
+                payouts: 'Saques / Pagar',
+                blocks_net: 'Bloqueios',
+                billing_debt: 'Dívida ML/MP',
+                ads: 'Ads',
+                shipping_claims: 'Frete / reclamações',
+                closing_balance: 'Saldo atual',
+            };
+            const currency = this.cashflowData.currency || 'BRL';
+            const title = `${labels[field] || field} — ${bucket.label || ''}`;
+            document.getElementById('cashflow-detail-title').textContent = title;
+
+            let body = '';
+            if (field === 'opening_balance' || field === 'closing_balance') {
+                const fields = ['opening_balance', 'released', 'scheduled_release', 'payouts', 'blocks_net', 'billing_debt', 'ads', 'shipping_claims', 'closing_balance'];
+                body = `<p class="text-muted small">Composição da faixa. N/D permanece desconhecido e não foi inventado como zero.</p>
+                    <div class="table-responsive"><table class="table table-sm"><tbody>${fields.map(item => `
+                        <tr><td>${this.escapeHtml(labels[item] || item)}</td><td class="text-end fw-semibold">${this.formatCashflowMoney(bucket[item], currency)}</td></tr>`).join('')}
+                    </tbody></table></div>`;
+            } else {
+                const details = Array.isArray(bucket.details?.[field]) ? bucket.details[field] : [];
+                body = details.length ? `<div class="table-responsive"><table class="table table-sm align-middle">
+                    <thead><tr><th>Conta</th><th>Data</th><th>Origem</th><th>Referência</th><th>Status</th><th>Capturado</th><th class="text-end">Valor</th></tr></thead>
+                    <tbody>${details.map(item => `<tr>
+                        <td>#${this.escapeHtml(String(item.account_id || this.cashflowData.account_id || ''))}</td>
+                        <td>${this.escapeHtml(item.date || '')}</td>
+                        <td>${this.escapeHtml(`${item.source || ''} / ${item.source_type || ''}`)}</td>
+                        <td><code>${this.escapeHtml(String(item.external_reference || item.source_record_id || ''))}</code></td>
+                        <td>${this.escapeHtml(item.status || '')}${item.estimated ? ' <span class="badge bg-light text-secondary border">projeção</span>' : ''}</td>
+                        <td>${item.fetched_at ? this.escapeHtml(this.formatDateTime(item.fetched_at)) : 'N/D'}</td>
+                        <td class="text-end fw-semibold">${this.formatCashflowMoney(item.amount, currency)}</td>
+                    </tr>`).join('')}</tbody></table></div>`
+                    : '<div class="alert alert-light border mb-0">Nenhum lançamento individual compõe este valor nesta faixa.</div>';
+            }
+            document.getElementById('cashflow-detail-body').innerHTML = body;
+            const modalEl = document.getElementById('cashflow-detail-modal');
+            if (modalEl && window.bootstrap?.Modal) {
+                window.bootstrap.Modal.getOrCreateInstance(modalEl).show();
+            }
         },
 
         loadProfitabilityOnce: function() {

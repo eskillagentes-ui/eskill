@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Services;
 
+use App\Exception\UnsafeOperationException;
+use App\Services\HiddenSeo\SafetyGuard;
 use RuntimeException;
 use Throwable;
 
@@ -111,6 +113,12 @@ class AssistantActionExecutorService
 
         if (trim($questionId) === '' || trim($text) === '') {
             throw new RuntimeException('Parâmetros obrigatórios: question_id, text');
+        }
+
+        try {
+            (new SafetyGuard())->assertCanApply($accountId, false, true);
+        } catch (UnsafeOperationException $e) {
+            throw new RuntimeException($e->getMessage(), 0, $e);
         }
 
         $service = new QuestionService($accountId);

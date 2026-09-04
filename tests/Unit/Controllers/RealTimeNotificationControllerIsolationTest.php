@@ -19,6 +19,6 @@ final class RealTimeNotificationControllerIsolationTest extends TestCase
         $this->assertStringContainsString('SessionHelper::getActiveAccountId', $source);
         $this->assertStringNotContainsString("\$user['current_account_id']", $source);
         $this->assertStringNotContainsString("\$user['id']", $source);
-        $this->assertSame(6, substr_count($source, 'requireActiveAccountId()'));
+        $this->assertSame(6, substr_count($source, '$this->requireActiveAccountId()'));
     }
 }
