@@ -74,14 +74,25 @@ class HiddenSeoSuggester
     }
 
     /**
-     * Aplica sugestões aprovadas no ML. Conta 1335 → UnsafeOperationException.
+     * Aplica sugestões aprovadas no ML. FACILYTY 1335 exige ItemGoGrant do MLB (um por vez).
      *
      * @throws UnsafeOperationException
      * @return array{success:bool,applied:int,errors:int,dry_run:bool}
      */
     public function applyPending(array $itemIds, bool $dryRun = true, bool $allowApply = false): array
     {
-        $this->guard->assertCanApply($this->accountId, $dryRun, $allowApply);
+        $mlbId = null;
+        $normalized = [];
+        foreach ($itemIds as $itemId) {
+            $id = strtoupper(trim((string) $itemId));
+            if ($id !== '') {
+                $normalized[] = $id;
+            }
+        }
+        if (count($normalized) === 1) {
+            $mlbId = $normalized[0];
+        }
+        $this->guard->assertCanApply($this->accountId, $dryRun, $allowApply, $mlbId);
 
         if ($dryRun) {
             return [

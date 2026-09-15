@@ -24,8 +24,9 @@ use Psr\Log\LoggerInterface;
  *  - REPRICE_MAX_ITEMS_PER_RUN: máximo de itens avaliados por execução
  *  - REPRICE_MIN_MARGIN_PCT:    preço mínimo = cost_price × (1 + margem/100)
  *
- * Conta em FORBIDDEN_ACCOUNTS (SafetyGuard): a simulação roda (dry-run é sempre
- * permitido), mas seria_aplicado é sempre false, pois o apply real seria bloqueado.
+ * Conta em FORBIDDEN_ACCOUNTS (blacklist extra) ou FACILYTY (1335, exige ItemGoGrant
+ * por MLB): a simulação roda (dry-run sempre permitido), mas seria_aplicado é false
+ * — apply real em massa continua bloqueado.
  *
  * Spec: .github/prompts/repricing-automatico.prompt.md
  */
@@ -86,9 +87,10 @@ class RepriceSimulationService
             $maxItems = min($limit, $maxItems);
         }
 
-        // Dry-run é sempre permitido pelo SafetyGuard; mas se a conta está na
-        // blacklist, o apply real seria bloqueado — logo nada "seria aplicado".
-        $applyBlocked = $this->safetyGuard->isForbidden($accountId);
+        // Dry-run é sempre permitido. Apply real: FORBIDDEN_ACCOUNTS (outras contas)
+        // ou FACILYTY sem ItemGoGrant por MLB — simulação não aplica em massa.
+        $applyBlocked = $this->safetyGuard->isForbidden($accountId)
+            || $this->safetyGuard->isFacilyty($accountId);
 
         $report = [
             'mode' => 'simulation',
@@ -113,7 +115,7 @@ class RepriceSimulationService
         ];
 
         if ($applyBlocked) {
-            $this->logger->warning('Conta em FORBIDDEN_ACCOUNTS: simulação read-only permitida, apply seria bloqueado', [
+            $this->logger->warning('Apply real seria bloqueado (FORBIDDEN_ACCOUNTS ou FACILYTY sem ItemGoGrant); simulação read-only segue', [
                 'account_id' => $accountId,
             ]);
         }
@@ -271,7 +273,9 @@ class RepriceSimulationService
         }
 
         if ($applyBlocked) {
-            $entry['motivo_skip'] = 'conta_proibida: apply bloqueado pelo SafetyGuard (FORBIDDEN_ACCOUNTS)';
+            $entry['motivo_skip'] = $this->safetyGuard->isForbidden((int) ($item['account_id'] ?? 0))
+                ? 'conta_proibida: apply bloqueado pelo SafetyGuard (FORBIDDEN_ACCOUNTS)'
+                : 'conta_proibida: apply FACILYTY bloqueado (exige ItemGoGrant por MLB)';
             return $entry;
         }
 

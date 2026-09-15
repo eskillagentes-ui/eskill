@@ -612,6 +612,7 @@ class QuestionService
 
     /**
      * Fail-closed: POST /answers só com conta válida fora de FORBIDDEN_ACCOUNTS.
+     * FACILYTY (1335) permanece bloqueada aqui — respostas automáticas não consomem ItemGoGrant.
      *
      * @return array<string, mixed>|null
      */
@@ -619,14 +620,17 @@ class QuestionService
     {
         $accountId = (int) ($this->accountId ?? 0);
         $guard = new SafetyGuard();
-        if ($accountId > 0 && !$guard->isForbidden($accountId)) {
+        if ($accountId > 0 && !$guard->isForbidden($accountId) && !$guard->isFacilyty($accountId)) {
             return null;
         }
 
         $error = $accountId <= 0
             ? 'Apply bloqueado: conta ML ausente.'
-            : "Apply bloqueado: conta {$accountId} está na blacklist (FORBIDDEN_ACCOUNTS). "
-                . 'Perguntas não são enviadas automaticamente na FACILYTY (1335).';
+            : ($guard->isFacilyty($accountId)
+                ? "Apply bloqueado: FACILYTY (conta {$accountId}) exige ItemGoGrant por MLB. "
+                    . 'Perguntas não são enviadas automaticamente.'
+                : "Apply bloqueado: conta {$accountId} está na blacklist (FORBIDDEN_ACCOUNTS). "
+                    . 'Perguntas não são enviadas automaticamente nesta conta.');
 
         return [
             'success' => false,

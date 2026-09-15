@@ -14,6 +14,7 @@ Ambiente paralelo no **mesmo host** de produção para smoke Hermes, seed do Pre
 | Tick | `pregao-tick` conta 1335 | `pregao-tick-staging` **disabled** até conta teste ≠1335 |
 | `PREGAO_SEED` | `false` | `true` |
 | `ML_WRITE_AUTOMATION` | política prod | `false` |
+| `FORBIDDEN_ACCOUNTS` | `none` após este modelo (FACILYTY via ItemGoGrant) | `none` (staging nunca liga FACILYTY) |
 | `APP_KEY` | prod | **distinta** (tokens não cruzam) |
 
 Regra: **zero sync staging→prod**. Schema staging veio de dump `--no-data` (sem tokens).
@@ -24,7 +25,7 @@ Regra: **zero sync staging→prod**. Schema staging veio de dump `--no-data` (se
 
 1. **DNS** — `staging.eskill.com.br` A → IP do host (hoje só `eskill.com.br` resolve).
 2. **TLS** — após DNS: `certbot --nginx -d staging.eskill.com.br` e descomentar bloco 443 em [`config/nginx/staging.eskill.com.br.conf`](../config/nginx/staging.eskill.com.br.conf).
-3. **OAuth ML** — adicionar `https://staging.eskill.com.br/auth/callback` na app ML (ou app de teste) e conectar conta **≠1335**; setar `PREGAO_ACCOUNT_ID` no `.env` staging.
+3. **OAuth ML** — adicionar `https://staging.eskill.com.br/auth/callback` na app ML (ou app de teste) e conectar conta **≠ FACILYTY**. `ProtectedProductionAccountPolicy` recusa vincular `ml_user_id` 3058804121 / nickname FACILYTY / id interno 1335 no staging. Setar `PREGAO_ACCOUNT_ID` no `.env` staging.
 4. Só então: `systemctl enable --now pregao-tick-staging`.
 
 ## Comandos

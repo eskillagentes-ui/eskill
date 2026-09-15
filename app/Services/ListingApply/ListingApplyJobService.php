@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Services\ListingApply;
 
+use App\Exception\UnsafeOperationException;
 use App\Services\HiddenSeo\SafetyGuard;
 use App\Services\ListingInvestigation\ListingInvestigationService;
 use App\Services\ListingInvestigation\ListingTitleDraftBuilder;
@@ -102,6 +103,16 @@ final class ListingApplyJobService
             return $this->persist($accountId, $mlb, self::STATUS_BLOCKED, true, $payload, $item, 'ml_write_automation_or_no_putter', false);
         }
 
+        try {
+            $this->guard->assertCanApply($accountId, false, true, $mlb);
+            $this->guard->consumeOnApply($accountId, $mlb);
+        } catch (UnsafeOperationException) {
+            $reason = $accountId === self::FACILYTY_ACCOUNT
+                ? 'facilyty_requires_item_go_grant'
+                : 'forbidden_account';
+            return $this->persist($accountId, $mlb, self::STATUS_BLOCKED, true, $payload, $item, $reason, false);
+        }
+
         $api = ($this->putter)($accountId, $mlb, $payload);
         $called = !empty($api['api_called']);
         $ok = !empty($api['success']) && $called;
@@ -152,19 +163,18 @@ final class ListingApplyJobService
         if (str_contains((string) getcwd(), 'staging.eskill.com.br') && $accountId === self::FACILYTY_ACCOUNT) {
             return 'staging_must_not_apply_1335';
         }
-        if ($this->guard->isForbidden($accountId) && $accountId !== self::FACILYTY_ACCOUNT) {
-            return 'forbidden_account';
-        }
-        if ($accountId === self::FACILYTY_ACCOUNT && !$this->isValidMlb($mlb)) {
-            return 'facilyty_requires_mlb_allowlist';
-        }
         $automation = filter_var($_ENV['ML_WRITE_AUTOMATION'] ?? getenv('ML_WRITE_AUTOMATION') ?: 'false', FILTER_VALIDATE_BOOLEAN);
         if (!$automation) {
             return 'ml_write_automation_false';
         }
-        if ($this->guard->isSafeMode()) {
-            // --apply is the explicit flag; 1335 still needs the single mlb allowlist (the CLI --mlb).
-            return null;
+        if ($accountId === self::FACILYTY_ACCOUNT && !$this->isValidMlb($mlb)) {
+            return 'facilyty_requires_mlb_allowlist';
+        }
+        if ($this->guard->isFacilyty($accountId) && !$this->guard->hasActiveGrant($accountId, $mlb)) {
+            return 'facilyty_requires_item_go_grant';
+        }
+        if (!$this->guard->isFacilyty($accountId) && $this->guard->isForbidden($accountId)) {
+            return 'forbidden_account';
         }
 
         return null;

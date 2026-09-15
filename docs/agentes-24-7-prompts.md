@@ -4,7 +4,7 @@
 
 Modo: **OBSERVE + QUEUE ONLY**. Inbox único: Pregão Hoje (`/dashboard/pregao`). Conta ativa da sessão. FACILYTY (1335) isolada da Falcão (1336).
 
-Escrita no Mercado Livre: **proibida**. `SAFE_MODE=true`, `ML_WRITE_AUTOMATION=false`, `FORBIDDEN_ACCOUNTS=1335`.
+Escrita no Mercado Livre: **proibida** por padrão. `SAFE_MODE=true`, `ML_WRITE_AUTOMATION=false`. FACILYTY (1335) só aplica com **ItemGoGrant** por MLB. `FORBIDDEN_ACCOUNTS` é blacklist extra opcional (`none` = vazia; não há fallback para 1335).
 
 Nunca: clonar anúncio, scrapar ML, encher MODEL/título de palavra, inventar desconto pra “ligar busca”, pausar por rótulo TRAVADA/MORTO/TOXICO, reprecificar sozinho, responder pergunta sozinho, ligar ads sem CMV.
 

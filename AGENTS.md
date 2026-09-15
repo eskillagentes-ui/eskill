@@ -145,7 +145,7 @@ storage/             # Logs, cache
 Aprovado pelo dono Jess Stai. Prompts oficiais: `docs/agentes-24-7-prompts.md`.
 
 Inbox: Pregão Hoje (`/dashboard/pregao`). Conta ativa da sessão. FACILYTY 1335 isolada da Falcão 1336.
-`SAFE_MODE=true`, `ML_WRITE_AUTOMATION=false`, `FORBIDDEN_ACCOUNTS=1335`.
+`SAFE_MODE=true`, `ML_WRITE_AUTOMATION=false`. FACILYTY só escreve com **ItemGoGrant** ativa daquele MLB (um por vez, TTL, consume no apply). `FORBIDDEN_ACCOUNTS` é blacklist **opcional extra** para outras contas — env vazio / `none` / `-` / `empty` não cai mais em 1335. Staging continua sem vincular identidade FACILYTY (`ProtectedProductionAccountPolicy`).
 
 Os três agentes (Ficha, Perguntas, Ads) **observam e enfileiram**. Não escrevem no Mercado Livre. Não postam respostas. Não pausam anúncios. Não ligam campanha de ads. Não iniciam Hermes. Não reativam clone cron.
 

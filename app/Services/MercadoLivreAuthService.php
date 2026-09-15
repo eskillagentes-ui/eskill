@@ -6,6 +6,7 @@ namespace App\Services;
 
 use App\Database;
 use App\Helpers\SessionHelper;
+use App\Security\ProtectedProductionAccountPolicy;
 
 /**
  * Serviço responsável pelo fluxo OAuth do Mercado Livre (autorização, troca de código e refresh)
@@ -636,6 +637,11 @@ class MercadoLivreAuthService
         if (!$mlUserId) {
             throw new \Exception('Não foi possível obter o id do usuário Mercado Livre');
         }
+
+        (new ProtectedProductionAccountPolicy())->assertCanLinkIdentity(
+            (string) $mlUserId,
+            is_string($nickname) ? $nickname : null
+        );
 
         // Criptografar tokens - OBRIGATÓRIO em produção
         $storeAccess = $accessToken;

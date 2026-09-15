@@ -1,3 +1,13 @@
+## 2026-09-15 — FACILYTY via ItemGoGrant (sem fallback FORBIDDEN_ACCOUNTS=1335)
+
+- GO do dono: escrita FACILYTY (1335) só com ItemGoGrant por MLB; `SAFE_MODE=true` e `ML_WRITE_AUTOMATION=false` intactos.
+- SafetyGuard: 1335 sempre exige grant ativa daquele MLB (mesmo fora da blacklist). `FORBIDDEN_ACCOUNTS=none`/`-`/`empty` (e `0` ignorado) → lista vazia; env vazio não cai mais em 1335.
+- ItemGoGrant: uma MLB ativa por conta, TTL, consume no apply. CLI `bin/item-go-grant.php`. Staging recusa identidade FACILYTY (`ProtectedProductionAccountPolicy` no OAuth).
+- PHPUnit focado verde: SafetyGuard 11, ItemGoGrant 3, ProtectedProductionAccountPolicy 4, ListingApply 11, RepriceSimulation 11.
+- Ops pós-merge: `FORBIDDEN_ACCOUNTS=none` em prod; FACILYTY continua precisando de grant-per-MLB. Sem lote/massa.
+
+---
+
 ## 2026-09-04 — Fluxo de Caixa MP com horizonte temporal
 
 - GO: pedido do dono para programar ao vivo a evolução do mock de Fluxo de Caixa; prompt escopado em `.github/prompts/financials-fluxo-caixa-horizonte.prompt.md`. Produção publicada após aprovação explícita em 04/09/2026.
