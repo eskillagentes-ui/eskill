@@ -148,7 +148,8 @@ class AutoAnswerJob
             return $this->result(0, 0, true);
         }
 
-        if ((new SafetyGuard())->isForbidden($this->accountId)) {
+        $guard = new SafetyGuard();
+        if ($guard->isForbidden($this->accountId) || $guard->isFacilyty($this->accountId)) {
             logger()->warning('AutoAnswerJob apply blocked', [
                 'job' => 'AutoAnswerJob',
                 'account_id' => $this->accountId,

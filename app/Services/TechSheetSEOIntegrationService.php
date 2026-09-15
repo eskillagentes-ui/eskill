@@ -609,9 +609,10 @@ class TechSheetSEOIntegrationService
             $versioning = new \App\Services\SEO\VersioningService($this->accountId);
             $versionId = $versioning->createSnapshot($itemId, 'title', $beforeData, $afterData, $changedBy, $userId);
 
-            // Governança: escrita real na API ML respeita SAFE_MODE/FORBIDDEN_ACCOUNTS
-            // (mesmo guard usado em HiddenSeoSuggester/TechSheetService::applyApproved).
-            (new \App\Services\HiddenSeo\SafetyGuard())->assertCanApply($this->accountId, false, true);
+            // Governança: FACILYTY exige ItemGoGrant do MLB; SAFE_MODE intacto.
+            $guard = new \App\Services\HiddenSeo\SafetyGuard();
+            $guard->assertCanApply($this->accountId, false, true, (string) $itemId);
+            $guard->consumeOnApply($this->accountId, (string) $itemId);
 
             $updated = $this->mlClient->put("/items/{$itemId}", [
                 'title' => $title,
@@ -675,9 +676,10 @@ class TechSheetSEOIntegrationService
             $versioning = new \App\Services\SEO\VersioningService($this->accountId);
             $versionId = $versioning->createSnapshot($itemId, 'description', $beforeData, $afterData, $changedBy, $userId);
 
-            // Governança: escrita real na API ML respeita SAFE_MODE/FORBIDDEN_ACCOUNTS
-            // (mesmo guard usado em HiddenSeoSuggester/TechSheetService::applyApproved).
-            (new \App\Services\HiddenSeo\SafetyGuard())->assertCanApply($this->accountId, false, true);
+            // Governança: FACILYTY exige ItemGoGrant do MLB; SAFE_MODE intacto.
+            $guard = new \App\Services\HiddenSeo\SafetyGuard();
+            $guard->assertCanApply($this->accountId, false, true, (string) $itemId);
+            $guard->consumeOnApply($this->accountId, (string) $itemId);
 
             $updated = $this->mlClient->put("/items/{$itemId}/description", [
                 'plain_text' => $plainText,

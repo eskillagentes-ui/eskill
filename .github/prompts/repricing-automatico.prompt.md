@@ -47,7 +47,7 @@ Ligar repricing automático em 3 fases, cada uma com gate de aprovação:
 - Scraping do site ML (somente API oficial).
 
 ## Regras
-1. Toda escrita de preço passa pelo SafetyGuard/flag equivalente (SAFE_MODE, FORBIDDEN_ACCOUNTS=1335 até aprovação da Fase 2).
+1. Toda escrita de preço passa pelo SafetyGuard/flag equivalente (`SAFE_MODE=true`, `ML_WRITE_AUTOMATION=false`). FACILYTY 1335 exige ItemGoGrant por MLB; `FORBIDDEN_ACCOUNTS` é blacklist extra opcional (não é mais o único gate da 1335).
 2. Teto de variação e preço mínimo validados ANTES de qualquer PUT — violação = skip + log + alerta, nunca clamp silencioso.
 3. Idempotência: mesma execução não aplica 2x no mesmo item (lock + checagem de preço atual antes do PUT).
 4. Rate limit ML: backoff exponencial; circuit breaker existente respeitado.

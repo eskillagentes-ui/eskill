@@ -2720,14 +2720,11 @@ class TechSheetService
 
         $payloadAttributes = array_values($currentMap ?: $appliedAttributes);
 
-        // Governança: aplicar sugestão aprovada é escrita real na API ML — respeita
-        // SAFE_MODE/FORBIDDEN_ACCOUNTS como os demais pontos de apply do Hidden SEO
-        // (HiddenSeoSuggester::applyPending, CLI tech-sheet apply). Sem isso, a UI e o
-        // auto-optimizer podiam escrever na conta 1335 (produção FACILYTY) sem passar
-        // pelo mesmo guard. allowApply=true porque chegar aqui já significa que o
-        // usuário aprovou a sugestão e pediu explicitamente para aplicar; a blacklist
-        // de contas (FORBIDDEN_ACCOUNTS) continua bloqueada de forma incondicional.
-        (new \App\Services\HiddenSeo\SafetyGuard())->assertCanApply($this->accountId, false, true);
+        // Governança: apply real na API ML. FACILYTY 1335 exige ItemGoGrant do MLB;
+        // FORBIDDEN_ACCOUNTS é blacklist extra para outras contas. SAFE_MODE intacto.
+        $guard = new \App\Services\HiddenSeo\SafetyGuard();
+        $guard->assertCanApply($this->accountId, false, true, (string) $itemId);
+        $guard->consumeOnApply($this->accountId, (string) $itemId);
 
         $mlResponse = $this->mlClient->put("/items/{$itemId}", ['attributes' => $payloadAttributes]);
         if (isset($mlResponse['error']) || ($mlResponse['success'] ?? true) === false) {

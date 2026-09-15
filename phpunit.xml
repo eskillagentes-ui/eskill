@@ -150,6 +150,7 @@
             <file>tests/Unit/Services/TechSheetModelSuggestionPolicyTest.php</file>
             <file>tests/Unit/Services/TechSheetHiddenSuggestionServiceTest.php</file>
             <file>tests/Unit/Services/HiddenSeo/SafetyGuardTest.php</file>
+            <file>tests/Unit/Services/HiddenSeo/ItemGoGrantTest.php</file>
             <file>tests/Unit/Services/HiddenSeo/TechSheetMapperTest.php</file>
             <file>tests/Unit/Services/HiddenSeo/HiddenSeoSuggesterTest.php</file>
             <file>tests/Unit/Services/HiddenSeo/ItemPerformanceServiceTest.php</file>

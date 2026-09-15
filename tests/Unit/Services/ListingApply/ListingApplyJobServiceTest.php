@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace Tests\Unit\Services\ListingApply;
 
+use App\Services\HiddenSeo\ItemGoGrant;
 use App\Services\HiddenSeo\SafetyGuard;
 use App\Services\ListingApply\ListingApplyJobService;
 use PDO;
@@ -74,8 +75,10 @@ final class ListingApplyJobServiceTest extends TestCase
         $_ENV['ML_WRITE_AUTOMATION'] = 'true';
         $db = $this->sqlite();
         $this->insertMirror($db, 1335, 'MLB1234567890', 'MLB-CAT-9', false);
+        $grants = new ItemGoGrant($db);
+        $grants->issue(1335, 'MLB1234567890', 900);
         $seen = null;
-        $svc = new ListingApplyJobService($db, new SafetyGuard(true, [1335]), static function (int $acc, string $mlb, array $payload) use (&$seen) {
+        $svc = new ListingApplyJobService($db, new SafetyGuard(true, [], 500, $grants), static function (int $acc, string $mlb, array $payload) use (&$seen) {
             $seen = ['acc' => $acc, 'mlb' => $mlb, 'payload' => $payload];
             return ['success' => true, 'api_called' => true];
         });

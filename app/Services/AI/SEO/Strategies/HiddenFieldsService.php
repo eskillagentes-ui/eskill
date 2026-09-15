@@ -579,9 +579,10 @@ class HiddenFieldsService
             ];
         }
 
-        // Governança: escrita real na API ML respeita SAFE_MODE/FORBIDDEN_ACCOUNTS,
-        // igual aos demais pontos de apply do Hidden SEO/Ficha Técnica.
-        (new \App\Services\HiddenSeo\SafetyGuard())->assertCanApply((int)$this->accountId, false, true);
+        // Governança: FACILYTY exige ItemGoGrant do MLB; SAFE_MODE intacto.
+        $guard = new \App\Services\HiddenSeo\SafetyGuard();
+        $guard->assertCanApply((int)$this->accountId, false, true, (string) $itemId);
+        $guard->consumeOnApply((int)$this->accountId, (string) $itemId);
 
         // Aplicar via API
         try {
